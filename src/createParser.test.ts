@@ -15,6 +15,7 @@ import {
   expr,
   constVal,
   createParser,
+  ident,
 } from "./index.js";
 import type { Parse, ComputeGrammar, Context } from "./index.js";
 import type { NumberNode } from "./primitive/index.js";
@@ -48,6 +49,13 @@ type AssertEqual<T, Expected> = T extends Expected
 // Grammar Definition
 // =============================================================================
 
+const identifier = defineNode({
+  name: "ident",
+  pattern: [ident()],
+  precedence: "atom",
+  resultType: "unknown",
+});
+
 const numberLit = defineNode({
   name: "number",
   pattern: [number()],
@@ -77,7 +85,7 @@ const parens = defineNode({
   resultType: "number",
 });
 
-const nodes = [numberLit, add, mul, parens] as const;
+const nodes = [numberLit, identifier, add, mul, parens] as const;
 
 // =============================================================================
 // Create Parser
@@ -144,7 +152,8 @@ console.log("=== createParser Runtime Tests ===");
 
 // Test R3: Parse with precedence
 {
-  const result = parser.parse("1+2*3", {});
+  const result = parser.parse("1+2*x", { x: "number" });
+  //
   assert.ok(result.length === 2, "Should match");
   const node = result[0] as unknown as {
     node: string;
@@ -160,6 +169,7 @@ console.log("=== createParser Runtime Tests ===");
 
 // Test R4: Parse with remaining input
 {
+  // @ts-expect-error - ValidatedInput requires full parsing, but we intentionally test partial parsing here
   const result = parser.parse("42 rest", {});
   assert.ok(result.length === 2, "Should match");
   assert.strictEqual(result[1], " rest");
@@ -176,7 +186,7 @@ console.log("=== createParser Runtime Tests ===");
 
 // Test R6: Chained addition (right-associative)
 {
-  const result = parser.parse("1+2+3", {});
+  const result = parser.parse("1+2+x", { x: "number" });
   assert.ok(result.length === 2, "Should match");
   const node = result[0] as unknown as {
     node: string;
@@ -190,7 +200,7 @@ console.log("=== createParser Runtime Tests ===");
   console.log("  R6: Parse '1+2+3' → OK (right-associative)");
 }
 
-// Test R7: Precedence with mul first (1*3+2 → add(mul(1,3), 2))
+// Test R7: Precedence with mul on right (2+1*3 → add(2, mul(1,3)))
 {
   const result = parser.parse("2+1*3", {});
   assert.ok(result.length === 2, "Should match");
@@ -200,14 +210,14 @@ console.log("=== createParser Runtime Tests ===");
     right: unknown;
   };
   assert.strictEqual(node.node, "add");
-  // Left should be mul(1, 3)
-  const left = node.left as { node: string };
-  assert.strictEqual(left.node, "mul");
-  // Right should be 2
-  const right = node.right as { node: string; raw: string };
-  assert.strictEqual(right.node, "literal");
-  assert.strictEqual(right.raw, "2");
-  console.log("  R7: Parse '1*3+2' → OK (mul binds tighter)");
+  // Left should be 2
+  const left = node.left as { node: string; raw: string };
+  assert.strictEqual(left.node, "literal");
+  assert.strictEqual(left.raw, "2");
+  // Right should be mul(1, 3)
+  const right = node.right as { node: string };
+  assert.strictEqual(right.node, "mul");
+  console.log("  R7: Parse '2+1*3' → OK (mul binds tighter)");
 }
 
 // Test R8: Parentheses (expr() resets to full grammar)

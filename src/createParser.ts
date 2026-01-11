@@ -54,7 +54,7 @@ type ValidatedInput<
   TGrammar extends Grammar,
   TInput extends string,
   $ extends Context
-> = Parse<TGrammar, TInput, $> extends [any, any] ? TInput : never;
+> = Parse<TGrammar, TInput, $> extends [any, ""] ? TInput : never;
 
 // =============================================================================
 // createParser Factory

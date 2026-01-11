@@ -25,7 +25,6 @@ import type {
   StringSchema,
   IdentSchema,
   ConstSchema,
-  ExprSchema,
 } from "../schema/index.js";
 import type {
   NumberNode,
@@ -173,6 +172,15 @@ type ParsePatternTuple<
   : [TAcc, TInput];
 
 /**
+ * Extract constraint from an ExprSchema by accessing the property directly.
+ * The constraint property is optional, so we exclude undefined from the result.
+ * Returns the constraint string type, or undefined if not constrained.
+ */
+type ExtractConstraint<T> = T extends { constraint: infer C extends string }
+  ? C
+  : undefined;
+
+/**
  * Parse an expression element based on its role.
  * Works with both plain schemas and NamedSchema (intersection type).
  *
@@ -180,6 +188,9 @@ type ParsePatternTuple<
  * - "lhs": TNextLevels (avoids left-recursion)
  * - "rhs": TCurrentLevels (maintains precedence, enables right-associativity)
  * - "expr": TFullGrammar (full reset for delimited contexts)
+ *
+ * Uses structural matching on `kind: "expr"` and `role` property to handle
+ * both plain ExprSchema and NamedSchema<ExprSchema, ...> intersection types.
  */
 type ParseElementWithLevel<
   TElement extends PatternSchema,
@@ -188,12 +199,12 @@ type ParseElementWithLevel<
   TCurrentLevels extends Grammar,
   TNextLevels extends Grammar,
   TFullGrammar extends Grammar
-> = TElement extends ExprSchema<infer C, infer Role>
+> = TElement extends { kind: "expr"; role: infer Role }
   ? Role extends "lhs"
-    ? ParseExprWithConstraint<TNextLevels, TInput, TContext, C, TFullGrammar>
+    ? ParseExprWithConstraint<TNextLevels, TInput, TContext, ExtractConstraint<TElement>, TFullGrammar>
     : Role extends "rhs"
-    ? ParseExprWithConstraint<TCurrentLevels, TInput, TContext, C, TFullGrammar>
-    : ParseExprWithConstraint<TFullGrammar, TInput, TContext, C, TFullGrammar>
+    ? ParseExprWithConstraint<TCurrentLevels, TInput, TContext, ExtractConstraint<TElement>, TFullGrammar>
+    : ParseExprWithConstraint<TFullGrammar, TInput, TContext, ExtractConstraint<TElement>, TFullGrammar>
   : ParseElement<TElement, TInput, TContext>;
 
 // =============================================================================
@@ -225,10 +236,6 @@ type ParseNodePattern<
  * Extract bindings from pattern and children (recursive zip).
  * Only includes children where the pattern element is a NamedSchema.
  */
-type Assign<O extends Record<string, unknown>, K extends string, V> = {
-  [P in keyof O | K]: P extends K ? V : P extends keyof O ? O[P] : never;
-};
-
 type ExtractBindings<
   TPattern extends readonly PatternSchema[],
   TChildren extends unknown[],
@@ -253,11 +260,6 @@ type ExtractBindings<
       : ExtractBindings<RestPattern, RestChildren, TAcc>
     : TAcc
   : TAcc;
-
-/**
- * Simplify an intersection type to a plain object type.
- */
-type Simplify<T> = { [K in keyof T]: T[K] };
 
 /**
  * Build the result node from parsed children.
