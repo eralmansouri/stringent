@@ -9,13 +9,10 @@
 import assert from "node:assert";
 import {
   defineNode,
-  number,
   lhs,
   rhs,
-  expr,
   constVal,
   createParser,
-  ident,
 } from "./index.js";
 import type { Parse, ComputeGrammar, Context } from "./index.js";
 import type { NumberNode } from "./primitive/index.js";
@@ -48,20 +45,8 @@ type AssertEqual<T, Expected> = T extends Expected
 // =============================================================================
 // Grammar Definition
 // =============================================================================
-
-const identifier = defineNode({
-  name: "ident",
-  pattern: [ident()],
-  precedence: "atom",
-  resultType: "unknown",
-});
-
-const numberLit = defineNode({
-  name: "number",
-  pattern: [number()],
-  precedence: "atom",
-  resultType: "number",
-});
+// Only operators are defined - atoms (number, string, identifier, parentheses)
+// are built-in and automatically included in the grammar.
 
 const add = defineNode({
   name: "add",
@@ -77,27 +62,20 @@ const mul = defineNode({
   resultType: "number",
 });
 
-// Parentheses use expr() - full grammar reset for delimited context
-const parens = defineNode({
-  name: "parens",
-  pattern: [constVal("("), expr("number").as("inner"), constVal(")")],
-  precedence: "atom",
-  resultType: "number",
-});
-
-const nodes = [numberLit, identifier, add, mul, parens] as const;
+// Only operators - atoms are built-in
+const operators = [add, mul] as const;
 
 // =============================================================================
 // Create Parser
 // =============================================================================
 
-const parser = createParser(nodes);
+const parser = createParser(operators);
 
 // =============================================================================
 // Type-Level Tests (compile-time)
 // =============================================================================
 
-type Grammar = ComputeGrammar<typeof nodes>;
+type Grammar = ComputeGrammar<typeof operators>;
 type Ctx = Context<{}>;
 
 // Test T1: Parse simple number
@@ -230,19 +208,19 @@ console.log("=== createParser Runtime Tests ===");
     right: unknown;
   };
   assert.strictEqual(node.node, "mul");
-  // Left should be the parens node containing add(1, 2)
+  // Left should be the built-in parentheses node containing add(1, 2)
   const left = node.left as { node: string; inner: unknown };
-  assert.strictEqual(left.node, "parens");
-  console.log("  R8: Parse '(1+2)*3' → OK (parens reset precedence)");
+  assert.strictEqual(left.node, "parentheses");
+  console.log("  R8: Parse '(1+2)*3' → OK (parentheses reset precedence)");
 }
 
-// Test R9: Nested parens
+// Test R9: Nested parentheses
 {
   const result = parser.parse("((1+2))", {});
   assert.ok(result.length === 2, "Should match");
   const node = result[0] as unknown as { node: string };
-  assert.strictEqual(node.node, "parens");
-  console.log("  R9: Parse '((1+2))' → OK (nested parens)");
+  assert.strictEqual(node.node, "parentheses");
+  console.log("  R9: Parse '((1+2))' → OK (nested parentheses)");
 }
 
 console.log("");

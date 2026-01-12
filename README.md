@@ -21,20 +21,12 @@ pnpm add stringent
 
 ### Define Your Grammar
 
-Use `defineNode` to create expression nodes with patterns, precedence, and result types:
+Use `defineNode` to create operators with patterns, precedence, and result types. Atoms (numbers, strings, identifiers, parentheses) are built-in:
 
 ```typescript
-import { defineNode, number, constVal, lhs, rhs, createParser } from 'stringent';
+import { defineNode, constVal, lhs, rhs, createParser } from 'stringent';
 
-// Atomic: number literals
-const numberLit = defineNode({
-  name: "number",
-  pattern: [number()],
-  precedence: "atom",
-  resultType: "number",
-});
-
-// Binary operators with precedence
+// Define operators with precedence
 const add = defineNode({
   name: "add",
   pattern: [lhs("number").as("left"), constVal("+"), rhs("number").as("right")],
@@ -53,11 +45,12 @@ const mul = defineNode({
 ### Create a Parser
 
 ```typescript
-const parser = createParser([numberLit, add, mul] as const);
+// Only pass operators - atoms are built-in
+const parser = createParser([add, mul] as const);
 
 // Type-safe parsing - result type is inferred at compile-time
 const result = parser.parse("1+2*3", {});
-//    ^? const result: [{ node: "add"; left: { node: "number"; value: "1" }; right: { node: "mul"; left: { node: "number"; value: "2" }; right: { node: "number"; value: "3" } } }, ""]
+// Parses as: add(1, mul(2, 3)) because * binds tighter than +
 ```
 
 ### Pattern Elements

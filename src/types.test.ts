@@ -163,8 +163,9 @@ const _testExprFactory: TestExprFactory = true;
 //
 // NodeSchema defines a complete grammar rule: name, pattern, precedence, resultType.
 
-// Precedence can be a number (for operators) or "atom" (for literals)
-type TestPrecedence = AssertEqual<Precedence, number | "atom">;
+// Precedence is a number for operators (lower = binds looser)
+// Atoms are now built-in and don't use precedence
+type TestPrecedence = AssertEqual<Precedence, number>;
 const _testPrecedence: TestPrecedence = true;
 
 // defineNode creates a NodeSchema with exact types preserved
@@ -276,20 +277,8 @@ console.log("  2.4 BinaryNode: OK");
 console.log("");
 console.log("=== PART 3: Grammar Types ===");
 
-// Define nodes for testing grammar computation
-const numberLit = defineNode({
-  name: "number",
-  pattern: [number()],
-  precedence: "atom",
-  resultType: "number",
-});
-
-const stringLit = defineNode({
-  name: "string",
-  pattern: [string(["\"", "'"])],
-  precedence: "atom",
-  resultType: "string",
-});
+// Define operators for testing grammar computation
+// Atoms (number, string, identifier, parentheses) are now built-in
 
 const add = defineNode({
   name: "add",
@@ -305,7 +294,8 @@ const mul = defineNode({
   resultType: "number",
 });
 
-type TestNodes = readonly [typeof numberLit, typeof stringLit, typeof add, typeof mul];
+// Only operators - atoms are built-in and automatically appended
+type TestNodes = readonly [typeof add, typeof mul];
 
 // -----------------------------------------------------------------------------
 // 3.1 Grammar (Flat Tuple Structure)
@@ -335,29 +325,25 @@ const _testGrammarStructure: TestGrammarStructure = true;
 type TestGrammar = ComputeGrammar<TestNodes>;
 
 // The grammar should be:
-//   [[add], [mul], [number, string]]
+//   [[add], [mul], [BuiltInAtoms]]
 //
 // Index 0: add (prec 1, lowest)
 // Index 1: mul (prec 2, higher)
-// Index 2: atoms (always last)
+// Index 2: built-in atoms (always last)
 
-// Test that it's a tuple (array)
-type TestGrammarIsTuple = TestGrammar extends readonly unknown[][] ? true : false;
-const _testGrammarIsTuple: TestGrammarIsTuple = true;
+// Test that it's a grammar (tuple of arrays)
+type TestGrammarIsValid = TestGrammar extends Grammar ? true : false;
+const _testGrammarIsValid: TestGrammarIsValid = true;
 
-// Test that it has 3 levels (2 operator levels + 1 atom level)
+// Test that it has 3 levels (2 operator levels + 1 built-in atom level)
 type TestGrammarLength = TestGrammar["length"] extends 3 ? true : false;
 const _testGrammarLength: TestGrammarLength = true;
 
-// Test that the last level contains atoms
-type TestLastLevelIsAtoms = TestGrammar extends readonly [...infer _Rest, infer Last]
-  ? Last extends readonly NodeSchema[]
-    ? Last[number]["precedence"] extends "atom"
-      ? true
-      : false
-    : false
-  : false;
-const _testLastLevelIsAtoms: TestLastLevelIsAtoms = true;
+// Test that the last level contains built-in atoms
+// Built-in atoms include: numberLiteral, stringLiteral, identifier, parentheses
+type LastLevel = TestGrammar extends readonly [...infer _Rest, infer Last] ? Last : never;
+type TestLastLevelHasAtoms = LastLevel extends readonly { name: string }[] ? true : false;
+const _testLastLevelHasAtoms: TestLastLevelHasAtoms = true;
 
 console.log("  3.1 Grammar (flat tuple): OK");
 console.log("  3.2 ComputeGrammar: OK");
