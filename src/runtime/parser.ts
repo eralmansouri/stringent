@@ -19,6 +19,14 @@ import type {
   ConstSchema,
   ExprSchema,
 } from "../schema/index.js";
+import {
+  defineNode,
+  number,
+  string,
+  ident,
+  constVal,
+  expr,
+} from "../schema/index.js";
 
 import {
   ASTNode,
@@ -26,6 +34,63 @@ import {
   NumberNode,
   StringNode,
 } from "../primitive/index.js";
+
+// =============================================================================
+// Built-in Atoms
+// =============================================================================
+
+/**
+ * Built-in atom schemas.
+ * These are always appended as the last level of the grammar.
+ * Users don't need to define these - they're provided automatically.
+ */
+
+/**
+ * Precedence for built-in atoms.
+ * Atoms are precedence 0 (base case), operators have precedence 1, 2, 3, etc.
+ * Note: Atoms are appended separately, so this value isn't used in sorting.
+ */
+const ATOM_PRECEDENCE = 0;
+
+/** Number literal atom - matches numeric literals */
+const numberLiteral = defineNode({
+  name: "numberLiteral",
+  pattern: [number()],
+  precedence: ATOM_PRECEDENCE,
+  resultType: "number",
+});
+
+/** String literal atom - matches strings with " or ' quotes */
+const stringLiteral = defineNode({
+  name: "stringLiteral",
+  pattern: [string(['"', "'"])],
+  precedence: ATOM_PRECEDENCE,
+  resultType: "string",
+});
+
+/** Identifier atom - matches identifiers */
+const identifierAtom = defineNode({
+  name: "identifier",
+  pattern: [ident()],
+  precedence: ATOM_PRECEDENCE,
+  resultType: "unknown",
+});
+
+/** Parentheses atom - matches ( expr ) for grouping */
+const parentheses = defineNode({
+  name: "parentheses",
+  pattern: [constVal("("), expr().as("inner"), constVal(")")],
+  precedence: ATOM_PRECEDENCE,
+  resultType: "unknown",
+});
+
+/** All built-in atoms, used as the last level of the grammar */
+export const BUILT_IN_ATOMS = [
+  numberLiteral,
+  stringLiteral,
+  identifierAtom,
+  parentheses,
+] as const;
 
 /** Parse result: empty = no match, [node, rest] = matched */
 export type ParseResult<T extends ASTNode<any, any> = ASTNode<any, any>> =
@@ -92,40 +157,36 @@ function parseConst(value: string, input: string): ParseResult {
 // =============================================================================
 
 /**
- * Build runtime grammar from node schemas.
+ * Build runtime grammar from operator schemas.
  *
  * Returns a flat tuple of levels:
- *   [[ops@prec1], [ops@prec2], ..., [atoms]]
+ *   [[ops@prec1], [ops@prec2], ..., [builtInAtoms]]
  *
- * Levels are sorted by precedence ascending (lowest first).
- * Atoms are always the last level.
+ * Operators are sorted by precedence ascending (lowest first).
+ * Built-in atoms are always appended as the last level.
  */
-export function buildGrammar(nodes: readonly NodeSchema[]): Grammar {
-  const atoms: NodeSchema[] = [];
-  const operators: Map<number, NodeSchema[]> = new Map();
+export function buildGrammar(operators: readonly NodeSchema[]): Grammar {
+  const operatorsByPrec: Map<number, NodeSchema[]> = new Map();
+  const operatorsAndPrimitives = [...operators];
 
-  for (const node of nodes) {
-    if (node.precedence === "atom") {
-      atoms.push(node);
-    } else {
-      const prec = node.precedence as number;
-      if (!operators.has(prec)) {
-        operators.set(prec, []);
-      }
-      operators.get(prec)!.push(node);
-    }
+  for (const op of operatorsAndPrimitives) {
+    const prec = op.precedence;
+    const ops = operatorsByPrec.get(prec) ?? [];
+    operatorsByPrec.set(prec, ops);
+    ops.push(op);
   }
 
   // Sort precedences ascending
-  const precedences = [...operators.keys()].sort((a, b) => a - b);
+  const precedences = [...operatorsByPrec.keys()].sort((a, b) => a - b);
 
-  // Build flat grammar: [[ops@prec1], [ops@prec2], ..., [atoms]]
+  // Build flat grammar: [[ops@prec1], [ops@prec2], ..., [builtInAtoms]]
   const grammar: (readonly NodeSchema[])[] = [];
   for (const prec of precedences) {
-    grammar.push(operators.get(prec)!);
+    grammar.push(operatorsByPrec.get(prec) ?? []);
   }
-  grammar.push(atoms);
 
+  // Append built-in atoms as the last level
+  grammar.push(BUILT_IN_ATOMS);
   return grammar;
 }
 
@@ -266,6 +327,9 @@ function extractBindings(
  * - Single child without names: passthrough (atom behavior)
  * - If configure() provided: transform bindings to fields
  * - Otherwise: bindings become node fields directly
+ *
+ * Special case: If resultType is "unknown" and there's a single expr binding,
+ * we propagate that binding's outputSchema (for generic parentheses, etc.).
  */
 function buildNodeResult(
   nodeSchema: NodeSchema,
@@ -284,10 +348,26 @@ function buildNodeResult(
     ? nodeSchema.configure(bindings, context)
     : bindings;
 
+  // Determine output schema:
+  // - If resultType is "unknown" and there's a single expr binding, use its outputSchema
+  // - Otherwise use the node's static resultType
+  let outputSchema = nodeSchema.resultType;
+  if (outputSchema === "unknown") {
+    const bindingKeys = Object.keys(bindings);
+    if (bindingKeys.length === 1) {
+      const singleBinding = bindings[bindingKeys[0]] as {
+        outputSchema?: string;
+      };
+      if (singleBinding.outputSchema) {
+        outputSchema = singleBinding.outputSchema;
+      }
+    }
+  }
+
   // Build node with fields
   return {
     node: nodeSchema.name,
-    outputSchema: nodeSchema.resultType,
+    outputSchema,
     ...fields,
   } as ASTNode;
 }

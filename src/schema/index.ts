@@ -202,8 +202,8 @@ export const expr = <const TConstraint extends string>(constraint?: TConstraint)
 // Node Definition Schema
 // =============================================================================
 
-/** Precedence type: number for operators, "atom" for atoms (literals) */
-export type Precedence = number | "atom";
+/** Precedence type: number for operators (lower = binds looser) */
+export type Precedence = number;
 
 /**
  * A node definition schema.
@@ -212,7 +212,7 @@ export type Precedence = number | "atom";
  * all the literal types needed for compile-time grammar computation:
  * - TName: The unique node name (e.g., "add", "mul")
  * - TPattern: The pattern elements as a tuple type
- * - TPrecedence: The precedence (number for operators, "atom" for atoms)
+ * - TPrecedence: The precedence (lower = binds looser, tried first)
  * - TResultType: The result type (e.g., "number", "string")
  */
 export interface NodeSchema<

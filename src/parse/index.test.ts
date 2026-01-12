@@ -9,7 +9,7 @@ import type { Context } from "../context.js";
 import type { ComputeGrammar } from "../grammar/index.js";
 import type { Parse } from "./index.js";
 import type { NumberNode } from "../primitive/index.js";
-import { defineNode, number, lhs, rhs, constVal } from "../schema/index.js";
+import { defineNode, lhs, rhs, constVal } from "../schema/index.js";
 
 // AST node types with named bindings
 interface AddNode<TLeft, TRight> {
@@ -39,13 +39,7 @@ type AssertEqual<T, Expected> = T extends Expected
 // =============================================================================
 // Test Grammar
 // =============================================================================
-
-const numberLit = defineNode({
-  name: "number",
-  pattern: [number()],
-  precedence: "atom",
-  resultType: "number",
-});
+// Only operators are defined - atoms are built-in
 
 const add = defineNode({
   name: "add",
@@ -61,8 +55,9 @@ const mul = defineNode({
   resultType: "number",
 });
 
-type Nodes = readonly [typeof numberLit, typeof add, typeof mul];
-type Grammar = ComputeGrammar<Nodes>;
+// Only operators - atoms are built-in and automatically appended
+type Operators = readonly [typeof add, typeof mul];
+type Grammar = ComputeGrammar<Operators>;
 type Ctx = Context<{ x: "number"; y: "string" }>;
 
 // =============================================================================
