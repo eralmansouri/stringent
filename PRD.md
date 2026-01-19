@@ -104,14 +104,14 @@ Since this is a new project, consider these potential improvements:
 **Files:** `src/parse/index.ts`, `src/error-handling.test.ts` (new)
 
 ### 1.4 Edge Case Tests
-- [ ] Test deeply nested parentheses (10+ levels)
-- [ ] Test long chained operations (a + b + c + d + e + ...)
-- [ ] Test mixed precedence chains
-- [ ] Test empty input handling
-- [ ] Test whitespace-only input
-- [ ] Test unicode identifiers
-- [ ] Test very long string literals
-- [ ] Test number edge cases (negative, decimals, scientific notation)
+- [x] Test deeply nested parentheses (10+ levels)
+- [x] Test long chained operations (a + b + c + d + e + ...)
+- [x] Test mixed precedence chains
+- [x] Test empty input handling
+- [x] Test whitespace-only input
+- [x] Test unicode identifiers
+- [x] Test very long string literals
+- [x] Test number edge cases (negative, decimals, scientific notation)
 
 ### 1.5 Combinator Review
 - [ ] Evaluate if Union, Tuple, Optional, Many combinators are needed

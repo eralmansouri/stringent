@@ -95,3 +95,66 @@
 **Files Changed:**
 - src/error-handling.test.ts (new - 79 tests)
 - PRD.md (marked task 1.3 as complete)
+
+### 2026-01-18: Task 1.4 - Edge Case Tests
+
+**Completed:**
+- Created comprehensive `src/edge-cases.test.ts` with 89 tests covering:
+  - **Deeply nested parentheses (7 tests):**
+    - 10, 15, and 20 levels of nested parentheses
+    - Nested parentheses with expression inside
+    - Nested parentheses with operators at multiple levels
+    - Mismatched deeply nested parentheses
+    - Alternating parentheses depths
+  - **Long chained operations (10 tests):**
+    - 5, 10, 15 chained additions
+    - 5, 10 chained multiplications
+    - Right-associativity preservation in long chains
+    - Chained subtractions and divisions
+    - Chained operations with variables
+    - Very long expression with 20 operations
+  - **Mixed precedence chains (9 tests):**
+    - add-mul-add and mul-add-mul chains
+    - Three precedence levels (add, mul, pow)
+    - Complex mixed precedence expressions
+    - Parentheses overriding precedence in chains
+    - Alternating operators of different precedence
+    - Long mixed precedence expressions
+  - **Empty input handling (3 tests):**
+    - Empty string, empty with operators defined, null character
+  - **Whitespace-only input (11 tests):**
+    - Single/multiple spaces, tabs, newlines
+    - Carriage return, CRLF, mixed whitespace
+    - Form feed and vertical tab
+  - **Unicode/ASCII identifiers (11 tests):**
+    - ASCII identifiers, underscores, dollar signs
+    - CamelCase, snake_case, SCREAMING_SNAKE_CASE
+    - Very long identifiers (100 chars)
+    - Numbers not starting identifiers
+    - Context-based type resolution
+  - **Very long string literals (10 tests):**
+    - Strings with 100 and 1000 characters
+    - Strings with spaces, mixed content
+    - Single-quoted long strings
+    - Strings containing operators and parentheses
+    - Empty and single character strings
+  - **Number edge cases (20 tests):**
+    - Basic integers (zero, single digit, large, leading zeros)
+    - Decimal numbers (various formats, very small decimals)
+    - Negative numbers (via Token.Number support)
+    - Scientific notation behavior (parses integer, leaves exponent)
+    - Special values (Infinity, NaN as identifiers)
+    - Boundary values (MAX_SAFE_INTEGER, beyond MAX_SAFE_INTEGER)
+  - **Complex combined edge cases (8 tests):**
+    - Deeply nested with long chains
+    - Mixed types in expressions
+    - Whitespace in complex expressions
+    - Expressions with remaining input
+
+**Test Results:**
+- All 294 tests pass (89 new + 205 existing)
+- TypeScript typecheck passes
+
+**Files Changed:**
+- src/edge-cases.test.ts (new - 89 tests)
+- PRD.md (marked task 1.4 as complete)
