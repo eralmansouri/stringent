@@ -488,3 +488,37 @@
 - src/primitive/index.ts (removed legacy exports, renamed to internal factories)
 - src/index.ts (removed legacy exports section)
 - PRD.md (marked task 3.2 as complete)
+
+### 2026-01-18: Task 5.3 - Package.json Cleanup
+
+**Completed:**
+- Enhanced package.json for production readiness
+- **Scripts:**
+  - `build`: Already configured (`tsc -p tsconfig.build.json`)
+  - `typecheck`: Already configured (`tsc --noEmit`)
+  - `lint`: Added (uses `tsc --noEmit` until ESLint is configured in task 6.1)
+  - `test`: Already configured (`vitest run`)
+  - `test:watch`: Already configured (`vitest`)
+  - `test:coverage`: Added (`vitest run --coverage`)
+  - `prepublishOnly`: Already configured (`pnpm build`)
+- **Added `engines` field:**
+  - Requires Node.js >=18.0.0 (per README requirements)
+- **Expanded keywords for npm discovery:**
+  - Added: type-safe, compile-time, type-level, expression-parser, dsl, ast, grammar, validation, inference
+  - Total: 12 keywords for better npm search visibility
+- **Reviewed dependencies:**
+  - `@sinclair/parsebox`: runtime dependency (correct)
+  - `arktype`: runtime dependency (correct)
+  - `hotscript`: devDependency (correct - type-only imports)
+  - `tsx`: devDependency (correct - development tool)
+  - `typescript`: devDependency (correct - build tool)
+  - `vitest`: devDependency (correct - test framework)
+  - `@types/node`: devDependency (correct - type definitions)
+
+**Test Results:**
+- All 643 tests pass
+- TypeScript typecheck passes
+
+**Files Changed:**
+- package.json (added engines, lint script, test:coverage, expanded keywords)
+- PRD.md (marked task 5.3 as complete)

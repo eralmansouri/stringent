@@ -283,11 +283,17 @@ Since this is a new project, consider these potential improvements:
 - [ ] Add test coverage reporting
 
 ### 5.3 Package.json Cleanup
-- [ ] Fix broken test script
-- [ ] Add proper scripts (test, test:watch, build, lint)
-- [ ] Review dependencies
-- [ ] Add engines field (Node.js version)
-- [ ] Add keywords for npm discovery
+- [x] Fix broken test script
+- [x] Add proper scripts (test, test:watch, build, lint)
+- [x] Review dependencies
+- [x] Add engines field (Node.js version)
+- [x] Add keywords for npm discovery
+
+**Completed:** Package.json is now production-ready:
+- Scripts: `build`, `typecheck`, `lint`, `test`, `test:watch`, `test:coverage`, `prepublishOnly`
+- Added `engines` field requiring Node.js >=18.0.0
+- Expanded keywords for npm discoverability: type-safe, compile-time, type-level, expression-parser, dsl, ast, grammar, validation, inference
+- Reviewed dependencies: hotscript correctly remains a devDependency (type-only imports)
 
 ---
 
