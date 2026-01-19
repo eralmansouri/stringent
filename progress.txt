@@ -624,3 +624,54 @@
 **Files Changed:**
 - docs/api-reference.md (new - comprehensive API documentation)
 - PRD.md (marked task 4.2 as complete)
+
+### 2026-01-18: Task 4.4 - Examples
+
+**Completed:**
+- Created `/examples` directory with 5 comprehensive example files
+- Each example demonstrates different use cases and features of Stringent
+
+**Examples Created:**
+1. **`basic-arithmetic.ts`** - Core arithmetic operations example
+   - Addition, subtraction, multiplication, division, exponentiation
+   - Operator precedence demonstration (lower = looser binding)
+   - Parentheses for precedence override
+   - Chained operations and nested parentheses
+   - Type safety demonstration
+
+2. **`comparison-operators.ts`** - Comparison and filtering example
+   - Equality (==, !=), less/greater than (<, >, <=, >=)
+   - Arithmetic combined with comparisons
+   - Practical filter system example with array filtering
+   - Context-based variable resolution
+
+3. **`form-validation.ts`** - Form validation rules example
+   - String equality (password confirmation)
+   - Number comparisons (age validation)
+   - Custom operators (contains, startsWith, .length)
+   - Logical operators (&& and ||)
+   - Complete validation system with error messages
+
+4. **`conditional-ternary.ts`** - Ternary expressions example
+   - Basic ternary: condition ? trueValue : falseValue
+   - Arithmetic in conditions and branches
+   - Nested ternary expressions with parentheses
+   - Practical examples: grade calculator, value clamping
+
+5. **`custom-operators.ts`** - Domain-specific language examples
+   - String DSL: concatenation (++), repeat (**), UPPER, LOWER, REVERSE
+   - Custom operators: divides, between...and
+   - Nullish coalescing (??)
+   - Unit conversion DSL: km to miles, C to F, lbs to kg
+
+**Test Results:**
+- All 691 tests pass
+- TypeScript typecheck passes (pnpm lint)
+
+**Files Changed:**
+- examples/basic-arithmetic.ts (new)
+- examples/comparison-operators.ts (new)
+- examples/form-validation.ts (new)
+- examples/conditional-ternary.ts (new)
+- examples/custom-operators.ts (new)
+- PRD.md (marked task 4.4 as complete)

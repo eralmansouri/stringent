@@ -272,12 +272,19 @@ Since this is a new project, consider these potential improvements:
 - [ ] Document grammar computation
 
 ### 4.4 Examples
-- [ ] Create `/examples` directory
-- [ ] Add basic arithmetic example
-- [ ] Add comparison operators example
-- [ ] Add form validation example
-- [ ] Add conditional/ternary example
-- [ ] Add custom operators example
+- [x] Create `/examples` directory
+- [x] Add basic arithmetic example
+- [x] Add comparison operators example
+- [x] Add form validation example
+- [x] Add conditional/ternary example
+- [x] Add custom operators example
+
+**Completed:** Created `/examples` directory with 5 comprehensive examples:
+- `basic-arithmetic.ts` - Addition, subtraction, multiplication, division, exponentiation with precedence
+- `comparison-operators.ts` - Equality, inequality, less/greater than, filter system example
+- `form-validation.ts` - Password confirmation, age validation, email validation, custom operators
+- `conditional-ternary.ts` - Ternary expressions, grade calculator, value clamping
+- `custom-operators.ts` - String DSL, custom operators (divides, between), nullish coalescing, unit conversion
 
 **Files:** `/examples/` (new directory)
 
