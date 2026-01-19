@@ -250,3 +250,62 @@ Runtime validation (throwing errors for missing/wrong types) still works correct
 - `src/runtime/eval.test.ts`: Added 21 new tests, updated 1 existing test
 
 All 734 tests pass. No new lint errors.
+
+## Task 7 (PRD): Study ArkType Integration (COMPLETED)
+
+This corresponds to PRD Task 1. Investigated how arktype can be used for compile-time and runtime type validation.
+
+### Key Findings
+
+**1. How does arktype's generic validation work?**
+- `type('number')` creates a Type object that validates at runtime
+- The Type object has an `.infer` property for extracting the TypeScript type
+- Invalid type strings cause compile-time errors via TypeScript's type system
+
+**2. How to validate type strings at compile time?**
+- Use `type.validate<T>` in generic function parameters
+- Example: `function fn<const T>(schema: type.validate<T>) { ... }`
+- This causes compile errors for invalid type strings like 'garbage'
+
+**3. How does type.infer work?**
+- After creating a Type: `const t = type('number')`
+- Extract the TS type: `type T = typeof t.infer` // number
+- Works with all valid arktype definitions
+
+**4. What arktype types should Stringent support initially?**
+- All primitives: 'number', 'string', 'boolean', 'null', 'undefined'
+- Unions: 'string | number' (for ternary result types)
+- Subtypes: 'string.email', 'number.integer' (validated at runtime)
+- Constraints: 'number >= 0' (validated at runtime)
+
+### Integration Pattern for Stringent
+
+For `lhs()`, `rhs()`, `expr()` constraint validation:
+```typescript
+export const lhs = <const T extends string>(constraint?: type.validate<T>) => ...
+```
+
+For `parser.parse()` schema validation:
+```typescript
+parse<TSchema extends Record<string, string>>(
+  input: string,
+  schema: { [K in keyof TSchema]: type.validate<TSchema[K]> }
+) => ...
+```
+
+For `SchemaToType` replacement:
+- Use arktype's `type.infer` mechanism
+- Direct type creation preserves inference: `type NumType = typeof type('number').infer`
+- Generic functions with `type.validate` may lose return type inference due to TS limitations
+
+### Tests Added
+
+Created `src/arktype-research.test.ts` with 16 comprehensive tests:
+- Question 1: How does arktype generic validation work? (6 tests)
+- Question 2: How to validate type strings at compile time? (2 tests)
+- Question 3: How does type.infer work? (2 tests)
+- Question 4: What types should Stringent support initially? (3 tests)
+- Integration pattern for Stringent (2 tests)
+- Key findings summary (1 test)
+
+All 750 tests pass. No lint errors.

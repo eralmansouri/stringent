@@ -266,20 +266,26 @@ const n: number = value;  // ✓ TypeScript knows value is number
 
 ## Tasks
 
-### Task 1: Study ArkType Integration
+### Task 1: Study ArkType Integration (COMPLETED)
 
 Before writing any code, understand:
 
-- [ ] How does arktype's generic validation work? (See SKILL.md, ADVANCED.md)
-- [ ] How can we validate that a string is a valid arktype type at compile time?
-- [ ] How does `type.infer` work to extract TypeScript types from arktype definitions?
-- [ ] What arktype types should Stringent support initially?
+- [x] How does arktype's generic validation work? (See SKILL.md, ADVANCED.md)
+- [x] How can we validate that a string is a valid arktype type at compile time?
+- [x] How does `type.infer` work to extract TypeScript types from arktype definitions?
+- [x] What arktype types should Stringent support initially?
 
 Read these resources:
 - `/Users/mansouri/Repositories/arktype-marketplace/skills/arktype/SKILL.md`
 - `/Users/mansouri/Repositories/arktype-marketplace/skills/arktype/ADVANCED.md`
 - `/Users/mansouri/Repositories/arktype-marketplace/skills/arktype/KEYWORDS.md`
 - The comment at `src/schema/index.ts:64` that references arktype
+
+**Findings documented in `src/arktype-research.test.ts`:**
+1. `type('number')` creates a Type object that validates at runtime
+2. `type.validate<def>` validates type strings at compile time in generic functions
+3. `typeof type('...').infer` extracts the TypeScript type from a definition
+4. Stringent should support: primitives, unions, subtypes (string.email), constraints (number >= 0)
 
 ### Task 2: Create Type Validation Using ArkType
 
