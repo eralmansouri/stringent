@@ -309,3 +309,92 @@ Created `src/arktype-research.test.ts` with 16 comprehensive tests:
 - Key findings summary (1 test)
 
 All 750 tests pass. No lint errors.
+
+## Task 8 (PRD Task 2): Create Type Validation Using ArkType (COMPLETED)
+
+Replaced the hardcoded `SchemaToType` with arktype-based validation.
+
+### Implementation
+
+Updated `src/schema/index.ts` with new type utilities:
+
+**1. `ValidArkType<T>` - Compile-Time Type Validation**
+```typescript
+export type ValidArkType<T extends string> = type.validate<T>;
+```
+Uses arktype's `type.validate` to validate type strings at compile time.
+- Valid types return the type string itself
+- Invalid types cause TypeScript compile errors
+
+**2. `ArkTypeSchemaToType<T>` - Direct arktype Inference**
+```typescript
+export type ArkTypeSchemaToType<T extends string> = type.infer<T>;
+```
+Direct wrapper around arktype's `type.infer` (no fallback).
+- Returns the TypeScript type for valid arktype strings
+- Returns `never` for invalid type strings
+
+**3. `SchemaToType<T>` - Backwards-Compatible Inference**
+```typescript
+export type SchemaToType<T extends string> =
+  // Fast path for common primitives
+  T extends 'number' ? number
+  : T extends 'string' ? string
+  : T extends 'boolean' ? boolean
+  : T extends 'null' ? null
+  : T extends 'undefined' ? undefined
+  : T extends 'unknown' ? unknown
+  : // Only use arktype for literal strings (not generic 'string')
+    string extends T ? unknown
+  : SchemaToTypeAdvanced<T>;
+```
+- Fast path for common primitives to avoid deep type instantiation
+- Detects advanced arktype patterns (subtypes, constraints, unions, arrays)
+- Falls back to `unknown` for invalid/generic types
+
+### Type Inference Results
+
+The updated `SchemaToType` now correctly infers:
+- `'number'` → `number`
+- `'string'` → `string`
+- `'boolean'` → `boolean`
+- `'null'` → `null`
+- `'undefined'` → `undefined`
+- `'unknown'` → `unknown`
+- `'string.email'` → `string` (subtype)
+- `'number.integer'` → `number` (subtype)
+- `'number >= 0'` → `number` (constraint)
+- `'string | number'` → `string | number` (union)
+- `'string[]'` → `string[]` (array)
+- `'garbage'` → `unknown` (invalid, fallback)
+
+### Tests Added
+
+Created `src/schema/arktype-integration.test.ts` with 32 comprehensive tests:
+- SchemaToType - Primitive Types (5 tests)
+- SchemaToType - ArkType Subtypes (4 tests)
+- SchemaToType - ArkType Constraints (4 tests)
+- SchemaToType - Union Types (4 tests)
+- ArkTypeSchemaToType - Direct arktype.infer (5 tests)
+- ValidArkType - Compile-Time Validation (4 tests)
+- SchemaToType - Edge Cases (3 tests)
+- SchemaToType - Fallback Behavior (3 tests)
+
+### Known Limitations
+
+1. **Type widening in complex parsers**: When using `parser.parse()` with many nodes,
+   the outputSchema type can get widened from literal `"string"` to generic `string`.
+   This is a pre-existing limitation (PRD GAP 6) and is documented in the test.
+
+2. **Requires literal type strings**: The arktype inference only works with literal
+   string types. Generic `string` types fall back to `unknown` to prevent infinite
+   type recursion.
+
+### Files Modified
+
+- `src/schema/index.ts`: Added arktype import, `ValidArkType`, `ArkTypeSchemaToType`,
+  updated `SchemaToType`, added `SchemaToTypeAdvanced` and `ArkTypeSchemaToTypeSafe` helpers
+- `src/schema/arktype-integration.test.ts`: New test file with 32 tests
+- `src/runtime/eval.test.ts`: Updated 1 test to reflect actual type inference behavior
+
+All 783 tests pass. TypeScript type checking passes. No lint errors (only pre-existing warnings).

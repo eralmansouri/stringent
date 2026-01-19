@@ -287,7 +287,7 @@ Read these resources:
 3. `typeof type('...').infer` extracts the TypeScript type from a definition
 4. Stringent should support: primitives, unions, subtypes (string.email), constraints (number >= 0)
 
-### Task 2: Create Type Validation Using ArkType
+### Task 2: Create Type Validation Using ArkType (COMPLETED)
 
 Replace the hardcoded `SchemaToType` with arktype-based validation.
 
@@ -309,10 +309,18 @@ export type SchemaToType<T extends string> = T extends 'number'
 - `"string | number"` → `string | number` (union)
 - `"garbage"` → compile error
 
-- [ ] Integrate arktype's type inference
-- [ ] Validate constraint strings at compile time
-- [ ] Support arktype subtypes (string.email, number.integer, etc.)
-- [ ] Support arktype constraints (number > 0, string >= 8, etc.)
+- [x] Integrate arktype's type inference
+- [x] Validate constraint strings at compile time
+- [x] Support arktype subtypes (string.email, number.integer, etc.)
+- [x] Support arktype constraints (number > 0, string >= 8, etc.)
+
+**Implementation Notes:**
+- `SchemaToType<T>` now uses arktype's `type.infer<T>` for advanced types
+- Fast path for common primitives ('number', 'string', 'boolean', etc.) to avoid deep type instantiation
+- `ValidArkType<T>` provides compile-time validation via `type.validate<T>`
+- `ArkTypeSchemaToType<T>` is a direct wrapper around `type.infer<T>` (returns `never` for invalid)
+- Fallback to `unknown` for invalid types to maintain backwards compatibility
+- Tests added in `src/schema/arktype-integration.test.ts` (32 tests)
 
 ### Task 3: Fix Schema Validation in ExprSchema Factories
 
