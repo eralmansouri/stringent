@@ -213,9 +213,9 @@ it('evaluate returns number for number outputSchema', () => {
 
 ### Task 5: Update Documentation
 
-- [ ] Update README to show type-safe evaluation examples
-- [ ] Update API reference (`docs/api-reference.md`) with correct return types
-- [ ] Add examples showing compile-time type inference in action
+- [x] Update README to show type-safe evaluation examples
+- [x] Update API reference (`docs/api-reference.md`) with correct return types
+- [x] Add examples showing compile-time type inference in action
 
 ---
 

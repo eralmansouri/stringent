@@ -83,9 +83,34 @@ Added comprehensive type-level tests in `src/runtime/eval.test.ts`:
 
 All 714 tests pass including 98 tests in eval.test.ts.
 
-## Task 5: Update Documentation (PENDING)
+## Task 5: Update Documentation (COMPLETED)
 
-Not yet started.
+Updated the documentation to reflect the new type-safe evaluation feature:
+
+### README.md Updates
+- Added "Type-Safe Evaluation" section with comprehensive examples
+- Added code examples showing type inference for number, boolean, and string result types
+- Updated the "Evaluate Expressions" section to highlight type inference
+- Updated "Key Features" section to emphasize type-safe evaluation
+
+### docs/api-reference.md Updates
+- Updated `evaluate()` section with new generic signature:
+  ```typescript
+  function evaluate<T>(ast: T, ctx: EvalContext): SchemaToType<ExtractOutputSchema<T>>
+  ```
+- Added documentation of the type utilities (`ExtractOutputSchema`, `SchemaToType`)
+- Added detailed "Type Inference Example" showing how types flow through
+- Updated `createEvaluator()` section with new generic signature
+- Added type inference example for `createEvaluator()`
+
+### Key Documentation Points
+- Return type is inferred from AST's `outputSchema` field
+- `outputSchema: "number"` → returns `number`
+- `outputSchema: "string"` → returns `string`
+- `outputSchema: "boolean"` → returns `boolean`
+- `outputSchema: "null"` → returns `null`
+- `outputSchema: "undefined"` → returns `undefined`
+- Unknown schemas → returns `unknown`
 
 ---
 

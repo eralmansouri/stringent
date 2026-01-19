@@ -389,17 +389,41 @@ Named bindings are:
 
 ### evaluate()
 
-Evaluates a parsed AST node to produce a runtime value.
+Evaluates a parsed AST node to produce a runtime value with **compile-time type inference**.
+
+The return type is automatically inferred from the AST node's `outputSchema` field:
+- `outputSchema: "number"` → returns `number`
+- `outputSchema: "string"` → returns `string`
+- `outputSchema: "boolean"` → returns `boolean`
+- `outputSchema: "null"` → returns `null`
+- `outputSchema: "undefined"` → returns `undefined`
+- Other/unknown → returns `unknown`
 
 ```typescript
-function evaluate(ast: unknown, ctx: EvalContext): unknown
+function evaluate<T>(ast: T, ctx: EvalContext): SchemaToType<ExtractOutputSchema<T>>
+```
+
+#### Type Utilities
+
+```typescript
+// Extract outputSchema from an AST node type
+type ExtractOutputSchema<T> = T extends { outputSchema: infer S extends string } ? S : 'unknown';
+
+// Map schema string to TypeScript type (from src/schema/index.ts)
+type SchemaToType<T extends string> =
+  T extends "number" ? number :
+  T extends "string" ? string :
+  T extends "boolean" ? boolean :
+  T extends "null" ? null :
+  T extends "undefined" ? undefined :
+  unknown;
 ```
 
 #### Parameters
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `ast` | `unknown` | The parsed AST node |
+| `ast` | `T` | The parsed AST node (generic, captures the node type) |
 | `ctx` | `EvalContext` | Evaluation context with data and node schemas |
 
 #### EvalContext
@@ -422,7 +446,34 @@ if (result.length === 2) {
     data: {},
     nodes: [numberLit, add, mul],
   });
+  // TypeScript infers: value: number (from outputSchema: "number")
   console.log(value); // 7
+}
+```
+
+#### Type Inference Example
+
+```typescript
+// The type flows through from parsing to evaluation
+const add = defineNode({
+  name: "add",
+  pattern: [lhs("number").as("left"), constVal("+"), rhs("number").as("right")],
+  precedence: 1,
+  resultType: "number",  // This becomes outputSchema on the AST
+  eval: ({ left, right }) => left + right,
+});
+
+const parser = createParser([add] as const);
+const result = parser.parse("1 + 2", {});
+
+if (result.length === 2) {
+  // result[0] has type with outputSchema: "number"
+  const value = evaluate(result[0], { data: {}, nodes: [add] });
+  // value has type: number (not unknown!)
+
+  // TypeScript will catch type errors:
+  const doubled: number = value * 2;  // ✓ Works
+  const upper: string = value.toUpperCase();  // ✗ Error: number has no toUpperCase
 }
 ```
 
@@ -430,12 +481,18 @@ if (result.length === 2) {
 
 ### createEvaluator()
 
-Creates a bound evaluator function with pre-configured node schemas.
+Creates a bound evaluator function with pre-configured node schemas. The returned function preserves **compile-time type inference** just like `evaluate()`.
 
 ```typescript
 function createEvaluator(nodes: readonly NodeSchema[]):
-  <TData extends Record<string, unknown>>(ast: unknown, data: TData) => unknown
+  <T, TData extends Record<string, unknown>>(ast: T, data: TData) => SchemaToType<ExtractOutputSchema<T>>
 ```
+
+The returned evaluator function infers the return type from the AST's `outputSchema`:
+- `outputSchema: "number"` → returns `number`
+- `outputSchema: "string"` → returns `string`
+- `outputSchema: "boolean"` → returns `boolean`
+- etc.
 
 #### Example
 
@@ -445,6 +502,7 @@ const evaluator = createEvaluator([numberLit, add, mul]);
 const result = parser.parse("1+2*3", {});
 if (result.length === 2) {
   const value = evaluator(result[0], {});
+  // TypeScript infers: value: number
   console.log(value); // 7
 }
 
@@ -452,7 +510,33 @@ if (result.length === 2) {
 const result2 = parser.parse("x+y", { x: "number", y: "number" });
 if (result2.length === 2) {
   const value = evaluator(result2[0], { x: 10, y: 20 });
+  // TypeScript infers: value: number
   console.log(value); // 30
+}
+```
+
+#### Type Inference Example
+
+```typescript
+// Boolean expression
+const gt = defineNode({
+  name: "gt",
+  pattern: [lhs("number").as("left"), constVal(">"), rhs("number").as("right")],
+  precedence: 1,
+  resultType: "boolean",
+  eval: ({ left, right }) => left > right,
+});
+
+const evaluator = createEvaluator([gt]);
+const result = parser.parse("5 > 3", {});
+
+if (result.length === 2) {
+  const isGreater = evaluator(result[0], {});
+  // TypeScript infers: isGreater: boolean (not unknown!)
+
+  if (isGreater) {
+    console.log("5 is greater than 3");
+  }
 }
 ```
 

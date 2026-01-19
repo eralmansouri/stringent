@@ -70,9 +70,72 @@ import { evaluate } from 'stringent';
 
 if (result.length === 2) {
   const value = evaluate(result[0], { data: {}, nodes: [add, mul] });
+  // TypeScript knows: typeof value === number (inferred from outputSchema!)
   console.log(value); // 7 (1 + 2*3 = 1 + 6 = 7)
 }
 ```
+
+### Type-Safe Evaluation
+
+The `evaluate()` function preserves compile-time type information. The return type is automatically inferred from the AST node's `outputSchema`:
+
+```typescript
+import { createParser, defineNode, evaluate, lhs, rhs, constVal } from 'stringent';
+
+// Number result type
+const add = defineNode({
+  name: "add",
+  pattern: [lhs("number").as("left"), constVal("+"), rhs("number").as("right")],
+  precedence: 1,
+  resultType: "number",  // This becomes the outputSchema
+  eval: ({ left, right }) => left + right,
+});
+
+const parser = createParser([add] as const);
+const result = parser.parse("1 + 2", {});
+
+if (result.length === 2) {
+  const value = evaluate(result[0], { data: {}, nodes: [add] });
+  // TypeScript infers: value: number
+  // NOT unknown!
+}
+
+// Boolean result type
+const eq = defineNode({
+  name: "eq",
+  pattern: [lhs("number").as("left"), constVal("=="), rhs("number").as("right")],
+  precedence: 1,
+  resultType: "boolean",  // Numbers in, boolean out
+  eval: ({ left, right }) => left === right,
+});
+
+const eqParser = createParser([eq] as const);
+const eqResult = eqParser.parse("1 == 2", {});
+
+if (eqResult.length === 2) {
+  const isEqual = evaluate(eqResult[0], { data: {}, nodes: [eq] });
+  // TypeScript infers: isEqual: boolean
+}
+
+// String result type
+const concat = defineNode({
+  name: "concat",
+  pattern: [lhs("string").as("left"), constVal("++"), rhs("string").as("right")],
+  precedence: 1,
+  resultType: "string",
+  eval: ({ left, right }) => left + right,
+});
+
+const concatParser = createParser([concat] as const);
+const concatResult = concatParser.parse('"hello" ++ "world"', {});
+
+if (concatResult.length === 2) {
+  const str = evaluate(concatResult[0], { data: {}, nodes: [concat] });
+  // TypeScript infers: str: string
+}
+```
+
+This is the core value proposition of Stringent: **compile-time type safety flows through parsing and evaluation**.
 
 ## Pattern Elements
 
@@ -388,11 +451,12 @@ try {
 ## Key Features
 
 - **Compile-time validation**: Invalid expressions fail TypeScript compilation
-- **Type inference**: Expression result types are inferred automatically
+- **Type-safe evaluation**: `evaluate()` returns the correct TypeScript type based on `outputSchema`
+- **Type inference**: Expression result types are inferred automatically through parsing and evaluation
 - **Operator precedence**: Correct parsing of complex expressions with configurable precedence levels
 - **Schema-aware**: Validates field references against your schema
 - **Dual API**: Same parsing logic at compile-time (types) and runtime
-- **Evaluation**: Built-in `evaluate` function to compute expression values
+- **Evaluation**: Built-in `evaluate` function to compute expression values with full type inference
 - **String escapes**: Full support for escape sequences (`\n`, `\t`, `\\`, `\"`, `\'`, `\uXXXX`, `\xHH`)
 
 ## API Reference
