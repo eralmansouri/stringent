@@ -407,23 +407,23 @@ describe('primitive literals - createParser integration', () => {
     const parser = createParser([booleanAnd, booleanOr] as const);
 
     it("should parse 'true && false'", () => {
-      const result = parser.parse('true && false', {});
-      expect(result).toHaveLength(2);
-      expect(result[0]).toHaveProperty('node', 'and');
+      const [evaluator, err] = parser.parse('true && false', {});
+      expect(err).toBeNull();
+      expect(evaluator!.ast).toHaveProperty('node', 'and');
     });
 
     it("should parse 'false || true'", () => {
-      const result = parser.parse('false || true', {});
-      expect(result).toHaveLength(2);
-      expect(result[0]).toHaveProperty('node', 'or');
+      const [evaluator, err] = parser.parse('false || true', {});
+      expect(err).toBeNull();
+      expect(evaluator!.ast).toHaveProperty('node', 'or');
     });
 
     it('should parse chained boolean operators', () => {
-      const result = parser.parse('true && false || true', {});
-      expect(result).toHaveLength(2);
+      const [evaluator, err] = parser.parse('true && false || true', {});
+      expect(err).toBeNull();
       // Due to precedence (lower = binds looser): && is precedence 1, || is precedence 2
       // So || binds tighter: true && (false || true) -> and node at top
-      expect(result[0]).toHaveProperty('node', 'and');
+      expect(evaluator!.ast).toHaveProperty('node', 'and');
     });
   });
 
@@ -438,19 +438,19 @@ describe('primitive literals - createParser integration', () => {
     const parser = createParser([nullishCoalesce] as const);
 
     it("should parse 'null ?? undefined'", () => {
-      const result = parser.parse('null ?? undefined', {});
-      expect(result).toHaveLength(2);
-      expect(result[0]).toHaveProperty('node', 'nullishCoalesce');
-      expect((result[0] as any).left).toHaveProperty('outputSchema', 'null');
-      expect((result[0] as any).right).toHaveProperty('outputSchema', 'undefined');
+      const [evaluator, err] = parser.parse('null ?? undefined', {});
+      expect(err).toBeNull();
+      expect(evaluator!.ast).toHaveProperty('node', 'nullishCoalesce');
+      expect((evaluator!.ast as any).left).toHaveProperty('outputSchema', 'null');
+      expect((evaluator!.ast as any).right).toHaveProperty('outputSchema', 'undefined');
     });
 
     it("should parse 'undefined ?? 42'", () => {
-      const result = parser.parse('undefined ?? 42', {});
-      expect(result).toHaveLength(2);
-      expect(result[0]).toHaveProperty('node', 'nullishCoalesce');
-      expect((result[0] as any).left).toHaveProperty('outputSchema', 'undefined');
-      expect((result[0] as any).right).toHaveProperty('outputSchema', 'number');
+      const [evaluator, err] = parser.parse('undefined ?? 42', {});
+      expect(err).toBeNull();
+      expect(evaluator!.ast).toHaveProperty('node', 'nullishCoalesce');
+      expect((evaluator!.ast as any).left).toHaveProperty('outputSchema', 'undefined');
+      expect((evaluator!.ast as any).right).toHaveProperty('outputSchema', 'number');
     });
   });
 
@@ -465,21 +465,21 @@ describe('primitive literals - createParser integration', () => {
     const parser = createParser([strictEqual] as const);
 
     it("should parse 'null === null'", () => {
-      const result = parser.parse('null === null', {});
-      expect(result).toHaveLength(2);
-      expect(result[0]).toHaveProperty('node', 'strictEqual');
+      const [evaluator, err] = parser.parse('null === null', {});
+      expect(err).toBeNull();
+      expect(evaluator!.ast).toHaveProperty('node', 'strictEqual');
     });
 
     it("should parse 'true === false'", () => {
-      const result = parser.parse('true === false', {});
-      expect(result).toHaveLength(2);
-      expect(result[0]).toHaveProperty('node', 'strictEqual');
+      const [evaluator, err] = parser.parse('true === false', {});
+      expect(err).toBeNull();
+      expect(evaluator!.ast).toHaveProperty('node', 'strictEqual');
     });
 
     it("should parse 'undefined === undefined'", () => {
-      const result = parser.parse('undefined === undefined', {});
-      expect(result).toHaveLength(2);
-      expect(result[0]).toHaveProperty('node', 'strictEqual');
+      const [evaluator, err] = parser.parse('undefined === undefined', {});
+      expect(err).toBeNull();
+      expect(evaluator!.ast).toHaveProperty('node', 'strictEqual');
     });
   });
 });

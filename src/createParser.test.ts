@@ -4,6 +4,7 @@
  * Verifies that:
  * 1. Type-level parsing produces correct types (compile-time tests)
  * 2. Runtime parsing produces correct values (runtime tests)
+ * 3. Bound evaluator API works correctly (Task 12)
  */
 
 import { describe, it, expect } from 'vitest';
@@ -91,30 +92,30 @@ describe('createParser type-level tests', () => {
 });
 
 // =============================================================================
-// Runtime Tests
+// Runtime Tests (using new bound evaluator API)
 // =============================================================================
 
 describe('createParser runtime tests', () => {
   it('should parse simple number', () => {
-    const result = parser.parse('42', {});
-    expect(result.length).toBe(2);
-    expect((result[0] as { node: string }).node).toBe('literal');
-    expect((result[0] as { raw: string }).raw).toBe('42');
-    expect(result[1]).toBe('');
+    const [evaluator, err] = parser.parse('42', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    expect(evaluator!.ast.node).toBe('literal');
+    expect((evaluator!.ast as unknown as { raw: string }).raw).toBe('42');
   });
 
   it('should parse simple addition', () => {
-    const result = parser.parse('1+2', {});
-    expect(result.length).toBe(2);
-    const node = result[0] as unknown as { node: string };
-    expect(node.node).toBe('add');
-    expect(result[1]).toBe('');
+    const [evaluator, err] = parser.parse('1+2', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    expect(evaluator!.ast.node).toBe('add');
   });
 
   it('should parse with precedence', () => {
-    const result = parser.parse('1+2*x', { x: 'number' });
-    expect(result.length).toBe(2);
-    const node = result[0] as unknown as {
+    const [evaluator, err] = parser.parse('1+2*x', { x: 'number' });
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const node = evaluator!.ast as unknown as {
       node: string;
       left: unknown;
       right: unknown;
@@ -125,23 +126,26 @@ describe('createParser runtime tests', () => {
     expect(right.node).toBe('mul');
   });
 
-  it('should return remaining input', () => {
+  it('should return error for partial parsing', () => {
     // @ts-expect-error - ValidatedInput requires full parsing, but we intentionally test partial parsing here
-    const result = parser.parse('42 rest', {});
-    expect(result.length).toBe(2);
-    expect(result[1]).toBe(' rest');
+    const [evaluator, err] = parser.parse('42 rest', {});
+    // With new API, this returns an error
+    expect(err).not.toBeNull();
+    expect(evaluator).toBeNull();
   });
 
-  it('should return empty array for no match', () => {
+  it('should return error for no match', () => {
     // @ts-expect-error - testing that invalid input causes type error
-    const result = parser.parse('@invalid', {});
-    expect(result.length).toBe(0);
+    const [evaluator, err] = parser.parse('@invalid', {});
+    expect(err).not.toBeNull();
+    expect(evaluator).toBeNull();
   });
 
   it('should handle chained addition (right-associative)', () => {
-    const result = parser.parse('1+2+x', { x: 'number' });
-    expect(result.length).toBe(2);
-    const node = result[0] as unknown as {
+    const [evaluator, err] = parser.parse('1+2+x', { x: 'number' });
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const node = evaluator!.ast as unknown as {
       node: string;
       left: unknown;
       right: unknown;
@@ -153,9 +157,10 @@ describe('createParser runtime tests', () => {
   });
 
   it('should handle precedence with mul on right (2+1*3 → add(2, mul(1,3)))', () => {
-    const result = parser.parse('2+1*3', {});
-    expect(result.length).toBe(2);
-    const node = result[0] as unknown as {
+    const [evaluator, err] = parser.parse('2+1*3', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const node = evaluator!.ast as unknown as {
       node: string;
       left: unknown;
       right: unknown;
@@ -171,9 +176,10 @@ describe('createParser runtime tests', () => {
   });
 
   it('should handle parentheses (expr() resets to full grammar)', () => {
-    const result = parser.parse('(1+2)*3', {});
-    expect(result.length).toBe(2);
-    const node = result[0] as unknown as {
+    const [evaluator, err] = parser.parse('(1+2)*3', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const node = evaluator!.ast as unknown as {
       node: string;
       left: unknown;
       right: unknown;
@@ -185,9 +191,10 @@ describe('createParser runtime tests', () => {
   });
 
   it('should handle nested parentheses', () => {
-    const result = parser.parse('((1+2))', {});
-    expect(result.length).toBe(2);
-    const node = result[0] as unknown as { node: string };
+    const [evaluator, err] = parser.parse('((1+2))', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const node = evaluator!.ast as unknown as { node: string };
     expect(node.node).toBe('parentheses');
   });
 });

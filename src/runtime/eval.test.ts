@@ -159,72 +159,82 @@ const parser = createParser(allNodes);
 
 describe('evaluate - literal nodes', () => {
   it('should evaluate number literal', () => {
-    const result = parser.parse('42', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('42', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(42);
   });
 
   it('should evaluate zero', () => {
-    const result = parser.parse('0', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('0', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(0);
   });
 
   it('should evaluate decimal number', () => {
-    const result = parser.parse('3.14159', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('3.14159', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBeCloseTo(3.14159);
   });
 
   it('should evaluate string literal (double quotes)', () => {
-    const result = parser.parse('"hello"', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('"hello"', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe('hello'); // Token.String strips quotes
   });
 
   it('should evaluate string literal (single quotes)', () => {
-    const result = parser.parse("'world'", {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse("'world'", {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe('world'); // Token.String strips quotes
   });
 
   it('should evaluate empty string', () => {
-    const result = parser.parse('""', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('""', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(''); // Token.String strips quotes
   });
 
   it('should evaluate true', () => {
-    const result = parser.parse('true', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('true', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(true);
   });
 
   it('should evaluate false', () => {
-    const result = parser.parse('false', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('false', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(false);
   });
 
   it('should evaluate null', () => {
-    const result = parser.parse('null', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('null', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(null);
   });
 
   it('should evaluate undefined', () => {
-    const result = parser.parse('undefined', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('undefined', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(undefined);
   });
 });
@@ -235,39 +245,44 @@ describe('evaluate - literal nodes', () => {
 
 describe('evaluate - identifier nodes', () => {
   it('should resolve identifier from context', () => {
-    const result = parser.parse('x', { x: 'number' });
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: { x: 10 }, nodes: allNodes });
+    const [evaluator, err] = parser.parse('x', { x: 'number' });
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({ x: 10 });
     expect(value).toBe(10);
   });
 
   it('should resolve multiple identifiers', () => {
-    const result = parser.parse('x+y', { x: 'number', y: 'number' });
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: { x: 3, y: 7 }, nodes: allNodes });
+    const [evaluator, err] = parser.parse('x+y', { x: 'number', y: 'number' });
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({ x: 3, y: 7 });
     expect(value).toBe(10);
   });
 
   it('should throw for undefined variable', () => {
-    const result = parser.parse('x', { x: 'number' });
-    expect(result.length).toBe(2);
+    const [evaluator, err] = parser.parse('x', { x: 'number' });
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
     expect(() => {
       // @ts-expect-error - intentionally passing wrong data to test runtime error
-      evaluate(result[0], { data: {}, nodes: allNodes });
-    }).toThrow('Undefined variable: x');
+      evaluator!({});
+    }).toThrow(/Data validation failed.*x must be a number/);
   });
 
   it('should resolve string identifier', () => {
-    const result = parser.parse('name', { name: 'string' });
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: { name: 'Alice' }, nodes: allNodes });
+    const [evaluator, err] = parser.parse('name', { name: 'string' });
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({ name: 'Alice' });
     expect(value).toBe('Alice');
   });
 
   it('should resolve boolean identifier', () => {
-    const result = parser.parse('flag', { flag: 'boolean' });
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: { flag: true }, nodes: allNodes });
+    const [evaluator, err] = parser.parse('flag', { flag: 'boolean' });
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({ flag: true });
     expect(value).toBe(true);
   });
 });
@@ -278,86 +293,98 @@ describe('evaluate - identifier nodes', () => {
 
 describe('evaluate - arithmetic operations', () => {
   it('should evaluate addition', () => {
-    const result = parser.parse('1+2', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('1+2', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(3);
   });
 
   it('should evaluate subtraction', () => {
-    const result = parser.parse('10-3', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('10-3', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(7);
   });
 
   it('should evaluate multiplication', () => {
-    const result = parser.parse('4*5', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('4*5', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(20);
   });
 
   it('should evaluate division', () => {
-    const result = parser.parse('20/4', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('20/4', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(5);
   });
 
   it('should evaluate exponentiation', () => {
-    const result = parser.parse('2**3', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('2**3', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(8);
   });
 
   it('should respect operator precedence (add/mul)', () => {
-    const result = parser.parse('2+3*4', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('2+3*4', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(14); // 2 + (3 * 4) = 14
   });
 
   it('should respect operator precedence (mul/pow)', () => {
-    const result = parser.parse('2*3**2', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('2*3**2', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(18); // 2 * (3^2) = 18
   });
 
   it('should handle chained addition (right-associative)', () => {
-    const result = parser.parse('1+2+3', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('1+2+3', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(6);
   });
 
   it('should handle chained multiplication', () => {
-    const result = parser.parse('2*3*4', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('2*3*4', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(24);
   });
 
   it('should handle complex expression', () => {
-    const result = parser.parse('1+2*3+4', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('1+2*3+4', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(11); // 1 + (2*3) + 4 = 1 + 6 + 4 = 11
   });
 
   it('should handle decimal operations', () => {
-    const result = parser.parse('1.5+2.5', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('1.5+2.5', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(4);
   });
 
   it('should handle division with decimals', () => {
-    const result = parser.parse('7/2', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('7/2', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(3.5);
   });
 });
@@ -368,41 +395,46 @@ describe('evaluate - arithmetic operations', () => {
 
 describe('evaluate - parentheses', () => {
   it('should evaluate expression in parentheses', () => {
-    const result = parser.parse('(42)', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('(42)', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(42);
   });
 
   it('should evaluate nested parentheses', () => {
     // Use simpler parser to avoid deep type inference
     const simpleParser = createParser([add, mul] as const);
-    const result = simpleParser.parse('((1+2))', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = simpleParser.parse('((1+2))', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(3);
   });
 
   it('should override precedence with parentheses', () => {
-    const result = parser.parse('(1+2)*3', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('(1+2)*3', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(9); // (1+2) * 3 = 9
   });
 
   it('should handle multiple parentheses groups', () => {
-    const result = parser.parse('(1+2)*(3+4)', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('(1+2)*(3+4)', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(21); // 3 * 7 = 21
   });
 
   it('should handle deeply nested parentheses with operations', () => {
     // Use simpler parser to avoid deep type inference timeout
     const simpleParser = createParser([add, mul] as const);
-    const result = simpleParser.parse('(((1+2)*3)+4)', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: [add, mul] });
+    const [evaluator, err] = simpleParser.parse('(((1+2)*3)+4)', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(13); // ((3*3)+4) = 9+4 = 13
   });
 });
@@ -413,51 +445,58 @@ describe('evaluate - parentheses', () => {
 
 describe('evaluate - comparison operations', () => {
   it('should evaluate equality (true)', () => {
-    const result = parser.parse('1==1', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('1==1', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(true);
   });
 
   it('should evaluate equality (false)', () => {
-    const result = parser.parse('1==2', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('1==2', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(false);
   });
 
   it('should evaluate inequality (true)', () => {
-    const result = parser.parse('1!=2', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('1!=2', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(true);
   });
 
   it('should evaluate less than (true)', () => {
-    const result = parser.parse('1<2', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('1<2', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(true);
   });
 
   it('should evaluate less than (false)', () => {
-    const result = parser.parse('2<1', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('2<1', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(false);
   });
 
   it('should evaluate greater than (true)', () => {
-    const result = parser.parse('2>1', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('2>1', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(true);
   });
 
   it('should compare with variables', () => {
-    const result = parser.parse('x>y', { x: 'number', y: 'number' });
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: { x: 10, y: 5 }, nodes: allNodes });
+    const [evaluator, err] = parser.parse('x>y', { x: 'number', y: 'number' });
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({ x: 10, y: 5 });
     expect(value).toBe(true);
   });
 });
@@ -468,30 +507,34 @@ describe('evaluate - comparison operations', () => {
 
 describe('evaluate - logical operations', () => {
   it('should evaluate AND (true && true)', () => {
-    const result = parser.parse('true&&true', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('true&&true', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(true);
   });
 
   it('should evaluate AND (true && false)', () => {
-    const result = parser.parse('true&&false', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('true&&false', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(false);
   });
 
   it('should evaluate OR (false || true)', () => {
-    const result = parser.parse('false||true', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('false||true', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(true);
   });
 
   it('should evaluate OR (false || false)', () => {
-    const result = parser.parse('false||false', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('false||false', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(false);
   });
 });
@@ -502,42 +545,47 @@ describe('evaluate - logical operations', () => {
 
 describe('evaluate - ternary conditional', () => {
   it('should evaluate ternary (true branch)', () => {
-    const result = parser.parse('true?1:2', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('true?1:2', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(1);
   });
 
   it('should evaluate ternary (false branch)', () => {
-    const result = parser.parse('false?1:2', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('false?1:2', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(2);
   });
 
   it('should evaluate ternary with comparison', () => {
     // Use parentheses because comparison and ternary have same precedence
-    const result = parser.parse('(1<2)?10:20', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('(1<2)?10:20', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(10);
   });
 
   it('should evaluate ternary with expressions in branches', () => {
-    const result = parser.parse('true?1+2:3+4', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('true?1+2:3+4', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(3);
   });
 
   it('should evaluate ternary with variable condition', () => {
-    const result = parser.parse('cond?1:2', { cond: 'boolean' });
-    expect(result.length).toBe(2);
+    const [evaluator, err] = parser.parse('cond?1:2', { cond: 'boolean' });
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
 
-    const trueValue = evaluate(result[0], { data: { cond: true }, nodes: allNodes });
+    const trueValue = evaluator!({ cond: true });
     expect(trueValue).toBe(1);
 
-    const falseValue = evaluate(result[0], { data: { cond: false }, nodes: allNodes });
+    const falseValue = evaluator!({ cond: false });
     expect(falseValue).toBe(2);
   });
 });
@@ -548,23 +596,26 @@ describe('evaluate - ternary conditional', () => {
 
 describe('evaluate - variables in expressions', () => {
   it('should evaluate expression with single variable', () => {
-    const result = parser.parse('x+1', { x: 'number' });
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: { x: 5 }, nodes: allNodes });
+    const [evaluator, err] = parser.parse('x+1', { x: 'number' });
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({ x: 5 });
     expect(value).toBe(6);
   });
 
   it('should evaluate expression with multiple variables', () => {
-    const result = parser.parse('x*y+z', { x: 'number', y: 'number', z: 'number' });
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: { x: 2, y: 3, z: 4 }, nodes: allNodes });
+    const [evaluator, err] = parser.parse('x*y+z', { x: 'number', y: 'number', z: 'number' });
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({ x: 2, y: 3, z: 4 });
     expect(value).toBe(10); // (2*3)+4 = 10
   });
 
   it('should evaluate parenthesized expression with variables', () => {
-    const result = parser.parse('(x+y)*z', { x: 'number', y: 'number', z: 'number' });
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: { x: 1, y: 2, z: 3 }, nodes: allNodes });
+    const [evaluator, err] = parser.parse('(x+y)*z', { x: 'number', y: 'number', z: 'number' });
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({ x: 1, y: 2, z: 3 });
     expect(value).toBe(9); // (1+2)*3 = 9
   });
 });
@@ -574,27 +625,36 @@ describe('evaluate - variables in expressions', () => {
 // =============================================================================
 
 describe('createEvaluator', () => {
-  const evaluator = createEvaluator(allNodes);
+  const legacyEvaluator = createEvaluator(allNodes);
 
   it('should create bound evaluator', () => {
-    const result = parser.parse('1+2', {});
-    expect(result.length).toBe(2);
-    const value = evaluator(result[0], {});
+    const [boundEvaluator, err] = parser.parse('1+2', {});
+    expect(err).toBeNull();
+    expect(boundEvaluator).not.toBeNull();
+    const value = boundEvaluator!({});
     expect(value).toBe(3);
   });
 
   it('should work with variables', () => {
-    const result = parser.parse('x+y', { x: 'number', y: 'number' });
-    expect(result.length).toBe(2);
-    const value = evaluator(result[0], { x: 10, y: 20 });
+    const [boundEvaluator, err] = parser.parse('x+y', { x: 'number', y: 'number' });
+    expect(err).toBeNull();
+    expect(boundEvaluator).not.toBeNull();
+    const value = boundEvaluator!({ x: 10, y: 20 });
     expect(value).toBe(30);
   });
 
   it('should work with complex expressions', () => {
-    const result = parser.parse('(1+2)*x', { x: 'number' });
-    expect(result.length).toBe(2);
-    const value = evaluator(result[0], { x: 5 });
+    const [boundEvaluator, err] = parser.parse('(1+2)*x', { x: 'number' });
+    expect(err).toBeNull();
+    expect(boundEvaluator).not.toBeNull();
+    const value = boundEvaluator!({ x: 5 });
     expect(value).toBe(15);
+  });
+
+  it('should still support legacy createEvaluator API with manually constructed AST', () => {
+    const ast = { node: 'literal', value: 42, outputSchema: 'number' } as const;
+    const value = legacyEvaluator(ast, {});
+    expect(value).toBe(42);
   });
 });
 
@@ -686,68 +746,76 @@ describe('evaluate - error cases', () => {
 
 describe('evaluate - edge cases', () => {
   it('should handle division by zero', () => {
-    const result = parser.parse('1/0', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('1/0', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(Infinity);
   });
 
   it('should handle negative division result', () => {
-    const result = parser.parse('5/0', {});
-    expect(result.length).toBe(2);
-    const minusResult = parser.parse('0-5', {});
-    expect(minusResult.length).toBe(2);
+    const [evaluator, err] = parser.parse('5/0', {});
+    expect(err).toBeNull();
+    const [_minusEvaluator, minusErr] = parser.parse('0-5', {});
+    expect(minusErr).toBeNull();
     // We can't directly parse -5/0, but we can test the concept
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const value = evaluator!({});
     expect(value).toBe(Infinity);
   });
 
   it('should handle 0 ** 0', () => {
-    const result = parser.parse('0**0', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('0**0', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(1); // Math.pow(0, 0) === 1
   });
 
   it('should handle large numbers', () => {
-    const result = parser.parse('999999999*999999999', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('999999999*999999999', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(999999999 * 999999999);
   });
 
   it('should handle very small decimals', () => {
-    const result = parser.parse('0.0001+0.0002', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('0.0001+0.0002', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBeCloseTo(0.0003);
   });
 
   it('should handle equality of null', () => {
-    const result = parser.parse('null==null', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('null==null', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(true);
   });
 
   it('should handle equality of undefined', () => {
-    const result = parser.parse('undefined==undefined', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('undefined==undefined', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(true);
   });
 
   it('should handle boolean equality', () => {
-    const result = parser.parse('true==false', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('true==false', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(false);
   });
 
   it('should handle long chained operations', () => {
-    const result = parser.parse('1+2+3+4+5+6+7+8+9+10', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('1+2+3+4+5+6+7+8+9+10', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe(55);
   });
 });
@@ -767,17 +835,19 @@ describe('evaluate - integration with createParser', () => {
     });
 
     const customParser = createParser([customAdd] as const);
-    const result = customParser.parse('1 plus 2', {});
-    expect(result.length).toBe(2);
+    const [evaluator, err] = customParser.parse('1 plus 2', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
 
-    const value = evaluate(result[0], { data: {}, nodes: [customAdd] });
+    const value = evaluator!({});
     expect(value).toBe(3);
   });
 
   it('should work with string concatenation', () => {
-    const result = parser.parse('"hello"++"world"', {});
-    expect(result.length).toBe(2);
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const [evaluator, err] = parser.parse('"hello"++"world"', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
+    const value = evaluator!({});
     expect(value).toBe('hello' + 'world'); // Token.String strips quotes
   });
 });
@@ -867,10 +937,11 @@ describe('evaluate - type inference (Task 2)', () => {
   });
 
   it('infers type from parsed expressions - number', () => {
-    const result = parser.parse('1+2', {});
-    expect(result.length).toBe(2);
+    const [evaluator, err] = parser.parse('1+2', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
 
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const value = evaluator!({});
 
     // Type-level assertion: value should be number (from outputSchema: "number")
     expectTypeOf(value).toEqualTypeOf<number>();
@@ -880,10 +951,11 @@ describe('evaluate - type inference (Task 2)', () => {
   });
 
   it('infers type from parsed expressions - boolean', () => {
-    const result = parser.parse('true&&false', {});
-    expect(result.length).toBe(2);
+    const [evaluator, err] = parser.parse('true&&false', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
 
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const value = evaluator!({});
 
     // Type-level assertion: value should be boolean (from outputSchema: "boolean")
     expectTypeOf(value).toEqualTypeOf<boolean>();
@@ -893,10 +965,11 @@ describe('evaluate - type inference (Task 2)', () => {
   });
 
   it('infers type from parsed expressions - string', () => {
-    const result = parser.parse('"hello"++"world"', {});
-    expect(result.length).toBe(2);
+    const [evaluator, err] = parser.parse('"hello"++"world"', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
 
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const value = evaluator!({});
 
     // Type-level assertion: Due to complex parser type inference with many nodes,
     // the outputSchema type gets widened to generic 'string' rather than literal '"string"'.
@@ -909,10 +982,11 @@ describe('evaluate - type inference (Task 2)', () => {
   });
 
   it('infers type from comparison operations - numbers in, boolean out', () => {
-    const result = parser.parse('1<2', {});
-    expect(result.length).toBe(2);
+    const [evaluator, err] = parser.parse('1<2', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
 
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const value = evaluator!({});
 
     // Type-level assertion: even though operands are numbers, result is boolean
     expectTypeOf(value).toEqualTypeOf<boolean>();
@@ -922,10 +996,11 @@ describe('evaluate - type inference (Task 2)', () => {
   });
 
   it('infers type from nested expressions', () => {
-    const result = parser.parse('(1+2)*3', {});
-    expect(result.length).toBe(2);
+    const [evaluator, err] = parser.parse('(1+2)*3', {});
+    expect(err).toBeNull();
+    expect(evaluator).not.toBeNull();
 
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const value = evaluator!({});
 
     // Type-level assertion: result should be number
     expectTypeOf(value).toEqualTypeOf<number>();
@@ -936,11 +1011,11 @@ describe('evaluate - type inference (Task 2)', () => {
 });
 
 describe('createEvaluator - type inference (Task 3)', () => {
-  const evaluator = createEvaluator(allNodes);
+  const legacyEvaluator = createEvaluator(allNodes);
 
   it('returns correct type from createEvaluator - number', () => {
     const ast = { node: 'literal', value: 42, outputSchema: 'number' } as const;
-    const result = evaluator(ast, {});
+    const result = legacyEvaluator(ast, {});
 
     // Type-level assertion: result should be number
     expectTypeOf(result).toEqualTypeOf<number>();
@@ -951,7 +1026,7 @@ describe('createEvaluator - type inference (Task 3)', () => {
 
   it('returns correct type from createEvaluator - string', () => {
     const ast = { node: 'literal', value: 'hello', outputSchema: 'string' } as const;
-    const result = evaluator(ast, {});
+    const result = legacyEvaluator(ast, {});
 
     // Type-level assertion: result should be string
     expectTypeOf(result).toEqualTypeOf<string>();
@@ -962,7 +1037,7 @@ describe('createEvaluator - type inference (Task 3)', () => {
 
   it('returns correct type from createEvaluator - boolean', () => {
     const ast = { node: 'literal', value: true, outputSchema: 'boolean' } as const;
-    const result = evaluator(ast, {});
+    const result = legacyEvaluator(ast, {});
 
     // Type-level assertion: result should be boolean
     expectTypeOf(result).toEqualTypeOf<boolean>();
@@ -971,11 +1046,12 @@ describe('createEvaluator - type inference (Task 3)', () => {
     expect(result).toBe(true);
   });
 
-  it('returns correct type from createEvaluator - parsed expression', () => {
-    const result = parser.parse('1+2', {});
-    expect(result.length).toBe(2);
+  it('returns correct type from bound evaluator - parsed expression', () => {
+    const [boundEvaluator, err] = parser.parse('1+2', {});
+    expect(err).toBeNull();
+    expect(boundEvaluator).not.toBeNull();
 
-    const value = evaluator(result[0], {});
+    const value = boundEvaluator!({});
 
     // Type-level assertion: result should be number
     expectTypeOf(value).toEqualTypeOf<number>();
@@ -984,11 +1060,12 @@ describe('createEvaluator - type inference (Task 3)', () => {
     expect(value).toBe(3);
   });
 
-  it('returns correct type from createEvaluator with variables', () => {
-    const result = parser.parse('x+y', { x: 'number', y: 'number' });
-    expect(result.length).toBe(2);
+  it('returns correct type from bound evaluator with variables', () => {
+    const [boundEvaluator, err] = parser.parse('x+y', { x: 'number', y: 'number' });
+    expect(err).toBeNull();
+    expect(boundEvaluator).not.toBeNull();
 
-    const value = evaluator(result[0], { x: 10, y: 20 });
+    const value = boundEvaluator!({ x: 10, y: 20 });
 
     // Type-level assertion: result should be number
     expectTypeOf(value).toEqualTypeOf<number>();
@@ -1021,10 +1098,11 @@ describe('evaluate - type inference edge cases (Task 4)', () => {
     // Note: When using the parser, the compile-time type may be more complex
     // due to grammar type inference. This test verifies runtime behavior.
     const simpleParser = createParser([add, mul] as const);
-    const result = simpleParser.parse('x', { x: 'number' });
-    expect(result.length).toBe(2);
+    const [boundEvaluator, err] = simpleParser.parse('x', { x: 'number' });
+    expect(err).toBeNull();
+    expect(boundEvaluator).not.toBeNull();
 
-    const value = evaluate(result[0], { data: { x: 42 }, nodes: [add, mul] });
+    const value = boundEvaluator!({ x: 42 });
 
     // Runtime assertion - the value is correct
     expect(value).toBe(42);
@@ -1034,10 +1112,11 @@ describe('evaluate - type inference edge cases (Task 4)', () => {
     // After Task 9 fix: The parentheses node has resultType: "unknown", but when
     // there's exactly one binding, the type-level now propagates the inner
     // expression's outputSchema, matching the runtime behavior.
-    const result = parser.parse('(42)', {});
-    expect(result.length).toBe(2);
+    const [boundEvaluator, err] = parser.parse('(42)', {});
+    expect(err).toBeNull();
+    expect(boundEvaluator).not.toBeNull();
 
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const value = boundEvaluator!({});
 
     // Type-level assertion: parentheses now correctly infer the inner type
     // (42 is a number literal, so outputSchema is 'number')
@@ -1049,10 +1128,11 @@ describe('evaluate - type inference edge cases (Task 4)', () => {
 
   it('handles deeply nested parentheses - type propagates through all levels (Task 9 fix)', () => {
     const simpleParser = createParser([add, mul] as const);
-    const result = simpleParser.parse('((1+2))', {});
-    expect(result.length).toBe(2);
+    const [boundEvaluator, err] = simpleParser.parse('((1+2))', {});
+    expect(err).toBeNull();
+    expect(boundEvaluator).not.toBeNull();
 
-    const value = evaluate(result[0], { data: {}, nodes: [add, mul] });
+    const value = boundEvaluator!({});
 
     // Type-level assertion: nested parentheses now correctly infer the inner type
     // (1+2 is a number expression, so outputSchema is 'number')
@@ -1064,26 +1144,29 @@ describe('evaluate - type inference edge cases (Task 4)', () => {
 
   it('handles equality returning boolean from any operands', () => {
     // Numbers compared
-    const numResult = parser.parse('1==1', {});
-    expect(numResult.length).toBe(2);
-    const numValue = evaluate(numResult[0], { data: {}, nodes: allNodes });
+    const [numEvaluator, numErr] = parser.parse('1==1', {});
+    expect(numErr).toBeNull();
+    expect(numEvaluator).not.toBeNull();
+    const numValue = numEvaluator!({});
     expectTypeOf(numValue).toEqualTypeOf<boolean>();
     expect(numValue).toBe(true);
 
     // Strings compared
-    const strResult = parser.parse('"a"=="b"', {});
-    expect(strResult.length).toBe(2);
-    const strValue = evaluate(strResult[0], { data: {}, nodes: allNodes });
+    const [strEvaluator, strErr] = parser.parse('"a"=="b"', {});
+    expect(strErr).toBeNull();
+    expect(strEvaluator).not.toBeNull();
+    const strValue = strEvaluator!({});
     expectTypeOf(strValue).toEqualTypeOf<boolean>();
     expect(strValue).toBe(false);
   });
 
   it('handles ternary with unknown result type', () => {
     // Ternary has resultType: "unknown", so the result type is unknown
-    const result = parser.parse('true?1:2', {});
-    expect(result.length).toBe(2);
+    const [boundEvaluator, err] = parser.parse('true?1:2', {});
+    expect(err).toBeNull();
+    expect(boundEvaluator).not.toBeNull();
 
-    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+    const value = boundEvaluator!({});
 
     // Type-level assertion: ternary has outputSchema: "unknown"
     expectTypeOf(value).toEqualTypeOf<unknown>();
@@ -1262,68 +1345,75 @@ describe('evaluate - data-schema connection (Task 6)', () => {
     // for identifier outputSchema instead of literal values.
 
     it('evaluates parsed expression with identifiers', () => {
-      const result = parser.parse('x+y', { x: 'number', y: 'number' });
-      expect(result.length).toBe(2);
+      const [boundEvaluator, err] = parser.parse('x+y', { x: 'number', y: 'number' });
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
 
-      const value = evaluate(result[0], { data: { x: 5, y: 10 }, nodes: allNodes });
+      const value = boundEvaluator!({ x: 5, y: 10 });
       expect(value).toBe(15);
     });
 
     it('evaluates parsed identifier expression', () => {
-      const result = parser.parse('x', { x: 'number' });
-      expect(result.length).toBe(2);
+      const [boundEvaluator, err] = parser.parse('x', { x: 'number' });
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
 
-      const value = evaluate(result[0], { data: { x: 42 }, nodes: allNodes });
+      const value = boundEvaluator!({ x: 42 });
       expect(value).toBe(42);
     });
 
     it('throws for missing variable at runtime', () => {
-      const result = parser.parse('x', { x: 'number' });
-      expect(result.length).toBe(2);
+      const [boundEvaluator, err] = parser.parse('x', { x: 'number' });
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
 
       expect(() => {
         // Runtime validation catches missing variable
         // Type system also catches this - but we test runtime behavior here
         // @ts-expect-error - x is required, testing runtime throws
-        evaluate(result[0], { data: {}, nodes: allNodes });
-      }).toThrow('Undefined variable: x');
+        boundEvaluator!({});
+      }).toThrow(/Data validation failed.*x must be a number/);
     });
 
     it('evaluates parsed string identifier', () => {
-      const result = parser.parse('name', { name: 'string' });
-      expect(result.length).toBe(2);
+      const [boundEvaluator, err] = parser.parse('name', { name: 'string' });
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
 
-      const value = evaluate(result[0], { data: { name: 'Alice' }, nodes: allNodes });
+      const value = boundEvaluator!({ name: 'Alice' });
       expect(value).toBe('Alice');
     });
 
     it('evaluates parsed boolean identifier', () => {
-      const result = parser.parse('flag', { flag: 'boolean' });
-      expect(result.length).toBe(2);
+      const [boundEvaluator, err] = parser.parse('flag', { flag: 'boolean' });
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
 
-      const value = evaluate(result[0], { data: { flag: true }, nodes: allNodes });
+      const value = boundEvaluator!({ flag: true });
       expect(value).toBe(true);
     });
 
     it('evaluates parsed comparison with identifier', () => {
-      const result = parser.parse('x<10', { x: 'number' });
-      expect(result.length).toBe(2);
+      const [boundEvaluator, err] = parser.parse('x<10', { x: 'number' });
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
 
-      const value = evaluate(result[0], { data: { x: 5 }, nodes: allNodes });
+      const value = boundEvaluator!({ x: 5 });
       expect(value).toBe(true);
     });
 
     it('evaluates parsed nested expression with identifiers', () => {
-      const result = parser.parse('(x+1)*y', { x: 'number', y: 'number' });
-      expect(result.length).toBe(2);
+      const [boundEvaluator, err] = parser.parse('(x+1)*y', { x: 'number', y: 'number' });
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
 
-      const value = evaluate(result[0], { data: { x: 2, y: 3 }, nodes: allNodes });
+      const value = boundEvaluator!({ x: 2, y: 3 });
       expect(value).toBe(9); // (2+1)*3 = 9
     });
   });
 
   describe('createEvaluator type-level tests', () => {
-    const evaluator = createEvaluator(allNodes);
+    const legacyEvaluator = createEvaluator(allNodes);
 
     it('requires correct data types for identifiers (manual AST)', () => {
       const ast = {
@@ -1332,7 +1422,7 @@ describe('evaluate - data-schema connection (Task 6)', () => {
         outputSchema: 'number',
       } as const;
 
-      const value = evaluator(ast, { x: 42 });
+      const value = legacyEvaluator(ast, { x: 42 });
       expectTypeOf(value).toEqualTypeOf<number>();
       expect(value).toBe(42);
     });
@@ -1347,7 +1437,7 @@ describe('evaluate - data-schema connection (Task 6)', () => {
       // Type-level test only - verify that TypeScript catches the error
       const _typeTest = () => {
         // @ts-expect-error - x is required
-        evaluator(ast, {});
+        legacyEvaluator(ast, {});
       };
       expect(_typeTest).toBeDefined();
     });
@@ -1363,15 +1453,16 @@ describe('evaluate - data-schema connection (Task 6)', () => {
       // Runtime-level: throws validation error
       expect(() => {
         // @ts-expect-error - x should be number
-        evaluator(ast, { x: 'wrong' });
+        legacyEvaluator(ast, { x: 'wrong' });
       }).toThrow(/Variable 'x' failed validation for schema 'number'/);
     });
 
     it('evaluates parsed expression (runtime)', () => {
-      const result = parser.parse('x', { x: 'number' });
-      expect(result.length).toBe(2);
+      const [boundEvaluator, err] = parser.parse('x', { x: 'number' });
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
 
-      const value = evaluator(result[0], { x: 42 });
+      const value = boundEvaluator!({ x: 42 });
       expect(value).toBe(42);
     });
   });
@@ -1654,54 +1745,58 @@ describe('evaluate - data-schema connection (Task 6)', () => {
 
     describe('parsed expressions with constraints', () => {
       it('validates parsed identifier with number >= 0 constraint', () => {
-        const result = parser.parse('x', { x: 'number >= 0' });
-        expect(result.length).toBe(2);
+        const [boundEvaluator, err] = parser.parse('x', { x: 'number >= 0' });
+        expect(err).toBeNull();
+        expect(boundEvaluator).not.toBeNull();
 
         // Valid value
-        const value = evaluate(result[0], { data: { x: 5 }, nodes: allNodes });
+        const value = boundEvaluator!({ x: 5 });
         expect(value).toBe(5);
 
         // Invalid value
         expect(() => {
-          evaluate(result[0], { data: { x: -5 }, nodes: allNodes });
-        }).toThrow(/Variable 'x' failed validation/);
+          boundEvaluator!({ x: -5 });
+        }).toThrow(/Data validation failed.*x must be/);
       });
 
       it('validates parsed identifier with string.email constraint', () => {
-        const result = parser.parse('email', { email: 'string.email' });
-        expect(result.length).toBe(2);
+        const [boundEvaluator, err] = parser.parse('email', { email: 'string.email' });
+        expect(err).toBeNull();
+        expect(boundEvaluator).not.toBeNull();
 
         // Valid value
-        const value = evaluate(result[0], { data: { email: 'test@example.com' }, nodes: allNodes });
+        const value = boundEvaluator!({ email: 'test@example.com' });
         expect(value).toBe('test@example.com');
 
         // Invalid value
         expect(() => {
-          evaluate(result[0], { data: { email: 'invalid' }, nodes: allNodes });
-        }).toThrow(/Variable 'email' failed validation/);
+          boundEvaluator!({ email: 'invalid' });
+        }).toThrow(/Data validation failed.*email must be/);
       });
 
       it('validates parsed expression with two constrained identifiers', () => {
         // Parse two separate identifiers with constraints
         // (The add node pattern requires exact 'number' type match, so we test identifiers individually)
-        const resultX = parser.parse('x', { x: 'number >= 0' });
-        const resultY = parser.parse('y', { y: 'number.integer' });
-        expect(resultX.length).toBe(2);
-        expect(resultY.length).toBe(2);
+        const [evaluatorX, errX] = parser.parse('x', { x: 'number >= 0' });
+        const [evaluatorY, errY] = parser.parse('y', { y: 'number.integer' });
+        expect(errX).toBeNull();
+        expect(errY).toBeNull();
+        expect(evaluatorX).not.toBeNull();
+        expect(evaluatorY).not.toBeNull();
 
         // Valid values
-        expect(evaluate(resultX[0], { data: { x: 5 }, nodes: allNodes })).toBe(5);
-        expect(evaluate(resultY[0], { data: { y: 3 }, nodes: allNodes })).toBe(3);
+        expect(evaluatorX!({ x: 5 })).toBe(5);
+        expect(evaluatorY!({ y: 3 })).toBe(3);
 
         // x violates constraint (negative)
         expect(() => {
-          evaluate(resultX[0], { data: { x: -1 }, nodes: allNodes });
-        }).toThrow(/Variable 'x' failed validation/);
+          evaluatorX!({ x: -1 });
+        }).toThrow(/Data validation failed.*x must be/);
 
         // y violates constraint (not integer)
         expect(() => {
-          evaluate(resultY[0], { data: { y: 3.5 }, nodes: allNodes });
-        }).toThrow(/Variable 'y' failed validation/);
+          evaluatorY!({ y: 3.5 });
+        }).toThrow(/Data validation failed.*y must be/);
       });
     });
 
@@ -1741,16 +1836,17 @@ describe('evaluate - data-schema connection (Task 6)', () => {
 
       it('validates nested identifier in expression', () => {
         // Test that validation works when identifier is part of a larger expression
-        const result = parser.parse('(x)', { x: 'number >= 0' });
-        expect(result.length).toBe(2);
+        const [boundEvaluator, err] = parser.parse('(x)', { x: 'number >= 0' });
+        expect(err).toBeNull();
+        expect(boundEvaluator).not.toBeNull();
 
         // Valid
-        expect(evaluate(result[0], { data: { x: 5 }, nodes: allNodes })).toBe(5);
+        expect(boundEvaluator!({ x: 5 })).toBe(5);
 
         // Invalid
         expect(() => {
-          evaluate(result[0], { data: { x: -5 }, nodes: allNodes });
-        }).toThrow(/Variable 'x' failed validation/);
+          boundEvaluator!({ x: -5 });
+        }).toThrow(/Data validation failed.*x must be/);
       });
     });
   });
@@ -2163,10 +2259,11 @@ describe('single-binding outputSchema propagation (Task 9)', () => {
       // (1 + 2) - inner add has outputSchema: 'number'
       // parentheses has resultType: 'unknown' but only one binding
       // So outputSchema should propagate to 'number'
-      const result = parser.parse('(1+2)', {});
-      expect(result.length).toBe(2);
+      const [boundEvaluator, err] = parser.parse('(1+2)', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
 
-      const value = evaluate(result[0], { data: {}, nodes: allNodes });
+      const value = boundEvaluator!({});
 
       // Type-level: should be number, not unknown
       expectTypeOf(value).toEqualTypeOf<number>();
@@ -2177,10 +2274,11 @@ describe('single-binding outputSchema propagation (Task 9)', () => {
 
     it('propagates outputSchema through parentheses for string expression', () => {
       // ("hello") - inner string literal has outputSchema: 'string'
-      const result = parser.parse('("hello")', {});
-      expect(result.length).toBe(2);
+      const [boundEvaluator, err] = parser.parse('("hello")', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
 
-      const value = evaluate(result[0], { data: {}, nodes: allNodes });
+      const value = boundEvaluator!({});
 
       // Type-level: should be string
       expectTypeOf(value).toEqualTypeOf<string>();
@@ -2191,10 +2289,11 @@ describe('single-binding outputSchema propagation (Task 9)', () => {
 
     it('propagates outputSchema through parentheses for boolean expression', () => {
       // (true) - inner boolean literal has outputSchema: 'boolean'
-      const result = parser.parse('(true)', {});
-      expect(result.length).toBe(2);
+      const [boundEvaluator, err] = parser.parse('(true)', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
 
-      const value = evaluate(result[0], { data: {}, nodes: allNodes });
+      const value = boundEvaluator!({});
 
       // Type-level: should be boolean
       expectTypeOf(value).toEqualTypeOf<boolean>();
@@ -2207,10 +2306,11 @@ describe('single-binding outputSchema propagation (Task 9)', () => {
       // ((1+2)) - inner type propagates through multiple levels
       // Note: Using a simpler parser to avoid excessive computation time
       const simpleParser = createParser([add, mul] as const);
-      const result = simpleParser.parse('((1+2))', {});
-      expect(result.length).toBe(2);
+      const [boundEvaluator, err] = simpleParser.parse('((1+2))', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
 
-      const value = evaluate(result[0], { data: {}, nodes: [add, mul] });
+      const value = boundEvaluator!({});
 
       // Type-level: should be number
       expectTypeOf(value).toEqualTypeOf<number>();
@@ -2223,10 +2323,11 @@ describe('single-binding outputSchema propagation (Task 9)', () => {
       // (((42))) - type should propagate all the way through
       // Note: Using a simpler parser to avoid deep type instantiation
       const simpleParser = createParser([add, mul] as const);
-      const result = simpleParser.parse('(((42)))', {});
-      expect(result.length).toBe(2);
+      const [boundEvaluator, err] = simpleParser.parse('(((42)))', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
 
-      const value = evaluate(result[0], { data: {}, nodes: [add, mul] });
+      const value = boundEvaluator!({});
 
       // Type-level: should be number
       expectTypeOf(value).toEqualTypeOf<number>();
@@ -2237,10 +2338,11 @@ describe('single-binding outputSchema propagation (Task 9)', () => {
 
     it('propagates outputSchema through parentheses with comparison', () => {
       // (1==1) - inner comparison has outputSchema: 'boolean'
-      const result = parser.parse('(1==1)', {});
-      expect(result.length).toBe(2);
+      const [boundEvaluator, err] = parser.parse('(1==1)', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
 
-      const value = evaluate(result[0], { data: {}, nodes: allNodes });
+      const value = boundEvaluator!({});
 
       // Type-level: should be boolean
       expectTypeOf(value).toEqualTypeOf<boolean>();
@@ -2251,10 +2353,11 @@ describe('single-binding outputSchema propagation (Task 9)', () => {
 
     it('propagates outputSchema in complex expression with parentheses', () => {
       // (1+2) * 3 - parenthesized add returns number, multiplied by 3
-      const result = parser.parse('(1+2)*3', {});
-      expect(result.length).toBe(2);
+      const [boundEvaluator, err] = parser.parse('(1+2)*3', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
 
-      const value = evaluate(result[0], { data: {}, nodes: allNodes });
+      const value = boundEvaluator!({});
 
       // Type-level: should be number (mul result)
       expectTypeOf(value).toEqualTypeOf<number>();
@@ -2265,10 +2368,11 @@ describe('single-binding outputSchema propagation (Task 9)', () => {
 
     it('propagates outputSchema for parenthesized null', () => {
       // (null) - inner null literal has outputSchema: 'null'
-      const result = parser.parse('(null)', {});
-      expect(result.length).toBe(2);
+      const [boundEvaluator, err] = parser.parse('(null)', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
 
-      const value = evaluate(result[0], { data: {}, nodes: allNodes });
+      const value = boundEvaluator!({});
 
       // Type-level: should be null
       expectTypeOf(value).toEqualTypeOf<null>();
@@ -2279,10 +2383,11 @@ describe('single-binding outputSchema propagation (Task 9)', () => {
 
     it('propagates outputSchema for parenthesized undefined', () => {
       // (undefined) - inner undefined literal has outputSchema: 'undefined'
-      const result = parser.parse('(undefined)', {});
-      expect(result.length).toBe(2);
+      const [boundEvaluator, err] = parser.parse('(undefined)', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
 
-      const value = evaluate(result[0], { data: {}, nodes: allNodes });
+      const value = boundEvaluator!({});
 
       // Type-level: should be undefined
       expectTypeOf(value).toEqualTypeOf<undefined>();
@@ -2321,10 +2426,11 @@ describe('single-binding outputSchema propagation (Task 9)', () => {
       //
       // To get computed union types, use resultType: { union: ['then', 'else'] }
       // See "Task 9 Part B" tests below for the UnionResultType approach
-      const result = parser.parse('true?1:"hello"', {});
-      expect(result.length).toBe(2);
+      const [boundEvaluator, err] = parser.parse('true?1:"hello"', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
 
-      const value = evaluate(result[0], { data: {}, nodes: allNodes });
+      const value = boundEvaluator!({});
 
       // Type-level: should be unknown (ternary uses static 'unknown', not UnionResultType)
       expectTypeOf(value).toEqualTypeOf<unknown>();
@@ -2335,11 +2441,12 @@ describe('single-binding outputSchema propagation (Task 9)', () => {
   });
 
   describe('createEvaluator with single-binding propagation', () => {
-    it('propagates type through createEvaluator for parenthesized expression', () => {
-      const evaluator = createEvaluator(allNodes);
-      const result = parser.parse('(1+2)', {});
+    it('propagates type through bound evaluator for parenthesized expression', () => {
+      const [boundEvaluator, err] = parser.parse('(1+2)', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
 
-      const value = evaluator(result[0], {});
+      const value = boundEvaluator!({});
 
       // Type-level: should be number
       expectTypeOf(value).toEqualTypeOf<number>();
@@ -2379,56 +2486,65 @@ describe('union type computation (Task 9 Part B)', () => {
       // then.outputSchema = 'number'
       // else.outputSchema = 'string'
       // result.outputSchema = 'number | string'
-      const result = unionParser.parse('true?1:"hello"', {});
-      expect(result.length).toBe(2);
+      const [boundEvaluator, err] = unionParser.parse('true?1:"hello"', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
 
-      const ast = result[0];
+      const ast = boundEvaluator!.ast;
       expect(ast).toHaveProperty('outputSchema');
       // Runtime computes union with sorted types: "number | string"
       expect((ast as { outputSchema: string }).outputSchema).toBe('number | string');
 
-      const value = evaluate(ast, { data: {}, nodes: [ternaryWithUnion, add, concat] });
+      const value = boundEvaluator!({});
       expect(value).toBe(1);
     });
 
     it('computes union for ternary with boolean and number branches', () => {
       // false ? true : 42
-      const result = unionParser.parse('false?true:42', {});
-      const ast = result[0];
+      const [boundEvaluator, err] = unionParser.parse('false?true:42', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
+      const ast = boundEvaluator!.ast;
       expect((ast as { outputSchema: string }).outputSchema).toBe('boolean | number');
 
-      const value = evaluate(ast, { data: {}, nodes: [ternaryWithUnion, add] });
+      const value = boundEvaluator!({});
       expect(value).toBe(42);
     });
 
     it('computes single type when both branches have same type', () => {
       // true ? 1 : 2
-      const result = unionParser.parse('true?1:2', {});
-      const ast = result[0];
+      const [boundEvaluator, err] = unionParser.parse('true?1:2', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
+      const ast = boundEvaluator!.ast;
       // When both branches have same type, result is that single type (not a union)
       expect((ast as { outputSchema: string }).outputSchema).toBe('number');
 
-      const value = evaluate(ast, { data: {}, nodes: [ternaryWithUnion, add] });
+      const value = boundEvaluator!({});
       expect(value).toBe(1);
     });
 
     it('computes union for ternary with string and boolean branches', () => {
       // true ? "hello" : false
-      const result = unionParser.parse('true?"hello":false', {});
-      const ast = result[0];
+      const [boundEvaluator, err] = unionParser.parse('true?"hello":false', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
+      const ast = boundEvaluator!.ast;
       expect((ast as { outputSchema: string }).outputSchema).toBe('boolean | string');
 
-      const value = evaluate(ast, { data: {}, nodes: [ternaryWithUnion] });
+      const value = boundEvaluator!({});
       expect(value).toBe('hello');
     });
 
     it('computes union with expressions in branches', () => {
       // true ? 1 + 2 : "hello"
-      const result = unionParser.parse('true?1+2:"hello"', {});
-      const ast = result[0];
+      const [boundEvaluator, err] = unionParser.parse('true?1+2:"hello"', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
+      const ast = boundEvaluator!.ast;
       expect((ast as { outputSchema: string }).outputSchema).toBe('number | string');
 
-      const value = evaluate(ast, { data: {}, nodes: [ternaryWithUnion, add] });
+      const value = boundEvaluator!({});
       expect(value).toBe(3);
     });
 
@@ -2437,20 +2553,24 @@ describe('union type computation (Task 9 Part B)', () => {
       // The then branch is a ternary with outputSchema 'number | string'
       // The else branch is 'boolean'
       // Result should be 'boolean | number | string'
-      const result = unionParser.parse('true?(false?1:"inner"):false', {});
-      const ast = result[0];
+      const [boundEvaluator, err] = unionParser.parse('true?(false?1:"inner"):false', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
+      const ast = boundEvaluator!.ast;
       // Note: Due to sorting, the union is ordered alphabetically
       expect((ast as { outputSchema: string }).outputSchema).toBe('boolean | number | string');
 
-      const value = evaluate(ast, { data: {}, nodes: [ternaryWithUnion, add] });
+      const value = boundEvaluator!({});
       expect(value).toBe('inner');
     });
   });
 
   describe('type-level union type computation', () => {
     it('infers union type for ternary with number and string branches', () => {
-      const result = unionParser.parse('true?1:"hello"', {});
-      const value = evaluate(result[0], { data: {}, nodes: [ternaryWithUnion, add, concat] });
+      const [boundEvaluator, err] = unionParser.parse('true?1:"hello"', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
+      const value = boundEvaluator!({});
 
       // Type-level: should be number | string
       // Note: The TypeScript type is a union of the actual types, not a string literal
@@ -2458,22 +2578,28 @@ describe('union type computation (Task 9 Part B)', () => {
     });
 
     it('infers union type for ternary with boolean and number branches', () => {
-      const result = unionParser.parse('false?true:42', {});
-      const value = evaluate(result[0], { data: {}, nodes: [ternaryWithUnion, add] });
+      const [boundEvaluator, err] = unionParser.parse('false?true:42', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
+      const value = boundEvaluator!({});
 
       expectTypeOf(value).toEqualTypeOf<boolean | number>();
     });
 
     it('infers single type when both branches have same type', () => {
-      const result = unionParser.parse('true?1:2', {});
-      const value = evaluate(result[0], { data: {}, nodes: [ternaryWithUnion, add] });
+      const [boundEvaluator, err] = unionParser.parse('true?1:2', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
+      const value = boundEvaluator!({});
 
       expectTypeOf(value).toEqualTypeOf<number>();
     });
 
     it('infers union type with expressions in branches', () => {
-      const result = unionParser.parse('true?1+2:"hello"', {});
-      const value = evaluate(result[0], { data: {}, nodes: [ternaryWithUnion, add] });
+      const [boundEvaluator, err] = unionParser.parse('true?1+2:"hello"', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
+      const value = boundEvaluator!({});
 
       expectTypeOf(value).toEqualTypeOf<string | number>();
     });
@@ -2499,19 +2625,21 @@ describe('union type computation (Task 9 Part B)', () => {
   });
 
   describe('createEvaluator with union types', () => {
-    it('infers union type through createEvaluator', () => {
-      const evaluator = createEvaluator([ternaryWithUnion, add, concat]);
-      const result = unionParser.parse('true?1:"hello"', {});
-      const value = evaluator(result[0], {});
+    it('infers union type through bound evaluator', () => {
+      const [boundEvaluator, err] = unionParser.parse('true?1:"hello"', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
+      const value = boundEvaluator!({});
 
       expectTypeOf(value).toEqualTypeOf<string | number>();
       expect(value).toBe(1);
     });
 
-    it('infers union type for nested ternary through createEvaluator', () => {
-      const evaluator = createEvaluator([ternaryWithUnion, add, concat]);
-      const result = unionParser.parse('true?(false?"a":"b"):42', {});
-      const value = evaluator(result[0], {});
+    it('infers union type for nested ternary through bound evaluator', () => {
+      const [boundEvaluator, err] = unionParser.parse('true?(false?"a":"b"):42', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
+      const value = boundEvaluator!({});
 
       // Inner ternary: string | string = string
       // Outer ternary: string | number = string | number
@@ -2524,8 +2652,10 @@ describe('union type computation (Task 9 Part B)', () => {
     it('handles union when one branch has unknown schema', () => {
       // If one of the bindings has 'unknown' schema, it's filtered out
       // This is handled by the runtime computeUnionOutputSchema function
-      const result = unionParser.parse('true?1:2', {});
-      const ast = result[0];
+      const [boundEvaluator, err] = unionParser.parse('true?1:2', {});
+      expect(err).toBeNull();
+      expect(boundEvaluator).not.toBeNull();
+      const ast = boundEvaluator!.ast;
 
       // Both branches are number, so result is just number (not unknown)
       expect((ast as { outputSchema: string }).outputSchema).toBe('number');

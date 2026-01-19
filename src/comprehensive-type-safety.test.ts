@@ -140,12 +140,14 @@ describe('data validation', () => {
   });
 
   it('validates at runtime', () => {
-    // Parse with constrained schema
-    const result = parser.parse('x + 1', { x: 'number >= 0' });
+    // Parse with constrained schema - just use identifier to avoid type mismatch
+    // (add node requires exact 'number' type, not 'number >= 0')
+    const [evaluator, err] = parser.parse('x', { x: 'number >= 0' });
+    expect(err).toBeNull();
 
     // Should throw at runtime for negative number
     expect(() => {
-      evaluate(result[0], { data: { x: -5 }, nodes });
+      evaluator!({ x: -5 });
     }).toThrow();
   });
 
@@ -458,59 +460,53 @@ describe('runtime arktype constraint validation', () => {
 describe('arktype subtypes', () => {
   describe('string subtypes', () => {
     it('string.email validates email format', () => {
-      const result = parser.parse('email', { email: 'string.email' });
-      expect(result.length).toBe(2);
+      const [evaluator, err] = parser.parse('email', { email: 'string.email' });
+      expect(err).toBeNull();
 
       // Valid email passes
-      const value = evaluate(result[0], {
-        data: { email: 'user@example.com' },
-        nodes,
-      });
+      const value = evaluator!({ email: 'user@example.com' });
       expect(value).toBe('user@example.com');
 
       // Invalid email fails
       expect(() => {
-        evaluate(result[0], {
-          data: { email: 'invalid-email' },
-          nodes,
-        });
+        evaluator!({ email: 'invalid-email' });
       }).toThrow();
     });
 
     it('string.uuid validates UUID format', () => {
-      const result = parser.parse('id', { id: 'string.uuid' });
-      expect(result.length).toBe(2);
+      const [evaluator, err] = parser.parse('id', { id: 'string.uuid' });
+      expect(err).toBeNull();
 
       // Valid UUID passes
       const validUuid = '123e4567-e89b-12d3-a456-426614174000';
-      const value = evaluate(result[0], { data: { id: validUuid }, nodes });
+      const value = evaluator!({ id: validUuid });
       expect(value).toBe(validUuid);
 
       // Invalid UUID fails
       expect(() => {
-        evaluate(result[0], { data: { id: 'not-a-uuid' }, nodes });
+        evaluator!({ id: 'not-a-uuid' });
       }).toThrow();
     });
 
     it('string.url validates URL format', () => {
       // Schema accepts the subtype
-      const result = parser.parse('link', { link: 'string.url' });
-      expect(result.length).toBe(2);
+      const [_evaluator, err] = parser.parse('link', { link: 'string.url' });
+      expect(err).toBeNull();
     });
   });
 
   describe('number subtypes', () => {
     it('number.integer validates integer values', () => {
-      const result = parser.parse('count', { count: 'number.integer' });
-      expect(result.length).toBe(2);
+      const [evaluator, err] = parser.parse('count', { count: 'number.integer' });
+      expect(err).toBeNull();
 
       // Integer passes
-      const value = evaluate(result[0], { data: { count: 42 }, nodes });
+      const value = evaluator!({ count: 42 });
       expect(value).toBe(42);
 
       // Float fails
       expect(() => {
-        evaluate(result[0], { data: { count: 3.14 }, nodes });
+        evaluator!({ count: 3.14 });
       }).toThrow();
     });
   });
@@ -518,16 +514,16 @@ describe('arktype subtypes', () => {
   describe('complex subtype expressions', () => {
     it('validates standalone identifier with integer constraint', () => {
       // When using constrained schemas, the constraint is preserved on identifiers
-      const result = parser.parse('count', { count: 'number.integer' });
-      expect(result.length).toBe(2);
+      const [evaluator, err] = parser.parse('count', { count: 'number.integer' });
+      expect(err).toBeNull();
 
       // Valid integer passes
-      const value = evaluate(result[0], { data: { count: 10 }, nodes });
+      const value = evaluator!({ count: 10 });
       expect(value).toBe(10);
 
       // Float fails validation
       expect(() => {
-        evaluate(result[0], { data: { count: 10.5 }, nodes });
+        evaluator!({ count: 10.5 });
       }).toThrow();
     });
   });
@@ -584,21 +580,23 @@ describe('edge cases', () => {
   it('validates multiple constrained identifiers individually', () => {
     // Parse individual identifiers with constraints
     // (The add node pattern requires exact 'number' type, so constraints are tested on identifiers)
-    const resultX = parser.parse('x', { x: 'number >= 0' });
-    const resultY = parser.parse('y', { y: 'number >= 0' });
+    const [evaluatorX, errX] = parser.parse('x', { x: 'number >= 0' });
+    const [evaluatorY, errY] = parser.parse('y', { y: 'number >= 0' });
+    expect(errX).toBeNull();
+    expect(errY).toBeNull();
 
     // Valid values
-    expect(evaluate(resultX[0], { data: { x: 5 }, nodes })).toBe(5);
-    expect(evaluate(resultY[0], { data: { y: 10 }, nodes })).toBe(10);
+    expect(evaluatorX!({ x: 5 })).toBe(5);
+    expect(evaluatorY!({ y: 10 })).toBe(10);
 
     // x invalid
     expect(() => {
-      evaluate(resultX[0], { data: { x: -1 }, nodes });
-    }).toThrow(/Variable 'x' failed validation/);
+      evaluatorX!({ x: -1 });
+    }).toThrow(/Data validation failed/);
 
     // y invalid
     expect(() => {
-      evaluate(resultY[0], { data: { y: -1 }, nodes });
-    }).toThrow(/Variable 'y' failed validation/);
+      evaluatorY!({ y: -1 });
+    }).toThrow(/Data validation failed/);
   });
 });

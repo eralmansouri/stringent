@@ -100,216 +100,216 @@ type CtxWithVars = Context<{ x: 'number'; y: 'number'; name: 'string'; flag: 'bo
 describe('runtime infer() function', () => {
   describe('literal nodes', () => {
     it("should infer number literal as 'number'", () => {
-      const result = parser.parse('42', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('42', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('number');
     });
 
     it("should infer decimal number as 'number'", () => {
-      const result = parser.parse('3.14', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('3.14', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('number');
     });
 
     it("should infer string literal as 'string'", () => {
-      const result = parser.parse('"hello"', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('"hello"', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('string');
     });
 
     it("should infer single-quoted string as 'string'", () => {
-      const result = parser.parse("'world'", {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse("'world'", {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('string');
     });
 
     it("should infer empty string as 'string'", () => {
-      const result = parser.parse('""', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('""', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('string');
     });
 
     it("should infer true as 'boolean'", () => {
-      const result = parser.parse('true', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('true', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('boolean');
     });
 
     it("should infer false as 'boolean'", () => {
-      const result = parser.parse('false', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('false', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('boolean');
     });
 
     it("should infer null as 'null'", () => {
-      const result = parser.parse('null', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('null', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('null');
     });
 
     it("should infer undefined as 'undefined'", () => {
-      const result = parser.parse('undefined', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('undefined', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('undefined');
     });
   });
 
   describe('identifier nodes', () => {
     it('should infer identifier with known type from context', () => {
-      const result = parser.parse('x', { x: 'number' });
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('x', { x: 'number' });
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('number');
     });
 
     it("should infer identifier without context as 'unknown'", () => {
       // Use a simpler parser for this test (without constraints)
       const simpleParser = createParser([]);
-      const result = simpleParser.parse('unknownVar', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = simpleParser.parse('unknownVar', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('unknown');
     });
 
     it('should infer multiple different identifier types', () => {
-      const result1 = parser.parse('x', { x: 'number' });
-      const result2 = parser.parse('name', { name: 'string' });
+      const [evaluator1, _err1] = parser.parse('x', { x: 'number' });
+      const [evaluator2, _err2] = parser.parse('name', { name: 'string' });
 
-      expect(infer(result1[0], emptyContext)).toBe('number');
-      expect(infer(result2[0], emptyContext)).toBe('string');
+      expect(infer(evaluator1!.ast, emptyContext)).toBe('number');
+      expect(infer(evaluator2!.ast, emptyContext)).toBe('string');
     });
   });
 
   describe('binary operation nodes', () => {
     it("should infer add operation as 'number'", () => {
-      const result = parser.parse('1+2', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('1+2', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('number');
     });
 
     it("should infer mul operation as 'number'", () => {
-      const result = parser.parse('3*4', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('3*4', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('number');
     });
 
     it("should infer eq operation as 'boolean'", () => {
-      const result = parser.parse('"a"=="b"', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('"a"=="b"', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('boolean');
     });
 
     it("should infer concat operation as 'string'", () => {
-      const result = parser.parse('"hello"++"world"', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('"hello"++"world"', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('string');
     });
 
     it("should infer nullCoalesce as 'unknown'", () => {
-      const result = parser.parse('null??42', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('null??42', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('unknown');
     });
 
     it("should infer chained additions as 'number'", () => {
-      const result = parser.parse('1+2+3', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('1+2+3', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('number');
     });
 
     it('should infer mixed precedence expressions correctly', () => {
-      const result = parser.parse('1+2*3', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('1+2*3', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('number');
     });
   });
 
   describe('parenthesized expressions', () => {
     it('should infer through parentheses - number', () => {
-      const result = parser.parse('(42)', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('(42)', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('number');
     });
 
     it('should infer through parentheses - string', () => {
-      const result = parser.parse('("hello")', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('("hello")', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('string');
     });
 
     it('should infer through nested parentheses', () => {
-      const result = parser.parse('((1+2))', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('((1+2))', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('number');
     });
 
     it('should infer through parentheses with precedence override', () => {
-      const result = parser.parse('(1+2)*3', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('(1+2)*3', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('number');
     });
   });
 
   describe('complex AST structures', () => {
     it('should infer deeply nested expression', () => {
-      const result = parser.parse('1+2*3+4*5', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('1+2*3+4*5', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('number');
     });
 
     it('should infer expression with variables', () => {
-      const result = parser.parse('x+y*2', { x: 'number', y: 'number' });
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('x+y*2', { x: 'number', y: 'number' });
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('number');
     });
 
     it('should infer string concatenation chain', () => {
-      const result = parser.parse('"a"++"b"++"c"', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('"a"++"b"++"c"', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('string');
     });
 
     it('should infer equality comparison with strings', () => {
-      const result = parser.parse('"foo"=="bar"', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('"foo"=="bar"', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('boolean');
     });
 
     it('should infer ternary expression', () => {
-      const result = parser.parse('true?1:2', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('true?1:2', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('unknown');
     });
 
     it('should infer nested ternary', () => {
-      const result = parser.parse('true?1:false?2:3', {});
-      expect(result.length).toBe(2);
-      const type = infer(result[0], emptyContext);
+      const [evaluator, err] = parser.parse('true?1:false?2:3', {});
+      expect(err).toBeNull();
+      const type = infer(evaluator!.ast, emptyContext);
       expect(type).toBe('unknown');
     });
   });
@@ -555,8 +555,9 @@ describe('static Infer<> type', () => {
 
 describe('runtime/type inference parity', () => {
   it('should match for number literal', () => {
-    const result = parser.parse('42', {});
-    const runtimeType = infer(result[0], emptyContext);
+    const [evaluator, err] = parser.parse('42', {});
+    expect(err).toBeNull();
+    const runtimeType = infer(evaluator!.ast, emptyContext);
 
     type Parsed = Parse<Grammar, '42', Ctx>;
     type Node = Parsed extends [infer N, string] ? N : never;
@@ -568,8 +569,9 @@ describe('runtime/type inference parity', () => {
   });
 
   it('should match for string literal', () => {
-    const result = parser.parse('"test"', {});
-    const runtimeType = infer(result[0], emptyContext);
+    const [evaluator, err] = parser.parse('"test"', {});
+    expect(err).toBeNull();
+    const runtimeType = infer(evaluator!.ast, emptyContext);
 
     type Parsed = Parse<Grammar, '"test"', Ctx>;
     type Node = Parsed extends [infer N, string] ? N : never;
@@ -581,8 +583,9 @@ describe('runtime/type inference parity', () => {
   });
 
   it('should match for boolean literal', () => {
-    const result = parser.parse('true', {});
-    const runtimeType = infer(result[0], emptyContext);
+    const [evaluator, err] = parser.parse('true', {});
+    expect(err).toBeNull();
+    const runtimeType = infer(evaluator!.ast, emptyContext);
 
     type Parsed = Parse<Grammar, 'true', Ctx>;
     type Node = Parsed extends [infer N, string] ? N : never;
@@ -594,8 +597,9 @@ describe('runtime/type inference parity', () => {
   });
 
   it('should match for null literal', () => {
-    const result = parser.parse('null', {});
-    const runtimeType = infer(result[0], emptyContext);
+    const [evaluator, err] = parser.parse('null', {});
+    expect(err).toBeNull();
+    const runtimeType = infer(evaluator!.ast, emptyContext);
 
     type Parsed = Parse<Grammar, 'null', Ctx>;
     type Node = Parsed extends [infer N, string] ? N : never;
@@ -607,8 +611,9 @@ describe('runtime/type inference parity', () => {
   });
 
   it('should match for undefined literal', () => {
-    const result = parser.parse('undefined', {});
-    const runtimeType = infer(result[0], emptyContext);
+    const [evaluator, err] = parser.parse('undefined', {});
+    expect(err).toBeNull();
+    const runtimeType = infer(evaluator!.ast, emptyContext);
 
     type Parsed = Parse<Grammar, 'undefined', Ctx>;
     type Node = Parsed extends [infer N, string] ? N : never;
@@ -620,8 +625,9 @@ describe('runtime/type inference parity', () => {
   });
 
   it('should match for addition', () => {
-    const result = parser.parse('1+2', {});
-    const runtimeType = infer(result[0], emptyContext);
+    const [evaluator, err] = parser.parse('1+2', {});
+    expect(err).toBeNull();
+    const runtimeType = infer(evaluator!.ast, emptyContext);
 
     type Parsed = Parse<Grammar, '1+2', Ctx>;
     type Node = Parsed extends [infer N, string] ? N : never;
@@ -633,8 +639,9 @@ describe('runtime/type inference parity', () => {
   });
 
   it('should match for multiplication', () => {
-    const result = parser.parse('3*4', {});
-    const runtimeType = infer(result[0], emptyContext);
+    const [evaluator, err] = parser.parse('3*4', {});
+    expect(err).toBeNull();
+    const runtimeType = infer(evaluator!.ast, emptyContext);
 
     type Parsed = Parse<Grammar, '3*4', Ctx>;
     type Node = Parsed extends [infer N, string] ? N : never;
@@ -646,8 +653,9 @@ describe('runtime/type inference parity', () => {
   });
 
   it('should match for string equality', () => {
-    const result = parser.parse('"a"=="b"', {});
-    const runtimeType = infer(result[0], emptyContext);
+    const [evaluator, err] = parser.parse('"a"=="b"', {});
+    expect(err).toBeNull();
+    const runtimeType = infer(evaluator!.ast, emptyContext);
 
     type Parsed = Parse<Grammar, '"a"=="b"', Ctx>;
     type Node = Parsed extends [infer N, string] ? N : never;
@@ -659,8 +667,9 @@ describe('runtime/type inference parity', () => {
   });
 
   it('should match for string concatenation', () => {
-    const result = parser.parse('"x"++"y"', {});
-    const runtimeType = infer(result[0], emptyContext);
+    const [evaluator, err] = parser.parse('"x"++"y"', {});
+    expect(err).toBeNull();
+    const runtimeType = infer(evaluator!.ast, emptyContext);
 
     type Parsed = Parse<Grammar, '"x"++"y"', Ctx>;
     type Node = Parsed extends [infer N, string] ? N : never;
@@ -672,8 +681,9 @@ describe('runtime/type inference parity', () => {
   });
 
   it('should match for complex expression', () => {
-    const result = parser.parse('1+2*3', {});
-    const runtimeType = infer(result[0], emptyContext);
+    const [evaluator, err] = parser.parse('1+2*3', {});
+    expect(err).toBeNull();
+    const runtimeType = infer(evaluator!.ast, emptyContext);
 
     type Parsed = Parse<Grammar, '1+2*3', Ctx>;
     type Node = Parsed extends [infer N, string] ? N : never;
@@ -685,8 +695,9 @@ describe('runtime/type inference parity', () => {
   });
 
   it('should match for identifier with context', () => {
-    const result = parser.parse('x', { x: 'number' });
-    const runtimeType = infer(result[0], emptyContext);
+    const [evaluator, err] = parser.parse('x', { x: 'number' });
+    expect(err).toBeNull();
+    const runtimeType = infer(evaluator!.ast, emptyContext);
 
     type Parsed = Parse<Grammar, 'x', CtxWithVars>;
     type Node = Parsed extends [infer N, string] ? N : never;
@@ -698,8 +709,9 @@ describe('runtime/type inference parity', () => {
   });
 
   it('should match for expression with identifier', () => {
-    const result = parser.parse('x+1', { x: 'number' });
-    const runtimeType = infer(result[0], emptyContext);
+    const [evaluator, err] = parser.parse('x+1', { x: 'number' });
+    expect(err).toBeNull();
+    const runtimeType = infer(evaluator!.ast, emptyContext);
 
     type Parsed = Parse<Grammar, 'x+1', CtxWithVars>;
     type Node = Parsed extends [infer N, string] ? N : never;
@@ -718,94 +730,94 @@ describe('runtime/type inference parity', () => {
 describe('complex AST structure inference', () => {
   describe('deeply nested expressions', () => {
     it('should handle 5 levels of addition', () => {
-      const result = parser.parse('1+2+3+4+5', {});
-      expect(result.length).toBe(2);
-      expect(infer(result[0], emptyContext)).toBe('number');
+      const [evaluator, err] = parser.parse('1+2+3+4+5', {});
+      expect(err).toBeNull();
+      expect(infer(evaluator!.ast, emptyContext)).toBe('number');
     });
 
     it('should handle 5 levels of multiplication', () => {
-      const result = parser.parse('1*2*3*4*5', {});
-      expect(result.length).toBe(2);
-      expect(infer(result[0], emptyContext)).toBe('number');
+      const [evaluator, err] = parser.parse('1*2*3*4*5', {});
+      expect(err).toBeNull();
+      expect(infer(evaluator!.ast, emptyContext)).toBe('number');
     });
 
     it('should handle nested parentheses with operators', () => {
-      const result = parser.parse('((1+2)*3)+4', {});
-      expect(result.length).toBe(2);
-      expect(infer(result[0], emptyContext)).toBe('number');
+      const [evaluator, err] = parser.parse('((1+2)*3)+4', {});
+      expect(err).toBeNull();
+      expect(infer(evaluator!.ast, emptyContext)).toBe('number');
     });
 
     it('should handle triple nested parentheses', () => {
-      const result = parser.parse('(((1)))', {});
-      expect(result.length).toBe(2);
-      expect(infer(result[0], emptyContext)).toBe('number');
+      const [evaluator, err] = parser.parse('(((1)))', {});
+      expect(err).toBeNull();
+      expect(infer(evaluator!.ast, emptyContext)).toBe('number');
     });
   });
 
   describe('mixed type operations', () => {
     it('should handle string concat followed by comparison (left-to-right)', () => {
       // Note: concat has higher precedence than eq, so this parses as ("a"++"b") == "ab"
-      const result = parser.parse('"a"++"b"=="ab"', {});
-      expect(result.length).toBe(2);
-      expect(infer(result[0], emptyContext)).toBe('boolean');
+      const [evaluator, err] = parser.parse('"a"++"b"=="ab"', {});
+      expect(err).toBeNull();
+      expect(infer(evaluator!.ast, emptyContext)).toBe('boolean');
     });
 
     it('should handle arithmetic with variables', () => {
-      const result = parser.parse('x*y+1', { x: 'number', y: 'number' });
-      expect(result.length).toBe(2);
-      expect(infer(result[0], emptyContext)).toBe('number');
+      const [evaluator, err] = parser.parse('x*y+1', { x: 'number', y: 'number' });
+      expect(err).toBeNull();
+      expect(infer(evaluator!.ast, emptyContext)).toBe('number');
     });
 
     it('should handle string variables in concat', () => {
-      const result = parser.parse('name++"!"', { name: 'string' });
-      expect(result.length).toBe(2);
-      expect(infer(result[0], emptyContext)).toBe('string');
+      const [evaluator, err] = parser.parse('name++"!"', { name: 'string' });
+      expect(err).toBeNull();
+      expect(infer(evaluator!.ast, emptyContext)).toBe('string');
     });
   });
 
   describe('ternary expressions', () => {
     it('should infer ternary with number branches', () => {
-      const result = parser.parse('true?1:2', {});
-      expect(result.length).toBe(2);
-      expect(infer(result[0], emptyContext)).toBe('unknown');
+      const [evaluator, err] = parser.parse('true?1:2', {});
+      expect(err).toBeNull();
+      expect(infer(evaluator!.ast, emptyContext)).toBe('unknown');
     });
 
     it('should infer ternary with string branches', () => {
-      const result = parser.parse('true?"yes":"no"', {});
-      expect(result.length).toBe(2);
-      expect(infer(result[0], emptyContext)).toBe('unknown');
+      const [evaluator, err] = parser.parse('true?"yes":"no"', {});
+      expect(err).toBeNull();
+      expect(infer(evaluator!.ast, emptyContext)).toBe('unknown');
     });
 
     it('should infer ternary with mixed branches', () => {
-      const result = parser.parse('false?1:"one"', {});
-      expect(result.length).toBe(2);
-      expect(infer(result[0], emptyContext)).toBe('unknown');
+      const [evaluator, err] = parser.parse('false?1:"one"', {});
+      expect(err).toBeNull();
+      expect(infer(evaluator!.ast, emptyContext)).toBe('unknown');
     });
 
     it('should infer nested ternary expressions', () => {
-      const result = parser.parse('true?false?1:2:3', {});
-      expect(result.length).toBe(2);
-      expect(infer(result[0], emptyContext)).toBe('unknown');
+      const [evaluator, err] = parser.parse('true?false?1:2:3', {});
+      expect(err).toBeNull();
+      expect(infer(evaluator!.ast, emptyContext)).toBe('unknown');
     });
   });
 
   describe('null coalescing', () => {
     it('should infer null coalesce with number fallback', () => {
-      const result = parser.parse('null??42', {});
-      expect(result.length).toBe(2);
-      expect(infer(result[0], emptyContext)).toBe('unknown');
+      const [evaluator, err] = parser.parse('null??42', {});
+      expect(err).toBeNull();
+      expect(infer(evaluator!.ast, emptyContext)).toBe('unknown');
     });
 
     it('should infer null coalesce with string fallback', () => {
-      const result = parser.parse('undefined??"default"', {});
-      expect(result.length).toBe(2);
-      expect(infer(result[0], emptyContext)).toBe('unknown');
+      const [evaluator, err] = parser.parse('undefined??"default"', {});
+      expect(err).toBeNull();
+      expect(infer(evaluator!.ast, emptyContext)).toBe('unknown');
     });
 
     it('should infer chained null coalesce', () => {
-      const result = parser.parse('null??undefined??1', {});
-      expect(result.length).toBe(2);
-      expect(infer(result[0], emptyContext)).toBe('unknown');
+      const [evaluator, err] = parser.parse('null??undefined??1', {});
+      expect(err).toBeNull();
+      expect(infer(evaluator!.ast, emptyContext)).toBe('unknown');
     });
   });
 });

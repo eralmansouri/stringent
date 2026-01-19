@@ -23,7 +23,6 @@ import {
   nullLiteral,
   booleanLiteral,
   undefinedLiteral,
-  evaluate,
   infer,
   parseWithErrors,
   emptyContext,
@@ -59,10 +58,11 @@ describe('Public API Type Inference', () => {
     const parser = createParser([add] as const);
 
     it('parser.parse() infers exact AST type from input literal', () => {
-      const _result = parser.parse('1+2', {});
-      // Result should be a tuple with exact AST type
-      type ResultType = typeof _result;
-      type IsValidResult = ResultType extends [{ node: 'add' }, ''] ? true : false;
+      const [_evaluator, _err] = parser.parse('1+2', {});
+      // Result should be [Evaluator, null] with exact AST type on evaluator.ast
+      type EvaluatorType = NonNullable<typeof _evaluator>;
+      type ASTType = EvaluatorType['ast'];
+      type IsValidResult = ASTType extends { node: 'add' } ? true : false;
       typeCheck<IsValidResult>(true);
     });
 
@@ -75,8 +75,8 @@ describe('Public API Type Inference', () => {
 
     it('parser validates successful parsing at type level', () => {
       // Valid input works
-      const valid = parser.parse('1+2', {});
-      expect(valid).toHaveLength(2);
+      const [_evaluator, err] = parser.parse('1+2', {});
+      expect(err).toBeNull();
 
       // Type system validates that parsing succeeds
       type ValidResult = Parse<ComputeGrammar<typeof parser.nodes>, '1+2', Context<{}>>;
@@ -173,8 +173,9 @@ describe('Public API Type Inference', () => {
     const parser = createParser([add] as const);
 
     it('returns the expected result type', () => {
-      const ast = parser.parse('1+2', {})[0];
-      const result = evaluate(ast, { data: {}, nodes: [add] });
+      const [evaluator, err] = parser.parse('1+2', {});
+      expect(err).toBeNull();
+      const result = evaluator!({});
       expect(result).toBe(3);
     });
   });
@@ -388,11 +389,12 @@ describe('Common Mistake Scenarios', () => {
       });
 
       const parser = createParser([add, mul] as const);
-      const result = parser.parse('1+2*3', {});
+      const [evaluator, err] = parser.parse('1+2*3', {});
+      expect(err).toBeNull();
 
       // 1+2*3 should parse as Add(1, Mul(2, 3)) due to precedence
-      expect(result[0].node).toBe('add');
-      expect((result[0] as { right: { node: string } }).right.node).toBe('mul');
+      expect(evaluator!.ast.node).toBe('add');
+      expect((evaluator!.ast as { right: { node: string } }).right.node).toBe('mul');
     });
   });
 
@@ -408,14 +410,14 @@ describe('Common Mistake Scenarios', () => {
       const parser = createParser([strCompare] as const);
 
       // String comparison should work
-      const result = parser.parse('"a"==="b"', {});
-      expect(result).toHaveLength(2);
+      const [_evaluator, err] = parser.parse('"a"==="b"', {});
+      expect(err).toBeNull();
 
       // Number comparison shouldn't match this rule
       // (will fall through to atoms, leaving remaining)
-      const numResult = parser.parse('1===2', {});
-      // Type constraint violation means no match - just parses "1"
-      expect(numResult[1]).toBe('===2');
+      const [_evaluator2, err2] = parser.parse('1===2', {});
+      // Type constraint violation means parse fails
+      expect(err2).not.toBeNull();
     });
 
     it('rhs() constrains right operand type', () => {
@@ -429,12 +431,13 @@ describe('Common Mistake Scenarios', () => {
       const parser = createParser([mixedOp] as const);
 
       // Correct types work
-      const valid = parser.parse('42::"format"', {});
-      expect(valid[0].node).toBe('toStr');
+      const [evalOk, err] = parser.parse('42::"format"', {});
+      expect(err).toBeNull();
+      expect(evalOk!.ast.node).toBe('toStr');
 
-      // Wrong RHS type leaves remaining
-      const invalid = parser.parse('42::99', {});
-      expect(invalid[1]).toBe('::99');
+      // Wrong RHS type leaves remaining - parse fails
+      const [_evalFail, err2] = parser.parse('42::99', {});
+      expect(err2).not.toBeNull();
     });
 
     it('expr() allows any type (no constraint)', () => {
@@ -448,12 +451,14 @@ describe('Common Mistake Scenarios', () => {
       const parser = createParser([parens] as const);
 
       // Numbers work
-      const numResult = parser.parse('(42)', {});
-      expect(numResult[0].node).toBe('group');
+      const [numEvaluator, numErr] = parser.parse('(42)', {});
+      expect(numErr).toBeNull();
+      expect(numEvaluator!.ast.node).toBe('group');
 
       // Strings work
-      const strResult = parser.parse('("hi")', {});
-      expect(strResult[0].node).toBe('group');
+      const [strEvaluator, strErr] = parser.parse('("hi")', {});
+      expect(strErr).toBeNull();
+      expect(strEvaluator!.ast.node).toBe('group');
     });
   });
 
