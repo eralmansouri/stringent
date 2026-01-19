@@ -747,3 +747,29 @@
 **Files Changed:**
 - .github/workflows/ci.yml (new - CI workflow)
 - PRD.md (marked task 5.2 as complete)
+
+### 2026-01-18: Task 5.1 - Build Configuration
+
+**Completed:**
+- Enhanced build configuration for production readiness
+- **tsconfig.json changes:**
+  - Added `sourceMap: true` for JavaScript source maps (enables debugging in bundled apps)
+  - Added `declarationMap: true` for TypeScript declaration source maps (enables "Go to Definition" in IDEs)
+- **tsconfig.build.json changes:**
+  - Added `src/test-helpers.ts` to exclude list (test infrastructure should not be in dist)
+  - Added `examples` to exclude list (examples should not be in dist)
+- **Dist output cleanup:**
+  - Removed stale `combinators` folder (was leftover from before task 1.5 deletion)
+  - Verified all 12 JS files now have corresponding `.js.map` and `.d.ts.map` source maps
+- **Minification evaluation:**
+  - Dist size: 320KB total (including source maps), ~1400 lines of JavaScript
+  - Decision: No minification needed - libraries should provide unminified code so bundlers can tree-shake and optimize appropriately for final applications
+
+**Test Results:**
+- All 691 tests pass
+- TypeScript typecheck passes
+
+**Files Changed:**
+- tsconfig.json (added sourceMap and declarationMap options)
+- tsconfig.build.json (added test-helpers.ts and examples to exclude list)
+- PRD.md (marked task 5.1 as complete)

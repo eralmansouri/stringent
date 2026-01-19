@@ -303,10 +303,19 @@ Since this is a new project, consider these potential improvements:
 ## Phase 5: Build & CI
 
 ### 5.1 Build Configuration
-- [ ] Review tsconfig.json settings
-- [ ] Ensure source maps are generated
-- [ ] Review dist output structure
-- [ ] Add minification if appropriate
+- [x] Review tsconfig.json settings
+- [x] Ensure source maps are generated
+- [x] Review dist output structure
+- [x] Add minification if appropriate
+
+**Completed:** Enhanced build configuration for production readiness:
+- Added `sourceMap: true` to tsconfig.json for JavaScript source maps
+- Added `declarationMap: true` to tsconfig.json for TypeScript declaration source maps
+- Updated tsconfig.build.json to exclude test-helpers.ts and examples from build
+- Cleaned stale `combinators` folder from dist output
+- Minification not added: Library is small (320KB including source maps, ~1400 lines JS), and libraries should provide unminified code for bundlers to tree-shake and optimize
+
+**Files:** `tsconfig.json`, `tsconfig.build.json`
 
 ### 5.2 CI Pipeline
 - [x] Add GitHub Actions workflow
