@@ -713,3 +713,37 @@
 - package.json (added docs and docs:watch scripts, typedoc devDependency)
 - .gitignore (added docs/api/)
 - PRD.md (marked task 4.2 typedoc item as complete)
+
+### 2026-01-18: Task 5.2 - CI Pipeline
+
+**Completed:**
+- Created `.github/workflows/ci.yml` with comprehensive GitHub Actions CI pipeline
+
+**Workflow Configuration:**
+- **Triggers:** Push to main, Pull requests to main
+- **Test Job (matrix strategy):**
+  - Runs on Node.js 18, 20, and 22
+  - Steps: checkout, install pnpm v9, setup Node.js with cache, install deps, typecheck, test, build
+  - Uses `pnpm install --frozen-lockfile` for reproducible builds
+- **Coverage Job:**
+  - Runs on Node.js 20
+  - Installs `@vitest/coverage-v8` for coverage generation
+  - Runs `pnpm test:coverage`
+  - Uploads coverage to Codecov with `codecov/codecov-action@v4`
+  - Uses `CODECOV_TOKEN` secret for authentication
+
+**CI Features:**
+- Type checking on every PR (`pnpm typecheck`)
+- Full test suite on every PR (`pnpm test`)
+- Build verification on every PR (`pnpm build`)
+- Coverage reporting with Codecov integration
+- Matrix testing across Node.js LTS versions (18, 20, 22)
+- pnpm caching for faster CI runs
+
+**Test Results:**
+- All 691 tests pass
+- TypeScript typecheck passes
+
+**Files Changed:**
+- .github/workflows/ci.yml (new - CI workflow)
+- PRD.md (marked task 5.2 as complete)

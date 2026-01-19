@@ -309,11 +309,24 @@ Since this is a new project, consider these potential improvements:
 - [ ] Add minification if appropriate
 
 ### 5.2 CI Pipeline
-- [ ] Add GitHub Actions workflow
-- [ ] Run tests on PR
-- [ ] Run type checking on PR
-- [ ] Run build verification
-- [ ] Add test coverage reporting
+- [x] Add GitHub Actions workflow
+- [x] Run tests on PR
+- [x] Run type checking on PR
+- [x] Run build verification
+- [x] Add test coverage reporting
+
+**Completed:** Created `.github/workflows/ci.yml` with comprehensive CI pipeline:
+- **Test job:** Runs on Node.js 18, 20, and 22 matrix
+  - Type checking (`pnpm typecheck`)
+  - Tests (`pnpm test`)
+  - Build verification (`pnpm build`)
+- **Coverage job:** Runs on Node.js 20
+  - Generates test coverage with `@vitest/coverage-v8`
+  - Uploads to Codecov for coverage tracking
+- Triggers on push to main and pull requests to main
+- Uses pnpm v9 with caching for fast installs
+
+**Files:** `.github/workflows/ci.yml` (new)
 
 ### 5.3 Package.json Cleanup
 - [x] Fix broken test script
