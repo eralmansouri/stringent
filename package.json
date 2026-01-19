@@ -48,6 +48,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "docs": "typedoc",
+    "docs:watch": "typedoc --watch",
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
@@ -58,6 +60,7 @@
     "@types/node": "^22.10.5",
     "hotscript": "^1.0.13",
     "tsx": "^4.21.0",
+    "typedoc": "^0.28.16",
     "typescript": "^5.7.2",
     "vitest": "^4.0.17"
   }

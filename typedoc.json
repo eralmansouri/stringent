@@ -1,0 +1,31 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["src/index.ts"],
+  "out": "docs/api",
+  "name": "Stringent API Documentation",
+  "readme": "README.md",
+  "includeVersion": true,
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "excludeExternals": true,
+  "categorizeByGroup": true,
+  "categoryOrder": [
+    "Core API",
+    "Schema Factories",
+    "Runtime Functions",
+    "Types",
+    "Error Handling",
+    "*"
+  ],
+  "navigationLinks": {
+    "GitHub": "https://github.com/formeddable/stringent",
+    "npm": "https://www.npmjs.com/package/stringent"
+  },
+  "plugin": [],
+  "cleanOutputDir": true,
+  "validation": {
+    "notExported": true,
+    "invalidLink": true,
+    "notDocumented": false
+  }
+}

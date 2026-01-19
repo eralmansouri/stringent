@@ -250,7 +250,7 @@ Since this is a new project, consider these potential improvements:
 - [x] Document Context type and usage
 - [x] Document Grammar type structure
 - [x] Document AST node types
-- [ ] Generate API docs from JSDoc (typedoc)
+- [x] Generate API docs from JSDoc (typedoc)
 
 **Completed:** Created comprehensive `/docs/api-reference.md` with:
 - Full createParser() documentation with type safety examples
@@ -261,8 +261,11 @@ Since this is a new project, consider these potential improvements:
 - All types: Parser, NodeSchema, Context, Grammar, AST node types
 - Error handling: error types, utilities, and factories
 - Type-level utilities: Parse, Infer, ComputeGrammar, SchemaToType, InferBindings
+- Typedoc configuration for auto-generated API docs from JSDoc comments
+- Scripts: `docs` and `docs:watch` added to package.json
+- Generated docs output to `/docs/api/` (gitignored)
 
-**Files:** `/docs/api-reference.md` (new)
+**Files:** `/docs/api-reference.md` (new), `typedoc.json` (new)
 
 ### 4.3 Architecture Documentation
 - [ ] Document precedence-based parsing algorithm

@@ -675,3 +675,41 @@
 - examples/conditional-ternary.ts (new)
 - examples/custom-operators.ts (new)
 - PRD.md (marked task 4.4 as complete)
+
+### 2026-01-18: Task 4.2 (final item) - Generate API docs from JSDoc (typedoc)
+
+**Completed:**
+- Installed typedoc as a dev dependency
+- Created `typedoc.json` configuration file with:
+  - Entry point: `src/index.ts`
+  - Output directory: `docs/api`
+  - Project name: "Stringent API Documentation"
+  - README integration
+  - Category ordering for organized documentation
+  - Navigation links to GitHub and npm
+  - Validation settings (notExported, invalidLink warnings)
+  - Excludes private, internal, and external items
+- Added npm scripts to package.json:
+  - `docs`: Generate API documentation
+  - `docs:watch`: Watch mode for documentation development
+- Updated `.gitignore` to exclude generated `docs/api/` directory
+- Generated documentation includes:
+  - 80 pages covering all public exports
+  - Functions, interfaces, types, and variables
+  - Full hierarchy view
+  - Searchable index
+
+**Typedoc Output:**
+- Generates HTML documentation to `docs/api/`
+- Includes all JSDoc comments from source code
+- 10 warnings for internal types referenced but not exported (expected behavior)
+
+**Test Results:**
+- All 691 tests pass
+- TypeScript typecheck passes
+
+**Files Changed:**
+- typedoc.json (new - typedoc configuration)
+- package.json (added docs and docs:watch scripts, typedoc devDependency)
+- .gitignore (added docs/api/)
+- PRD.md (marked task 4.2 typedoc item as complete)
