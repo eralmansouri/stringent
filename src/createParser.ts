@@ -73,7 +73,6 @@ type ValidatedInput<
  * @example
  * ```ts
  * import { defineNode, number, expr, constVal, createParser } from "stringent";
-import { Validate } from '../dist/static/parser';
  *
  * const numberLit = defineNode({
  *   name: "number",

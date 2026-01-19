@@ -80,8 +80,3 @@ export {
 export { evaluate, createEvaluator } from "./runtime/eval.js";
 export type { EvalContext } from "./runtime/eval.js";
 
-// =============================================================================
-// Legacy Combinators (for backwards compatibility)
-// =============================================================================
-
-export { Union, Tuple, Optional, Many } from "./combinators/index.js";
