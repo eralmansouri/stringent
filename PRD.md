@@ -568,6 +568,70 @@ const ternary = defineNode({
 
 ---
 
+### Task 11: Support Nested Object Schemas (COMPLETED)
+
+ArkType supports nested objects but Stringent's schema only accepts `Record<string, string>`.
+
+```typescript
+// Should work (valid arktype):
+parser.parse('x', { x: { y: 'boolean' } })
+
+// Previously failed with: Type '{ y: string; }' is not assignable to type 'string'.
+```
+
+- [x] Update `ValidatedSchema` type in `src/createParser.ts` to support nested objects
+- [x] Update `Context` type to support nested schema shapes
+- [x] Ensure arktype validates nested object schemas at compile time
+- [x] Add tests for nested object schemas
+- [x] Verify `type({ x: { y: 'boolean' } })` works as schema
+
+**Implementation Notes:**
+- Changed `parser.parse()` signature to use `type.validate<TSchema>` directly instead of custom `ValidatedSchema<TSchema>` type
+- Changed generic constraint from `TSchema extends SchemaRecord` to `const TSchema extends SchemaRecord` with `type.validate<TSchema>` as the parameter type
+- ArkType's `type.validate` handles nested object validation natively, validating all string leaves as valid arktype types
+- `SchemaRecord` already supported nested objects via `SchemaValue = string | { readonly [key: string]: SchemaValue }`
+- Custom recursive `ValidateSchemaValue` type had issues with union distribution when using `T[K] & SchemaValue`
+- Using `type.validate<TSchema>` directly delegates validation to arktype, which handles it correctly
+- Added 7 tests in `src/nested-object-test.test.ts` covering: arktype native nested support, parser.parse with valid/invalid nested schemas, deeply nested schemas, mixed flat and nested schemas
+
+### Task 12: Parser Returns Bound Evaluator
+
+Change parse to return a bound evaluator instead of raw AST.
+
+**Current API:**
+```typescript
+const result = parser.parse('x + 1', { x: 'number' });
+const value = evaluate(result[0], { data: { x: 5 }, nodes: [add, mul] });
+```
+
+**New API:**
+```typescript
+const [evaluator, err] = parser.parse('x + 1', { x: 'number' });
+if (!err) {
+  const value = evaluator({ x: 5 });
+  const ast = evaluator.ast;
+}
+```
+
+- [ ] Change `Parser.parse()` return type to `[Evaluator, Error | null]`
+- [ ] Create `Evaluator` type with `ast` property and call signature
+- [ ] Evaluator captures nodes from parser
+- [ ] Evaluator captures schema from parse call for data validation
+- [ ] Evaluator return type inferred from AST's outputSchema
+- [ ] Update all tests to use new API
+- [ ] Update documentation
+
+### Task 13: Update Base Ternary Node
+
+The base `ternary` node in eval.test.ts still uses `resultType: 'unknown'`.
+
+- [ ] Update `ternary` at line 112 of eval.test.ts to use `resultType: { union: ['then', 'else'] } as const`
+- [ ] Remove duplicate `ternaryWithUnion` (no longer needed)
+- [ ] Verify all ternary tests pass with correct type inference
+- [ ] Verify `x ? true : 0` has `outputSchema: 'boolean | number'`
+
+---
+
 ## What NOT to Do
 
 1. **Don't hardcode types.** The whole point is to use arktype's extensible type system, not `'number' | 'string' | 'boolean' | 'null' | 'undefined'`.
@@ -588,13 +652,26 @@ The fix is complete when:
 1. `lhs('garbage')` is a type error
 2. `rhs('asdfghjkl')` is a type error
 3. `parser.parse('x', { x: 'invalid' })` is a type error
+4. `parser.parse('x', { x: {y: 'number'}})` compiles successfully
 4. `lhs('string.email')` compiles successfully
 5. `lhs('number >= 0')` compiles successfully
 
 **Data-Schema Connection:**
 6. `evaluate(ast, { data: { x: "wrong" } })` is a type error when schema says `x: 'number'`
 7. `evaluate(ast, { data: { x: -5 } })` throws at runtime when schema says `x: 'number >= 0'`
-8. `evaluate(ast, { data: {} })` is a type error when schema has required variables
+8. `evaluate(ast, { data: {} })` is a type error when data does not satisfy expected schema
+
+```ts
+// The context provided during parsing
+const providedContextDuringParsing = {
+	name: "string",
+	"versions?": "(number | string)[]"
+} as const;
+// The type created with arktype
+const ContextShape = type(providedContextDuringParsing);
+// The shape of the argument during eval
+type ctxEvaluateShape = typeof ContextShape.infer;
+```
 
 **Evaluate Return Types:**
 9. `evaluate()` returns `string` when `outputSchema` is `'string.email'`

@@ -1283,3 +1283,98 @@ Updated README.md and docs/api-reference.md to document the ArkType integration 
 - `docs/api-reference.md`: Added ArkType Integration section, updated defineNode, expression factories, evaluate, and type utilities
 
 All 979 tests pass. No new lint errors (only pre-existing warnings).
+
+## Task 18 (PRD Task 11): Support Nested Object Schemas (COMPLETED)
+
+Enabled nested object schema support in `parser.parse()`. Users can now pass nested object schemas like `{ user: { name: 'string', age: 'number' } }` and get compile-time validation.
+
+### Problem
+
+The custom `ValidatedSchema` type in `createParser.ts` used a recursive mapped type with intersections:
+```typescript
+type ValidateSchemaValue<T> = T extends string
+  ? type.validate<T>
+  : T extends object
+    ? { [K in keyof T]: ValidateSchemaValue<T[K] & SchemaValue> }
+    : never;
+```
+
+The intersection `T[K] & SchemaValue` caused TypeScript union distribution issues. For nested objects like `{ user: { name: 'string' } }`, the intersection created:
+- `(T[K] & string) | (T[K] & { ... })`
+
+This broke validation for nested objects because the union distribution prevented proper constraint checking.
+
+### Solution
+
+Discovered that ArkType's native `type.validate<T>` already handles nested object validation correctly:
+```typescript
+function test<const T>(schema: type.validate<T>) { ... }
+test({ user: { name: 'string' } }); // Works!
+test({ user: { name: 'garbage' } }); // Compile error!
+```
+
+Updated `createParser.ts` to delegate directly to ArkType instead of using a custom recursive type:
+
+```typescript
+// Before: Custom recursive type with union distribution bug
+type ValidatedSchema<TSchema extends Record<string, string>> = {
+  [K in keyof TSchema]: string extends TSchema[K]
+    ? string
+    : type.validate<TSchema[K]>;
+};
+
+// After: Delegate to arktype's native validation
+export interface Parser<TGrammar extends Grammar, TNodes extends readonly NodeSchema[]> {
+  parse<TInput extends string, const TSchema extends SchemaRecord>(
+    input: ValidatedInput<TGrammar, TInput, Context<TSchema>>,
+    schema: type.validate<TSchema>
+  ): Parse<TGrammar, TInput, Context<TSchema>>;
+  readonly nodes: TNodes;
+}
+```
+
+Key changes:
+1. Changed schema constraint from `Record<string, string>` to `SchemaRecord` (which allows nested objects)
+2. Used `type.validate<TSchema>` directly instead of custom `ValidatedSchema<TSchema>`
+3. Removed the custom `ValidateSchemaValue` type entirely
+
+### Tests Added
+
+Created `src/nested-object-test.test.ts` with 7 tests:
+
+**ArkType native nested object support (2 tests):**
+- type() accepts nested object schemas
+- type.validate accepts nested object schemas in generic functions
+
+**parser.parse() with nested object schemas (5 tests):**
+- accepts nested object in schema
+- rejects invalid nested schema values (`@ts-expect-error`)
+- accepts deeply nested schemas (3 levels deep)
+- rejects invalid types in deeply nested schemas (`@ts-expect-error`)
+- accepts mixed flat and nested schemas
+
+### Validation Behavior
+
+**Valid nested schemas (no type error):**
+```typescript
+parser.parse('user', { user: { name: 'string', age: 'number' } });
+parser.parse('data', { data: { level1: { level2: { value: 'boolean' } } } });
+parser.parse('x', { x: 'number', user: { name: 'string' } }); // Mixed
+```
+
+**Invalid nested schemas (TypeScript compile error):**
+```typescript
+// @ts-expect-error - 'garbage' is not a valid arktype type
+parser.parse('user', { user: { name: 'garbage' } });
+
+// @ts-expect-error - 'invalid' is not a valid arktype type
+parser.parse('data', { data: { level1: { level2: { value: 'invalid' } } } });
+```
+
+### Files Modified
+
+- `src/createParser.ts`: Updated `Parser` interface and `createParser()` to use `type.validate<TSchema>` directly
+- `src/nested-object-test.test.ts`: New test file with 7 tests
+- `src/runtime/eval.test.ts`: Fixed test that was accidentally broken during debugging
+
+All 986 tests pass. TypeScript type checking passes. No lint errors (only pre-existing warnings).
