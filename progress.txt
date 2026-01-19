@@ -522,3 +522,58 @@
 **Files Changed:**
 - package.json (added engines, lint script, test:coverage, expanded keywords)
 - PRD.md (marked task 5.3 as complete)
+
+### 2026-01-18: Task 3.3 - Type Safety Review
+
+**Completed:**
+- Audited all `any` types in the codebase and replaced with stricter types where possible
+- Ensured all public APIs have proper type inference
+- Created comprehensive type tests for common mistake scenarios
+
+**Changes Made:**
+- **Replaced `any` with stricter types:**
+  - `src/createParser.ts:57`: Changed `[any, ""]` to `[unknown, ""]` in ValidatedInput conditional type
+  - `src/runtime/parser.ts:131`: Changed `ASTNode<any, any>` to `ASTNode<string, unknown>` in ParseResult type
+  - `src/runtime/parser.ts:810`: Changed `ASTNode<any, any>` to `ASTNode<string, unknown>` in ParseWithErrorsResult interface
+  - `src/errors.ts:268`: Changed `ASTNode<any, any>` to `ASTNode<string, unknown>` in ParseResultWithErrors type
+- **Created `src/type-safety.test.ts` (48 tests):**
+  - **Public API Type Inference (11 tests):**
+    - createParser() returns properly typed Parser
+    - parser.parse() infers exact AST type from input literal
+    - parser.nodes preserves exact node schema types
+    - defineNode() preserves exact name, pattern, precedence, and resultType types
+    - eval() and configure() parameter types are correctly inferred
+    - evaluate() and infer() have proper types
+    - parseWithErrors() returns properly typed result
+  - **Parse Result Type Inference (7 tests):**
+    - Parse infers correct node types for literals (NumberNode, StringNode)
+    - Binary operations preserve left/right types and output type
+    - Context-based identifier typing resolves types from context
+  - **Type Error Comprehensibility (4 tests):**
+    - Invalid/empty input returns empty tuple []
+    - Partial matches leave remaining input in result
+  - **Common Mistake Scenarios (9 tests):**
+    - number() without .as() captures nothing (still compiles)
+    - Named bindings are accessible in eval()
+    - Precedence ordering (lower binds looser)
+    - lhs(), rhs() constrain operand types
+    - expr() allows any type
+    - ParseResultWithErrors supports error tuples
+  - **Schema Factory Types (10 tests):**
+    - All primitive factories return correct schema types
+    - Expression factories return correct roles
+    - .as() creates NamedSchema with exact name type
+  - **Infer Type System (7 tests):**
+    - Infers correct types for all node types (number, string, boolean, null, undefined)
+    - Returns never for non-AST types
+
+**Test Results:**
+- All 691 tests pass (48 new + 643 existing)
+- TypeScript typecheck passes
+
+**Files Changed:**
+- src/createParser.ts (stricter ValidatedInput type)
+- src/runtime/parser.ts (stricter ParseResult and ParseWithErrorsResult types)
+- src/errors.ts (stricter ParseResultWithErrors type)
+- src/type-safety.test.ts (new - 48 tests)
+- PRD.md (marked task 3.3 as complete)

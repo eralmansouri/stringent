@@ -128,7 +128,7 @@ export const BUILT_IN_ATOMS = [
 ] as const;
 
 /** Parse result: empty = no match, [node, rest] = matched */
-export type ParseResult<T extends ASTNode<any, any> = ASTNode<any, any>> =
+export type ParseResult<T extends ASTNode<string, unknown> = ASTNode<string, unknown>> =
   | []
   | [T & {}, string];
 
@@ -807,7 +807,7 @@ export type { RichParseError, ParseResultWithErrors };
 /**
  * Result from parseWithErrors - includes rich error information on failure.
  */
-export interface ParseWithErrorsResult<T extends ASTNode<any, any> = ASTNode<any, any>> {
+export interface ParseWithErrorsResult<T extends ASTNode<string, unknown> = ASTNode<string, unknown>> {
   /** Whether parsing was successful */
   readonly success: boolean;
   /** The parsed AST node (only present if success is true) */

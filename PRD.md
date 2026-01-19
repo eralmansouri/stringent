@@ -208,10 +208,23 @@ Since this is a new project, consider these potential improvements:
 - All 643 tests pass with the cleaned-up API
 
 ### 3.3 Type Safety Review
-- [ ] Audit for `any` types that could be stricter
-- [ ] Ensure all public APIs have proper type inference
-- [ ] Test that type errors are comprehensible
-- [ ] Add type tests for common mistake scenarios
+- [x] Audit for `any` types that could be stricter
+- [x] Ensure all public APIs have proper type inference
+- [x] Test that type errors are comprehensible
+- [x] Add type tests for common mistake scenarios
+
+**Completed:** Comprehensive type safety improvements:
+- Replaced 4 `any` type usages with stricter types (`unknown`, `ASTNode<string, unknown>`)
+- Created `src/type-safety.test.ts` with 48 tests covering:
+  - Public API type inference (createParser, defineNode, evaluate, infer, parseWithErrors)
+  - Parse result type inference (literals, binary operations, context-based typing)
+  - Type error comprehensibility (no match returns [], partial matches)
+  - Common mistake scenarios (pattern usage, precedence, expression roles)
+  - Schema factory types (all primitives and expression schemas)
+  - Infer type system (all node types, never for non-AST)
+- All 691 tests pass, TypeScript typecheck passes
+
+**Files:** `src/createParser.ts`, `src/runtime/parser.ts`, `src/errors.ts`, `src/type-safety.test.ts` (new)
 
 ---
 

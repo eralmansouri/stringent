@@ -265,7 +265,7 @@ import type { ASTNode } from "./primitive/index.js";
  * - [node, remaining]: successful parse
  * - [node, remaining, errors]: successful parse with collected errors
  */
-export type ParseResultWithErrors<T extends ASTNode<any, any> = ASTNode<any, any>> =
+export type ParseResultWithErrors<T extends ASTNode<string, unknown> = ASTNode<string, unknown>> =
   | []
   | [T & {}, string]
   | [T & {}, string, RichParseError[]];
