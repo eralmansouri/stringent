@@ -257,3 +257,33 @@
 - src/index.ts (added exports)
 - README.md (updated Runtime Evaluation section)
 - PRD.md (marked task 2.2 as complete)
+
+### 2026-01-18: Task 1.5 - Combinator Review
+
+**Completed:**
+- Evaluated combinators: Union, Tuple, Optional, Many were completely unused dead code
+- The combinators were a legacy API from an earlier architecture before the schema-based approach
+- Removed all combinator code since no backward compatibility is needed (per PRD guidelines)
+
+**Changes Made:**
+- **Deleted `src/combinators/index.ts`** - Contained:
+  - `_Union`, `_Tuple`, `_Optional`, `_Many` classes
+  - `Union()`, `Tuple()`, `Optional()`, `Many()` factory functions
+  - `Parse`, `ParseUnion`, `ParseTuple`, `ParseOptional`, `ParseMany` types
+  - None of these were used anywhere in the codebase
+- **Deleted `src/static/parser.ts`** - Only re-exported combinator types, unused
+- **Updated `src/index.ts`** - Removed combinator exports section
+- **Fixed `src/createParser.ts`** - Removed stray import comment from JSDoc
+- **Updated architecture diagram in PRD.md** - Removed `combinators/` reference
+
+**Verification:**
+- All 427 tests pass
+- TypeScript typecheck passes
+- No remaining references to deleted code
+
+**Files Changed:**
+- src/combinators/index.ts (deleted)
+- src/static/parser.ts (deleted)
+- src/index.ts (removed exports)
+- src/createParser.ts (fixed JSDoc comment)
+- PRD.md (marked task 1.5 as complete, updated architecture diagram)

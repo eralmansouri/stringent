@@ -40,7 +40,6 @@ src/
 ├── grammar/              # Grammar type computation
 ├── parse/                # Type-level parsing
 ├── primitive/            # Primitive parsers (number, string, ident)
-├── combinators/          # Parser combinators
 ├── runtime/              # Runtime parser & inference
 └── static/               # Static type re-exports
 ```
@@ -114,12 +113,15 @@ Since this is a new project, consider these potential improvements:
 - [x] Test number edge cases (negative, decimals, scientific notation)
 
 ### 1.5 Combinator Review
-- [ ] Evaluate if Union, Tuple, Optional, Many combinators are needed
-- [ ] If useful: add tests and document
-- [ ] If not useful: **remove them entirely** (no backward compat concerns)
-- [ ] Clean up any dead code paths
+- [x] Evaluate if Union, Tuple, Optional, Many combinators are needed
+- [x] If useful: add tests and document
+- [x] If not useful: **remove them entirely** (no backward compat concerns)
+- [x] Clean up any dead code paths
 
-**Files:** `src/combinators/index.ts`
+**Completed:** Removed unused combinators (Union, Tuple, Optional, Many) and related files:
+- Deleted `src/combinators/index.ts`
+- Deleted `src/static/parser.ts` (only re-exported combinators)
+- Removed combinator exports from `src/index.ts`
 
 ### 1.6 Inference Tests
 - [ ] Test runtime infer() function
