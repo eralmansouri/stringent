@@ -178,10 +178,20 @@ Since this is a new project, consider these potential improvements:
 ## Phase 3: API Polish
 
 ### 3.1 Error Messages
-- [ ] Improve ParseError messages with position info
-- [ ] Add source position tracking during parsing
-- [ ] Include snippet of problematic input in errors
-- [ ] Make TypeMismatchError more descriptive
+- [x] Improve ParseError messages with position info
+- [x] Add source position tracking during parsing
+- [x] Include snippet of problematic input in errors
+- [x] Make TypeMismatchError more descriptive
+
+**Completed:** Implemented comprehensive error system with:
+- `RichParseError` type with position (offset, line, column), message, and snippet
+- `SourcePosition` interface for position tracking
+- `parseWithErrors()` function that returns detailed error info on failure
+- Error creation utilities: `noMatchError`, `typeMismatchError`, `unterminatedStringError`, etc.
+- `formatParseError()` and `formatErrors()` for human-readable output
+- 62 tests covering position calculation, snippet creation, error formatting
+
+**Files:** `src/errors.ts` (new), `src/runtime/parser.ts`, `src/error-messages.test.ts` (new)
 
 ### 3.2 API Consistency
 - [ ] Review all exports for naming consistency

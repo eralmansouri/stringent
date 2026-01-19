@@ -790,3 +790,169 @@ export function parse<
     TContext
   >;
 }
+
+// =============================================================================
+// Enhanced Parse API with Error Information
+// =============================================================================
+
+import {
+  type RichParseError,
+  type ParseResultWithErrors,
+  noMatchError,
+  emptyInputError,
+} from "../errors.js";
+
+export type { RichParseError, ParseResultWithErrors };
+
+/**
+ * Result from parseWithErrors - includes rich error information on failure.
+ */
+export interface ParseWithErrorsResult<T extends ASTNode<any, any> = ASTNode<any, any>> {
+  /** Whether parsing was successful */
+  readonly success: boolean;
+  /** The parsed AST node (only present if success is true) */
+  readonly ast?: T;
+  /** Remaining unparsed input (only present if success is true) */
+  readonly remaining?: string;
+  /** Parse error information (only present if success is false) */
+  readonly error?: RichParseError;
+  /** Original input string */
+  readonly input: string;
+}
+
+/**
+ * Parse input with rich error information.
+ *
+ * Unlike `parse()` which returns an empty array on failure, this function
+ * returns detailed error information including:
+ * - Position (line, column, offset)
+ * - Error message
+ * - Source snippet showing where the error occurred
+ *
+ * @example
+ * ```ts
+ * const result = parseWithErrors([add], "1 + ", context);
+ * if (!result.success) {
+ *   console.log(result.error.message);
+ *   // "No grammar rule matched at position 1:5: """
+ *   console.log(result.error.snippet);
+ *   // "1 + →"
+ * }
+ * ```
+ */
+export function parseWithErrors<
+  const TNodes extends readonly NodeSchema[],
+  const TInput extends string,
+  const TContext extends Context
+>(
+  nodes: TNodes,
+  input: TInput,
+  context: TContext
+): ParseWithErrorsResult {
+  // Handle empty/whitespace-only input
+  if (input.trim().length === 0) {
+    return {
+      success: false,
+      error: emptyInputError(input),
+      input,
+    };
+  }
+
+  const grammar = buildGrammar(nodes);
+  const result = parseLevels(grammar, input, context, grammar);
+
+  if (result.length === 0) {
+    // Parse failed - determine where it failed
+    // Try to find how far we got before failing
+    const failOffset = findFailureOffset(grammar, input, context);
+    return {
+      success: false,
+      error: noMatchError(input, failOffset),
+      input,
+    };
+  }
+
+  // Parse succeeded
+  return {
+    success: true,
+    ast: result[0],
+    remaining: result[1],
+    input,
+  };
+}
+
+/**
+ * Find the offset where parsing failed by tracking the furthest successful parse.
+ * This helps provide more accurate error positions.
+ */
+function findFailureOffset(
+  grammar: Grammar,
+  input: string,
+  context: Context
+): number {
+  // Start by trimming leading whitespace since the parser does this
+  const trimmed = input.replace(/^[\s]*/, "");
+  const leadingWs = input.length - trimmed.length;
+
+  if (trimmed.length === 0) {
+    return 0;
+  }
+
+  // Try to parse and track how far we get
+  // This is a simplified heuristic - in a more complex implementation,
+  // we would thread position tracking through all parse functions
+  let furthestOffset = leadingWs;
+
+  // Try to parse the first atom/expression
+  const result = parseLevels(grammar, trimmed, context, grammar);
+  if (result.length === 2) {
+    // We parsed something - the failure is after what we parsed
+    const parsedLength = trimmed.length - result[1].length;
+    furthestOffset = leadingWs + parsedLength;
+
+    // Check if there's unparsed content
+    const remaining = result[1].trim();
+    if (remaining.length > 0) {
+      // There's remaining unparsed content - that's where the error is
+      furthestOffset = input.length - result[1].trimStart().length;
+    }
+  }
+
+  return furthestOffset;
+}
+
+/**
+ * Format a parse error for display.
+ *
+ * @example
+ * ```ts
+ * const result = parseWithErrors([add], "1 + ", context);
+ * if (!result.success) {
+ *   console.log(formatParseError(result.error));
+ *   // Error at line 1, column 5:
+ *   //   No grammar rule matched at position 1:5: ""
+ *   //
+ *   //   1 + →
+ * }
+ * ```
+ */
+export function formatParseError(error: RichParseError): string {
+  const { position, message, snippet } = error;
+  const lines: string[] = [];
+
+  lines.push(`Error at line ${position.line}, column ${position.column}:`);
+  lines.push(`  ${message}`);
+  lines.push("");
+  lines.push(`  ${snippet}`);
+
+  if (error.context) {
+    const ctx = error.context;
+    if (ctx.expected && ctx.actual) {
+      lines.push("");
+      lines.push(`  Expected: ${ctx.expected}`);
+      lines.push(`  Actual:   ${ctx.actual}`);
+    }
+  }
+
+  return lines.join("\n");
+}

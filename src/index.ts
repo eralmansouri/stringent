@@ -77,7 +77,33 @@ export {
 // Runtime Utilities
 // =============================================================================
 
-export { processEscapeSequences } from "./runtime/parser.js";
+export { processEscapeSequences, parseWithErrors, formatParseError } from "./runtime/parser.js";
+export type { RichParseError, ParseResultWithErrors, ParseWithErrorsResult } from "./runtime/parser.js";
+
+// =============================================================================
+// Error Types and Utilities
+// =============================================================================
+
+export {
+  calculatePosition,
+  createSnippet,
+  createParseError,
+  noMatchError,
+  typeMismatchError,
+  unterminatedStringError,
+  unclosedParenError,
+  unexpectedTokenError,
+  emptyInputError,
+  hasErrors,
+  getErrors,
+  formatError,
+  formatErrors,
+} from "./errors.js";
+export type {
+  SourcePosition,
+  ParseErrorKind,
+  ErrorContext,
+} from "./errors.js";
 
 // =============================================================================
 // Runtime Evaluation

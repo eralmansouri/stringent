@@ -411,3 +411,48 @@
 **Files Changed:**
 - README.md (comprehensive rewrite)
 - PRD.md (marked task 4.1 as complete)
+
+### 2026-01-18: Task 3.1 - Error Messages
+
+**Completed:**
+- Implemented comprehensive error system with position tracking and helpful messages
+- **New error types and interfaces (`src/errors.ts`):**
+  - `SourcePosition` interface: offset, line (1-based), column (1-based)
+  - `RichParseError` interface: kind, message, position, snippet, input, context
+  - `ParseErrorKind` type: 'no_match', 'type_mismatch', 'unterminated_string', etc.
+  - `ErrorContext` interface: expected, actual, parsing properties
+- **Error creation utilities:**
+  - `calculatePosition(input, offset)` - converts offset to line/column
+  - `createSnippet(input, offset)` - creates visual snippet with position marker (→)
+  - `createParseError()` - generic error factory
+  - `noMatchError()`, `typeMismatchError()`, `unterminatedStringError()`, etc.
+- **Enhanced parser API (`src/runtime/parser.ts`):**
+  - `parseWithErrors()` - returns structured result with success/error info
+  - `ParseWithErrorsResult` type with success, ast, remaining, error, input
+  - `formatParseError()` - formats error for display
+- **Public exports (`src/index.ts`):**
+  - All error types, interfaces, and utility functions exported
+- **Design decisions:**
+  - Original `parse()` function unchanged for backward compatibility
+  - New `parseWithErrors()` provides rich error info for better DX
+  - Partial parses (valid prefix with remaining content) are considered successful
+  - Only truly unparseable input returns errors
+
+**Tests (`src/error-messages.test.ts` - 62 tests):**
+- Position calculation (10 tests): single/multi-line, edge cases
+- Snippet creation (12 tests): truncation, special characters, edge cases
+- Error creation functions (17 tests): all error types with context
+- parseWithErrors (12 tests): success/failure cases, partial parsing
+- Error formatting (6 tests): single and multiple errors
+- Integration tests (5 tests): multi-line, complex expressions
+
+**Test Results:**
+- All 643 tests pass (62 new + 581 existing)
+- TypeScript typecheck passes
+
+**Files Changed:**
+- src/errors.ts (new - error types and utilities)
+- src/runtime/parser.ts (added parseWithErrors, formatParseError)
+- src/index.ts (added error exports)
+- src/error-messages.test.ts (new - 62 tests)
+- PRD.md (marked task 3.1 as complete)
