@@ -18,6 +18,9 @@ import type {
   StringSchema,
   ConstSchema,
   ExprSchema,
+  NullSchema,
+  BooleanSchema,
+  UndefinedSchema,
 } from "../schema/index.js";
 import {
   defineNode,
@@ -26,6 +29,9 @@ import {
   ident,
   constVal,
   expr,
+  nullLiteral,
+  booleanLiteral,
+  undefinedLiteral,
 } from "../schema/index.js";
 
 import {
@@ -33,6 +39,9 @@ import {
   IdentNode,
   NumberNode,
   StringNode,
+  NullNode,
+  BooleanNode,
+  UndefinedNode,
 } from "../primitive/index.js";
 
 // =============================================================================
@@ -84,10 +93,39 @@ const parentheses = defineNode({
   resultType: "unknown",
 });
 
+/** Null literal atom - matches the keyword null */
+const nullAtom = defineNode({
+  name: "nullLiteral",
+  pattern: [nullLiteral()],
+  precedence: ATOM_PRECEDENCE,
+  resultType: "null",
+});
+
+/** Boolean literal atom - matches true or false */
+const booleanAtom = defineNode({
+  name: "booleanLiteral",
+  pattern: [booleanLiteral()],
+  precedence: ATOM_PRECEDENCE,
+  resultType: "boolean",
+});
+
+/** Undefined literal atom - matches the keyword undefined */
+const undefinedAtom = defineNode({
+  name: "undefinedLiteral",
+  pattern: [undefinedLiteral()],
+  precedence: ATOM_PRECEDENCE,
+  resultType: "undefined",
+});
+
 /** All built-in atoms, used as the last level of the grammar */
+// Note: Keyword literals (null, true, false, undefined) must come BEFORE
+// identifierAtom to ensure they're matched correctly rather than as identifiers
 export const BUILT_IN_ATOMS = [
   numberLiteral,
   stringLiteral,
+  nullAtom,
+  booleanAtom,
+  undefinedAtom,
   identifierAtom,
   parentheses,
 ] as const;
@@ -152,6 +190,84 @@ function parseConst(value: string, input: string): ParseResult {
   return [{ node: "const", outputSchema: JSON.stringify(value) }, result[1]];
 }
 
+function parseNull(input: string): ParseResult {
+  const result = Token.Const("null", input) as [] | [string, string];
+  if (result.length === 0) return [];
+  // Ensure it's not part of a longer identifier (e.g., "nullable")
+  const remaining = result[1];
+  if (remaining.length > 0 && /^[a-zA-Z0-9_$]/.test(remaining)) {
+    return [];
+  }
+  return [
+    {
+      node: "literal",
+      raw: "null",
+      value: null,
+      outputSchema: "null",
+    } as NullNode,
+    remaining,
+  ];
+}
+
+function parseBoolean(input: string): ParseResult {
+  // Try "true" first
+  let result = Token.Const("true", input) as [] | [string, string];
+  if (result.length === 2) {
+    const remaining = result[1];
+    // Ensure it's not part of a longer identifier (e.g., "trueName")
+    if (remaining.length === 0 || !/^[a-zA-Z0-9_$]/.test(remaining)) {
+      return [
+        {
+          node: "literal",
+          raw: "true",
+          value: true,
+          outputSchema: "boolean",
+        } as BooleanNode<"true">,
+        remaining,
+      ];
+    }
+  }
+
+  // Try "false"
+  result = Token.Const("false", input) as [] | [string, string];
+  if (result.length === 2) {
+    const remaining = result[1];
+    // Ensure it's not part of a longer identifier (e.g., "falsePositive")
+    if (remaining.length === 0 || !/^[a-zA-Z0-9_$]/.test(remaining)) {
+      return [
+        {
+          node: "literal",
+          raw: "false",
+          value: false,
+          outputSchema: "boolean",
+        } as BooleanNode<"false">,
+        remaining,
+      ];
+    }
+  }
+
+  return [];
+}
+
+function parseUndefined(input: string): ParseResult {
+  const result = Token.Const("undefined", input) as [] | [string, string];
+  if (result.length === 0) return [];
+  // Ensure it's not part of a longer identifier (e.g., "undefinedVar")
+  const remaining = result[1];
+  if (remaining.length > 0 && /^[a-zA-Z0-9_$]/.test(remaining)) {
+    return [];
+  }
+  return [
+    {
+      node: "literal",
+      raw: "undefined",
+      value: undefined,
+      outputSchema: "undefined",
+    } as UndefinedNode,
+    remaining,
+  ];
+}
+
 // =============================================================================
 // Build Runtime Grammar from Node Schemas
 // =============================================================================
@@ -211,6 +327,12 @@ function parseElement(
       return parseIdent(input, context);
     case "const":
       return parseConst((element as ConstSchema).value, input);
+    case "null":
+      return parseNull(input);
+    case "boolean":
+      return parseBoolean(input);
+    case "undefined":
+      return parseUndefined(input);
     default:
       return [];
   }

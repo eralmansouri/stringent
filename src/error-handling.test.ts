@@ -304,12 +304,13 @@ describe("type mismatch errors", () => {
       });
 
       // "then" branch must be number, but "hello" is string
-      const result = parse([ternary], 'true?"hello":1', contextWith({ true: "boolean" }));
+      // Use "cond" as an identifier (not "true" which is now a boolean literal)
+      const result = parse([ternary], 'cond?"hello":1', contextWith({ cond: "boolean" }));
       expect(result.length).toBe(2);
-      // Falls back to parsing identifier "true"
+      // Falls back to parsing identifier "cond"
       expect(result[0]).toMatchObject({
         node: "identifier",
-        name: "true",
+        name: "cond",
       });
     });
   });

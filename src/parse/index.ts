@@ -25,12 +25,18 @@ import type {
   StringSchema,
   IdentSchema,
   ConstSchema,
+  NullSchema,
+  BooleanSchema,
+  UndefinedSchema,
 } from "../schema/index.js";
 import type {
   NumberNode,
   StringNode,
   IdentNode,
   ConstNode,
+  NullNode,
+  BooleanNode,
+  UndefinedNode,
 } from "../primitive/index.js";
 
 // =============================================================================
@@ -110,6 +116,51 @@ type ParseConstPrimitive<
   ? [ConstNode<TValue>, R]
   : [];
 
+/**
+ * Parse null literal - matches "null" keyword followed by non-identifier char.
+ */
+type ParseNullPrimitive<TInput extends string> =
+  Token.TConst<"null", TInput> extends [string, infer R extends string]
+    ? R extends `${infer C}${string}`
+      ? C extends "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z" | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z" | "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "_" | "$"
+        ? [] // Part of a longer identifier
+        : [NullNode, R]
+      : [NullNode, R] // End of input
+    : [];
+
+/**
+ * Parse boolean literal - matches "true" or "false" keywords followed by non-identifier char.
+ */
+type ParseBooleanPrimitive<TInput extends string> =
+  Token.TConst<"true", TInput> extends [string, infer R extends string]
+    ? R extends `${infer C}${string}`
+      ? C extends "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z" | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z" | "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "_" | "$"
+        ? ParseBooleanFalse<TInput> // Check if "false" matches instead
+        : [BooleanNode<"true">, R]
+      : [BooleanNode<"true">, R]
+    : ParseBooleanFalse<TInput>;
+
+type ParseBooleanFalse<TInput extends string> =
+  Token.TConst<"false", TInput> extends [string, infer R extends string]
+    ? R extends `${infer C}${string}`
+      ? C extends "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z" | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z" | "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "_" | "$"
+        ? [] // Part of a longer identifier
+        : [BooleanNode<"false">, R]
+      : [BooleanNode<"false">, R]
+    : [];
+
+/**
+ * Parse undefined literal - matches "undefined" keyword followed by non-identifier char.
+ */
+type ParseUndefinedPrimitive<TInput extends string> =
+  Token.TConst<"undefined", TInput> extends [string, infer R extends string]
+    ? R extends `${infer C}${string}`
+      ? C extends "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z" | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z" | "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "_" | "$"
+        ? [] // Part of a longer identifier
+        : [UndefinedNode, R]
+      : [UndefinedNode, R] // End of input
+    : [];
+
 // =============================================================================
 // Pattern Element Parsing
 // =============================================================================
@@ -130,6 +181,12 @@ type ParseElement<
   ? ParseIdentPrimitive<TInput, TContext>
   : TElement extends ConstSchema<infer V>
   ? ParseConstPrimitive<V, TInput>
+  : TElement extends NullSchema
+  ? ParseNullPrimitive<TInput>
+  : TElement extends BooleanSchema
+  ? ParseBooleanPrimitive<TInput>
+  : TElement extends UndefinedSchema
+  ? ParseUndefinedPrimitive<TInput>
   : never; // ExprSchema is handled by ParseElementWithLevel
 
 /**

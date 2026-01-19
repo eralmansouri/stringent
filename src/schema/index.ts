@@ -13,6 +13,9 @@ import type {
   StringNode,
   IdentNode,
   ConstNode,
+  NullNode,
+  BooleanNode,
+  UndefinedNode,
 } from "../primitive/index.js";
 
 // =============================================================================
@@ -41,6 +44,15 @@ export interface ConstSchema<TValue extends string = string>
   readonly value: TValue;
 }
 
+/** Null literal pattern element */
+export interface NullSchema extends Schema<"null"> {}
+
+/** Boolean literal pattern element */
+export interface BooleanSchema extends Schema<"boolean"> {}
+
+/** Undefined literal pattern element */
+export interface UndefinedSchema extends Schema<"undefined"> {}
+
 /** Expression role determines which grammar level is used */
 export type ExprRole = "lhs" | "rhs" | "expr";
 
@@ -65,6 +77,9 @@ export type PatternSchemaBase =
   | StringSchema<readonly string[]>
   | IdentSchema
   | ConstSchema<string>
+  | NullSchema
+  | BooleanSchema
+  | UndefinedSchema
   | ExprSchema<string, ExprRole>;
 
 // =============================================================================
@@ -129,6 +144,15 @@ export const ident = () => withAs<IdentSchema>({ kind: "ident" });
 /** Create a constant (exact match) pattern element */
 export const constVal = <const TValue extends string>(value: TValue) =>
   withAs<ConstSchema<TValue>>({ kind: "const", value });
+
+/** Create a null literal pattern element */
+export const nullLiteral = () => withAs<NullSchema>({ kind: "null" });
+
+/** Create a boolean literal pattern element */
+export const booleanLiteral = () => withAs<BooleanSchema>({ kind: "boolean" });
+
+/** Create an undefined literal pattern element */
+export const undefinedLiteral = () => withAs<UndefinedSchema>({ kind: "undefined" });
 
 /**
  * Create a LEFT-HAND SIDE expression element.
@@ -339,6 +363,8 @@ export type SchemaToType<T extends string> =
   T extends "number" ? number
   : T extends "string" ? string
   : T extends "boolean" ? boolean
+  : T extends "null" ? null
+  : T extends "undefined" ? undefined
   : unknown;
 
 /**
@@ -353,6 +379,9 @@ export type InferNodeType<TSchema extends PatternSchemaBase> =
   : TSchema extends StringSchema ? StringNode
   : TSchema extends IdentSchema ? IdentNode
   : TSchema extends ConstSchema ? ConstNode
+  : TSchema extends NullSchema ? NullNode
+  : TSchema extends BooleanSchema ? BooleanNode
+  : TSchema extends UndefinedSchema ? UndefinedNode
   : TSchema extends ExprSchema<infer C> ? { outputSchema: C }
   : never;
 
@@ -365,6 +394,9 @@ export type InferEvaluatedType<TSchema extends PatternSchemaBase> =
   : TSchema extends StringSchema ? string
   : TSchema extends IdentSchema ? unknown
   : TSchema extends ConstSchema ? never  // constants are matched, not captured as values
+  : TSchema extends NullSchema ? null
+  : TSchema extends BooleanSchema ? boolean
+  : TSchema extends UndefinedSchema ? undefined
   : TSchema extends ExprSchema<infer C extends string> ? SchemaToType<C>
   : never;
 

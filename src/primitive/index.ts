@@ -69,8 +69,8 @@ export type UndefinedNode = ASTNode<"literal", "undefined"> & {
 };
 
 export type BooleanNode<TValue extends string = string> = ASTNode<
-  "boolean",
-  TValue
+  "literal",
+  "boolean"
 > & { raw: TValue; value: TValue extends "true" ? true : false };
 
 export type LiteralNode =
