@@ -71,14 +71,13 @@ Use `.as(name)` to capture pattern elements as named bindings in the AST:
 lhs("number").as("left")  // Captures left operand as "left" in the AST node
 ```
 
-### Runtime Evaluation (Coming Soon)
-
-> **Note**
-> Runtime evaluation is not yet implemented.
+### Runtime Evaluation
 
 Add `eval` to compute values at runtime:
 
 ```typescript
+import { defineNode, createParser, evaluate, lhs, rhs, constVal } from 'stringent';
+
 const add = defineNode({
   name: "add",
   pattern: [lhs("number").as("left"), constVal("+"), rhs("number").as("right")],
@@ -86,7 +85,28 @@ const add = defineNode({
   resultType: "number",
   eval: ({ left, right }) => left + right,
 });
+
+const mul = defineNode({
+  name: "mul",
+  pattern: [lhs("number").as("left"), constVal("*"), rhs("number").as("right")],
+  precedence: 2,
+  resultType: "number",
+  eval: ({ left, right }) => left * right,
+});
+
+const parser = createParser([add, mul] as const);
+const result = parser.parse("2+3*4", {});
+
+if (result.length === 2) {
+  const value = evaluate(result[0], { data: {}, nodes: [add, mul] });
+  console.log(value); // 14 (2 + 3*4 = 2 + 12 = 14)
+}
 ```
+
+The `evaluate` function:
+- Recursively evaluates child nodes first
+- Calls each node's `eval` function with already-evaluated values
+- Resolves identifiers from the `data` context
 
 ## Key Features
 

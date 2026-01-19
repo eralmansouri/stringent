@@ -207,3 +207,53 @@
 - src/primitive-literals.test.ts (new - 58 tests)
 - src/error-handling.test.ts (updated test to use non-keyword identifier)
 - PRD.md (marked task 2.1 as complete)
+
+### 2026-01-18: Task 2.2 - Implement eval() Function
+
+**Completed:**
+- Created `src/runtime/eval.ts` with comprehensive evaluation functionality:
+  - `evaluate(ast, ctx)` - Recursively evaluates AST nodes to produce runtime values
+  - `createEvaluator(nodes)` - Factory to create a bound evaluator with pre-configured node schemas
+  - `EvalContext` interface - Defines evaluation context with data and node schemas
+- **Evaluation supports:**
+  - Literal nodes (number, string, boolean, null, undefined) - returns their values
+  - Identifier nodes - resolves from context data
+  - Parentheses nodes - forwards to inner expression
+  - Binary/custom operations - uses node's eval function with recursively evaluated children
+- **Error handling:**
+  - Invalid AST nodes (null, undefined, primitives)
+  - Missing node property
+  - Unknown node types
+  - Missing eval function
+  - Undefined variables
+- Updated exports in `src/index.ts`:
+  - Exported `evaluate`, `createEvaluator` functions
+  - Exported `EvalContext` type
+- Updated `README.md`:
+  - Removed "Coming Soon" note
+  - Added comprehensive example showing `evaluate()` usage
+
+**Tests (`src/runtime/eval.test.ts` - 75 tests):**
+- Literal node evaluation (10 tests): number, decimal, string, empty string, true, false, null, undefined
+- Identifier node evaluation (5 tests): context resolution, multiple identifiers, undefined variable error
+- Arithmetic operations (12 tests): add, sub, mul, div, pow, precedence, chaining, decimals
+- Parentheses (5 tests): simple, nested, precedence override, multiple groups, deeply nested
+- Comparison operations (7 tests): equality, inequality, less than, greater than, with variables
+- Logical operations (4 tests): AND, OR
+- Ternary conditional (5 tests): true/false branches, with comparison, expressions in branches
+- Variables in expressions (3 tests): single, multiple, parenthesized
+- createEvaluator helper (3 tests): bound evaluator, with variables, complex expressions
+- Error cases (10 tests): null/undefined/primitive AST, missing properties, unknown types
+- Edge cases (11 tests): division by zero, 0**0, large numbers, null/undefined equality
+
+**Test Results:**
+- All 427 tests pass (75 new + 352 existing)
+- TypeScript typecheck passes
+- Build passes
+
+**Files Changed:**
+- src/runtime/eval.ts (new - evaluation implementation)
+- src/runtime/eval.test.ts (new - 75 tests)
+- src/index.ts (added exports)
+- README.md (updated Runtime Evaluation section)
+- PRD.md (marked task 2.2 as complete)

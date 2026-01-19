@@ -74,6 +74,13 @@ export {
 } from "./primitive/index.js";
 
 // =============================================================================
+// Runtime Evaluation
+// =============================================================================
+
+export { evaluate, createEvaluator } from "./runtime/eval.js";
+export type { EvalContext } from "./runtime/eval.js";
+
+// =============================================================================
 // Legacy Combinators (for backwards compatibility)
 // =============================================================================
 

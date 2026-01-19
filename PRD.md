@@ -148,14 +148,14 @@ Since this is a new project, consider these potential improvements:
 ### 2.2 Implement eval() Function
 **README states:** "Coming Soon"
 
-- [ ] Design eval function signature
-- [ ] Implement recursive AST evaluation
-- [ ] Handle binary operators based on node type
-- [ ] Handle identifier resolution from context
-- [ ] Handle literal values
-- [ ] Add type-safe return type inference
-- [ ] Write comprehensive eval tests
-- [ ] Update README to remove "Coming Soon"
+- [x] Design eval function signature
+- [x] Implement recursive AST evaluation
+- [x] Handle binary operators based on node type
+- [x] Handle identifier resolution from context
+- [x] Handle literal values
+- [x] Add type-safe return type inference
+- [x] Write comprehensive eval tests
+- [x] Update README to remove "Coming Soon"
 
 **Files:** `src/runtime/eval.ts` (new), `README.md`
 
