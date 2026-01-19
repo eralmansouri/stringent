@@ -785,3 +785,75 @@ Updated 2 existing tests that now throw runtime errors in addition to type error
 - `src/runtime/eval.test.ts`: Added 27 new tests, updated 2 existing tests
 
 All 887 tests pass. TypeScript type checking passes. No lint errors (only pre-existing warnings).
+
+## Task 13 (PRD Task 7): Add Type-Level and Runtime Tests (COMPLETED)
+
+Created a comprehensive test file that consolidates all type safety tests for the PRD Task 7 requirements.
+
+### Implementation
+
+Created `src/comprehensive-type-safety.test.ts` with 42 tests organized into 4 main sections:
+
+**1. Type Tests for Schema Validation**
+- Tests that invalid schema types cause compile-time errors via `@ts-expect-error`
+- Tests for `parser.parse()` with invalid types like 'garbage'
+- Tests for `lhs()`, `rhs()`, `expr()` constraint validation
+- Tests for `defineNode()` resultType validation
+- Tests for valid arktype types (primitives, subtypes, constraints, unions)
+
+**2. Type Tests for Data Validation**
+- Tests that `evaluate()` requires correct data types for identifiers
+- Tests that missing variables cause type errors
+- Tests that wrong data types cause type errors
+- Tests that extra properties in data are allowed
+- Tests that literal-only expressions accept empty data
+
+**3. Runtime Tests for ArkType Constraint Validation**
+- Number constraint tests: `number >= 0`, `number > 0`, `number.integer`, range constraints
+- String constraint tests: `string.email`, `string.uuid`, string length constraints
+- Basic type constraint tests: number/string/boolean type validation
+- Union type constraint tests: `string | number` union validation
+- Nested identifier validation in expressions
+- Edge cases: 'unknown' schema skips validation
+
+**4. Tests for ArkType Subtypes**
+- `string.email` format validation with valid/invalid values
+- `string.uuid` format validation with valid/invalid values
+- `string.url` format validation
+- `number.integer` validation with integers vs floats
+- Standalone identifier constraint validation
+
+### Test Coverage Summary
+
+| Requirement | Test Count | Description |
+|-------------|------------|-------------|
+| Schema validation (type errors) | 10 | Compile-time rejection of invalid types |
+| Schema validation (valid types) | 8 | Acceptance of valid arktype types |
+| Data validation (type errors) | 5 | Type-level data-schema connection |
+| Runtime constraint validation | 16 | Runtime arktype constraint enforcement |
+| ArkType subtypes | 6 | Subtype-specific validation |
+| Edge cases | 3 | Special scenarios |
+
+### Notes
+
+The comprehensive test file follows the exact patterns shown in the PRD Task 7 specification:
+- Uses `@ts-expect-error` for compile-time type tests
+- Uses `expect().toThrow()` for runtime validation tests
+- Tests both type-level and runtime behavior where applicable
+- Uses manually constructed ASTs with `as const` for precise type-level testing
+- Uses parser output for runtime behavior testing
+
+### Pre-existing Test Coverage
+
+The following files also contain related tests that existed before Task 7:
+- `src/createParser.schema-validation.test.ts` (34 tests for schema validation)
+- `src/schema/constraint-validation.test.ts` (44 tests for constraint validation)
+- `src/schema/arktype-integration.test.ts` (32 tests for arktype integration)
+- `src/runtime/eval.test.ts` (27+ tests for runtime constraint validation)
+
+### Files Modified
+
+- `src/comprehensive-type-safety.test.ts`: New comprehensive test file with 42 tests
+- `PRD.md`: Marked Task 7 checkboxes as complete
+
+All 929 tests pass. No new lint errors.

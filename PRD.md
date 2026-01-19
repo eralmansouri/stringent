@@ -436,10 +436,10 @@ describe('data validation', () => {
 });
 ```
 
-- [ ] Type tests for schema validation
-- [ ] Type tests for data validation
-- [ ] Runtime tests for arktype constraint validation
-- [ ] Tests for arktype subtypes (string.email, etc.)
+- [x] Type tests for schema validation
+- [x] Type tests for data validation
+- [x] Runtime tests for arktype constraint validation
+- [x] Tests for arktype subtypes (string.email, etc.)
 
 ### Task 8: Fix Evaluate Return Type with ArkType
 
