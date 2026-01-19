@@ -315,16 +315,15 @@ describe('String Escape Integration with createParser', () => {
   const parser = createParser([stringConcat] as const);
 
   it('should parse and evaluate string with escapes', () => {
-    const result = parser.parse('"hello\\nworld"', {});
-    expect(result.length).toBe(2);
-    const [ast] = result;
-    expect(ast.outputSchema).toBe('string');
+    const [evaluator, err] = parser.parse('"hello\\nworld"', {});
+    expect(err).toBeNull();
+    expect(evaluator!.ast.outputSchema).toBe('string');
   });
 
   it('should concatenate strings with escapes', () => {
-    const result = parser.parse('"hello\\n" + "world"', {});
-    expect(result.length).toBe(2);
-    const [ast] = result;
+    const [evaluator, err] = parser.parse('"hello\\n" + "world"', {});
+    expect(err).toBeNull();
+    const ast = evaluator!.ast;
     expect(ast.node).toBe('concat');
     expect(ast.outputSchema).toBe('string');
 
@@ -335,9 +334,9 @@ describe('String Escape Integration with createParser', () => {
   });
 
   it('should handle multiple escaped strings in expression', () => {
-    const result = parser.parse('"a\\tb" + "c\\nd"', {});
-    expect(result.length).toBe(2);
-    const [ast] = result;
+    const [evaluator, err] = parser.parse('"a\\tb" + "c\\nd"', {});
+    expect(err).toBeNull();
+    const ast = evaluator!.ast;
 
     const left = (ast as any).left;
     const right = (ast as any).right;

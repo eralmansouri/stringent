@@ -64,29 +64,30 @@ const mul = defineNode({
 // Only pass operators - atoms (numbers, strings, identifiers, etc.) are built-in
 const parser = createParser([add, mul] as const);
 
-// Type-safe parsing - result type is inferred at compile-time
-const result = parser.parse("1+2*3", {});
+// Type-safe parsing returns a bound evaluator
+const [evaluator, err] = parser.parse("1+2*3", {});
 // Parses as: add(1, mul(2, 3)) because * binds tighter than +
 ```
 
 ### 3. Evaluate Expressions
 
 ```typescript
-import { evaluate } from 'stringent';
-
-if (result.length === 2) {
-  const value = evaluate(result[0], { data: {}, nodes: [add, mul] });
+if (!err) {
+  const value = evaluator({ /* data */ });
   // TypeScript knows: typeof value === number (inferred from outputSchema!)
   console.log(value); // 7 (1 + 2*3 = 1 + 6 = 7)
+
+  // Access the AST if needed
+  console.log(evaluator.ast); // { node: 'add', ... }
 }
 ```
 
 ### Type-Safe Evaluation
 
-The `evaluate()` function preserves compile-time type information. The return type is automatically inferred from the AST node's `outputSchema`:
+The bound evaluator returned by `parser.parse()` preserves compile-time type information. The return type is automatically inferred from the AST node's `outputSchema`:
 
 ```typescript
-import { createParser, defineNode, evaluate, lhs, rhs, constVal } from 'stringent';
+import { createParser, defineNode, lhs, rhs, constVal } from 'stringent';
 
 // Number result type
 const add = defineNode({
@@ -98,10 +99,10 @@ const add = defineNode({
 });
 
 const parser = createParser([add] as const);
-const result = parser.parse("1 + 2", {});
+const [evaluator, err] = parser.parse("1 + 2", {});
 
-if (result.length === 2) {
-  const value = evaluate(result[0], { data: {}, nodes: [add] });
+if (!err) {
+  const value = evaluator({});
   // TypeScript infers: value: number
   // NOT unknown!
 }
@@ -116,10 +117,10 @@ const eq = defineNode({
 });
 
 const eqParser = createParser([eq] as const);
-const eqResult = eqParser.parse("1 == 2", {});
+const [eqEvaluator, eqErr] = eqParser.parse("1 == 2", {});
 
-if (eqResult.length === 2) {
-  const isEqual = evaluate(eqResult[0], { data: {}, nodes: [eq] });
+if (!eqErr) {
+  const isEqual = eqEvaluator({});
   // TypeScript infers: isEqual: boolean
 }
 
@@ -133,10 +134,10 @@ const concat = defineNode({
 });
 
 const concatParser = createParser([concat] as const);
-const concatResult = concatParser.parse('"hello" ++ "world"', {});
+const [concatEvaluator, concatErr] = concatParser.parse('"hello" ++ "world"', {});
 
-if (concatResult.length === 2) {
-  const str = evaluate(concatResult[0], { data: {}, nodes: [concat] });
+if (!concatErr) {
+  const str = concatEvaluator({});
   // TypeScript infers: str: string
 }
 ```
@@ -207,20 +208,20 @@ lhs('garbage');
 
 ### Runtime Data Validation
 
-Data passed to `evaluate()` is validated at runtime against ArkType schemas:
+Data passed to the evaluator is validated at runtime against ArkType schemas:
 
 ```typescript
 const parser = createParser([add] as const);
-const result = parser.parse('x + y', { x: 'number >= 0', y: 'number' });
+const [evaluator, err] = parser.parse('x + y', { x: 'number >= 0', y: 'number' });
 
-if (result.length === 2) {
+if (!err) {
   // This works - x is a non-negative number
-  evaluate(result[0], { data: { x: 5, y: 3 }, nodes: [add] });
+  evaluator({ x: 5, y: 3 });
   // Returns: 8
 
   // This throws at runtime - x must be >= 0
-  evaluate(result[0], { data: { x: -5, y: 3 }, nodes: [add] });
-  // Throws: "Variable 'x' failed validation for schema 'number >= 0'"
+  evaluator({ x: -5, y: 3 });
+  // Throws: "Data validation failed: ..."
 }
 ```
 
@@ -230,15 +231,15 @@ Subtypes like `string.email` validate format at runtime:
 
 ```typescript
 const emailSchema = { email: 'string.email' };
-const result = parser.parse('email', emailSchema);
+const [evaluator, err] = parser.parse('email', emailSchema);
 
-if (result.length === 2) {
+if (!err) {
   // Valid email - works
-  evaluate(result[0], { data: { email: 'test@example.com' }, nodes: [] });
+  evaluator({ email: 'test@example.com' });
 
   // Invalid email - throws
-  evaluate(result[0], { data: { email: 'not-an-email' }, nodes: [] });
-  // Throws: "Variable 'email' failed validation for schema 'string.email'"
+  evaluator({ email: 'not-an-email' });
+  // Throws: "Data validation failed: ..."
 }
 ```
 
@@ -266,30 +267,30 @@ const parser = createParser([ternary] as const);
 // x ? true : 0
 // then branch: boolean, else branch: number
 // Result type: boolean | number
-const result = parser.parse('true ? 1 : "hello"', {});
+const [evaluator, err] = parser.parse('true ? 1 : "hello"', {});
 
-if (result.length === 2) {
-  const value = evaluate(result[0], { data: {}, nodes: [ternary] });
+if (!err) {
+  const value = evaluator({});
   // TypeScript infers: value is string | number
 }
 ```
 
 ### Type-Safe Data Requirements
 
-The `evaluate()` function enforces that data matches the schema at the type level:
+The evaluator enforces that data matches the schema at the type level:
 
 ```typescript
-const result = parser.parse('x + y', { x: 'number', y: 'number' });
+const [evaluator, err] = parser.parse('x + y', { x: 'number', y: 'number' });
 
-if (result.length === 2) {
+if (!err) {
   // OK - all required variables provided with correct types
-  evaluate(result[0], { data: { x: 5, y: 3 }, nodes: [add] });
+  evaluator({ x: 5, y: 3 });
 
   // @ts-expect-error - x should be number, not string
-  evaluate(result[0], { data: { x: 'wrong', y: 3 }, nodes: [add] });
+  evaluator({ x: 'wrong', y: 3 });
 
   // @ts-expect-error - y is required but missing
-  evaluate(result[0], { data: { x: 5 }, nodes: [add] });
+  evaluator({ x: 5 });
 }
 ```
 
@@ -339,7 +340,7 @@ expr().as("inner")         // Captures expression as "inner"
 ### Comparison Operators
 
 ```typescript
-import { defineNode, constVal, lhs, rhs, createParser, evaluate } from 'stringent';
+import { defineNode, constVal, lhs, rhs, createParser } from 'stringent';
 
 const eq = defineNode({
   name: "eq",
@@ -375,9 +376,9 @@ const gt = defineNode({
 
 const parser = createParser([eq, neq, lt, gt] as const);
 
-const result = parser.parse("5 > 3", {});
-if (result.length === 2) {
-  const value = evaluate(result[0], { data: {}, nodes: [eq, neq, lt, gt] });
+const [evaluator, err] = parser.parse("5 > 3", {});
+if (!err) {
+  const value = evaluator({});
   console.log(value); // true
 }
 ```
@@ -385,7 +386,7 @@ if (result.length === 2) {
 ### Conditional (Ternary) Expressions
 
 ```typescript
-import { defineNode, constVal, lhs, rhs, expr, createParser, evaluate } from 'stringent';
+import { defineNode, constVal, lhs, rhs, expr, createParser } from 'stringent';
 
 // Define comparison first
 const gt = defineNode({
@@ -414,9 +415,9 @@ const ternary = defineNode({
 
 const parser = createParser([gt, ternary] as const);
 
-const result = parser.parse("5 > 3 ? 10 : 20", {});
-if (result.length === 2) {
-  const value = evaluate(result[0], { data: {}, nodes: [gt, ternary] });
+const [evaluator, err] = parser.parse("5 > 3 ? 10 : 20", {});
+if (!err) {
+  const value = evaluator({});
   console.log(value); // 10
 }
 ```
@@ -426,7 +427,7 @@ if (result.length === 2) {
 Stringent supports identifier resolution from a schema context, enabling form validation expressions:
 
 ```typescript
-import { defineNode, constVal, lhs, rhs, createParser, evaluate } from 'stringent';
+import { defineNode, constVal, lhs, rhs, createParser } from 'stringent';
 
 const eq = defineNode({
   name: "eq",
@@ -445,22 +446,19 @@ type FormSchema = {
 };
 
 // Parse with schema - identifiers resolve their types from the schema
-const result = parser.parse("password == confirmPassword", {
+const [evaluator, err] = parser.parse("password == confirmPassword", {
   password: "string",
   confirmPassword: "string",
 } satisfies FormSchema);
 
-if (result.length === 2) {
+if (!err) {
   // Evaluate with actual form data
   const formData = {
     password: "secret123",
     confirmPassword: "secret123",
   };
 
-  const isValid = evaluate(result[0], {
-    data: formData,
-    nodes: [eq]
-  });
+  const isValid = evaluator(formData);
   console.log(isValid); // true
 }
 ```
@@ -468,7 +466,7 @@ if (result.length === 2) {
 ### Boolean Logic
 
 ```typescript
-import { defineNode, constVal, lhs, rhs, createParser, evaluate } from 'stringent';
+import { defineNode, constVal, lhs, rhs, createParser } from 'stringent';
 
 const and = defineNode({
   name: "and",
@@ -489,9 +487,9 @@ const or = defineNode({
 const parser = createParser([and, or] as const);
 
 // true || false && false → true || (false && false) → true || false → true
-const result = parser.parse("true || false && false", {});
-if (result.length === 2) {
-  const value = evaluate(result[0], { data: {}, nodes: [and, or] });
+const [evaluator, err] = parser.parse("true || false && false", {});
+if (!err) {
+  const value = evaluator({});
   console.log(value); // true
 }
 ```
@@ -499,7 +497,7 @@ if (result.length === 2) {
 ### String Concatenation
 
 ```typescript
-import { defineNode, constVal, lhs, rhs, createParser, evaluate } from 'stringent';
+import { defineNode, constVal, lhs, rhs, createParser } from 'stringent';
 
 const concat = defineNode({
   name: "concat",
@@ -511,9 +509,9 @@ const concat = defineNode({
 
 const parser = createParser([concat] as const);
 
-const result = parser.parse('"Hello" ++ " " ++ "World"', {});
-if (result.length === 2) {
-  const value = evaluate(result[0], { data: {}, nodes: [concat] });
+const [evaluator, err] = parser.parse('"Hello" ++ " " ++ "World"', {});
+if (!err) {
+  const value = evaluator({});
   console.log(value); // "Hello World"
 }
 ```
@@ -521,7 +519,7 @@ if (result.length === 2) {
 ### Nullish Coalescing
 
 ```typescript
-import { defineNode, constVal, lhs, rhs, createParser, evaluate } from 'stringent';
+import { defineNode, constVal, lhs, rhs, createParser } from 'stringent';
 
 const nullishCoalesce = defineNode({
   name: "nullishCoalesce",
@@ -533,9 +531,9 @@ const nullishCoalesce = defineNode({
 
 const parser = createParser([nullishCoalesce] as const);
 
-const result = parser.parse("null ?? 42", {});
-if (result.length === 2) {
-  const value = evaluate(result[0], { data: {}, nodes: [nullishCoalesce] });
+const [evaluator, err] = parser.parse("null ?? 42", {});
+if (!err) {
+  const value = evaluator({});
   console.log(value); // 42
 }
 ```
@@ -544,12 +542,12 @@ if (result.length === 2) {
 
 ### Parse Failures
 
-When parsing fails, the result is an empty array:
+When parsing fails, the result is `[null, Error]`:
 
 ```typescript
-const result = parser.parse("@invalid", {});
-if (result.length === 0) {
-  console.log("Parse failed: no grammar rule matched");
+const [evaluator, err] = parser.parse("@invalid", {});
+if (err) {
+  console.log("Parse failed:", err.message);
 }
 ```
 
@@ -643,11 +641,26 @@ defineNode({
 })
 ```
 
-### `evaluate(ast, context)`
+### `parser.parse(input, schema)`
 
-Recursively evaluates an AST node to produce a runtime value.
+Parses an input string and returns a bound evaluator.
 
 ```typescript
+const [evaluator, err] = parser.parse("x + 1", { x: 'number' });
+if (!err) {
+  const result = evaluator({ x: 5 }); // 6
+  console.log(evaluator.ast);         // The parsed AST
+  console.log(evaluator.schema);      // { x: 'number' }
+}
+```
+
+### `evaluate(ast, context)`
+
+Low-level function that evaluates an AST node. Most users should use the bound evaluator from `parser.parse()` instead.
+
+```typescript
+import { evaluate } from 'stringent';
+
 evaluate(ast, {
   data: Record<string, unknown>,  // Variable values
   nodes: NodeSchema[],            // Node schemas with eval functions

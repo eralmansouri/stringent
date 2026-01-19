@@ -594,7 +594,7 @@ parser.parse('x', { x: { y: 'boolean' } })
 - Using `type.validate<TSchema>` directly delegates validation to arktype, which handles it correctly
 - Added 7 tests in `src/nested-object-test.test.ts` covering: arktype native nested support, parser.parse with valid/invalid nested schemas, deeply nested schemas, mixed flat and nested schemas
 
-### Task 12: Parser Returns Bound Evaluator
+### Task 12: Parser Returns Bound Evaluator (COMPLETED)
 
 Change parse to return a bound evaluator instead of raw AST.
 
@@ -613,13 +613,24 @@ if (!err) {
 }
 ```
 
-- [ ] Change `Parser.parse()` return type to `[Evaluator, Error | null]`
-- [ ] Create `Evaluator` type with `ast` property and call signature
-- [ ] Evaluator captures nodes from parser
-- [ ] Evaluator captures schema from parse call for data validation
-- [ ] Evaluator return type inferred from AST's outputSchema
-- [ ] Update all tests to use new API
-- [ ] Update documentation
+- [x] Change `Parser.parse()` return type to `[Evaluator, Error | null]`
+- [x] Create `Evaluator` type with `ast` property and call signature
+- [x] Evaluator captures nodes from parser
+- [x] Evaluator captures schema from parse call for data validation
+- [x] Evaluator return type inferred from AST's outputSchema
+- [x] Update all tests to use new API
+- [x] Update documentation
+
+**Implementation Notes:**
+- Added `Evaluator<TAST, TSchema>` interface with call signature and `ast`/`schema` properties
+- Added `ParseResult<TAST, TSchema>` type as union of success and error tuples
+- Added `SchemaRecordToData<TSchema>` type to convert schema to TypeScript data types
+- Added `ExtractOutputSchema<T>` type to extract outputSchema from AST for return type
+- Evaluator validates data at runtime using ArkType before evaluation
+- Added `validateData()` function with validator caching for performance
+- Created comprehensive test file `createParser.bound-evaluator.test.ts` with 24 tests
+- Updated 10+ test files to use new `[evaluator, err]` API pattern
+- Updated README.md and docs/api-reference.md with new API documentation
 
 ### Task 13: Update Base Ternary Node
 

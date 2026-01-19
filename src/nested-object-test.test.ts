@@ -54,8 +54,9 @@ describe('nested object schemas (Task 11)', () => {
 
     it('accepts nested object in schema', () => {
       // This should compile without errors
-      const result = parser.parse('user', { user: { name: 'string', age: 'number' } });
-      expect(result[0]).toBeDefined();
+      const [evaluator, err] = parser.parse('user', { user: { name: 'string', age: 'number' } });
+      expect(err).toBeNull();
+      expect(evaluator!.ast).toBeDefined();
     });
 
     it('rejects invalid nested schema values', () => {
@@ -65,7 +66,7 @@ describe('nested object schemas (Task 11)', () => {
 
     it('accepts deeply nested schemas', () => {
       // This should compile
-      const result = parser.parse('data', {
+      const [evaluator, err] = parser.parse('data', {
         data: {
           level1: {
             level2: {
@@ -74,7 +75,8 @@ describe('nested object schemas (Task 11)', () => {
           },
         },
       });
-      expect(result[0]).toBeDefined();
+      expect(err).toBeNull();
+      expect(evaluator!.ast).toBeDefined();
     });
 
     it('rejects invalid types in deeply nested schemas', () => {
@@ -92,11 +94,12 @@ describe('nested object schemas (Task 11)', () => {
 
     it('accepts mixed flat and nested schemas', () => {
       // This should compile - mix of flat and nested values
-      const result = parser.parse('x', {
+      const [evaluator, err] = parser.parse('x', {
         x: 'number',
         user: { name: 'string', age: 'number' },
       });
-      expect(result[0]).toBeDefined();
+      expect(err).toBeNull();
+      expect(evaluator!.ast).toBeDefined();
     });
   });
 });

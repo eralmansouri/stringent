@@ -47,7 +47,7 @@ export type {
 } from './schema/index.js';
 
 export { createParser } from './createParser.js';
-export type { Parser } from './createParser.js';
+export type { Parser, Evaluator, ParseResult, SchemaRecordToData } from './createParser.js';
 
 // =============================================================================
 // Types: Parse, Grammar, Context

@@ -80,9 +80,12 @@ const add = defineNode({
 // IMPORTANT: Use `as const` for proper type inference
 const parser = createParser([numberLit, add] as const);
 
-// Type-safe parsing - input must parse completely
-const result = parser.parse("1+2", {});
-// Type: [{ node: "add", outputSchema: "number", left: NumberNode<"1">, right: NumberNode<"2"> }, ""]
+// Type-safe parsing returns a bound evaluator
+const [evaluator, err] = parser.parse("1+2", {});
+if (!err) {
+  const value = evaluator({}); // 3, typed as number
+  console.log(evaluator.ast);  // The parsed AST
+}
 ```
 
 #### Type Safety
@@ -526,13 +529,10 @@ interface EvalContext<TSchema extends Record<string, unknown> = Record<string, u
 
 ```typescript
 const parser = createParser([numberLit, add, mul] as const);
-const result = parser.parse("1+2*3", {});
+const [evaluator, err] = parser.parse("1+2*3", {});
 
-if (result.length === 2) {
-  const value = evaluate(result[0], {
-    data: {},
-    nodes: [numberLit, add, mul],
-  });
+if (!err) {
+  const value = evaluator({});
   // TypeScript infers: value: number (from outputSchema: "number")
   console.log(value); // 7
 }
@@ -551,11 +551,11 @@ const add = defineNode({
 });
 
 const parser = createParser([add] as const);
-const result = parser.parse("1 + 2", {});
+const [evaluator, err] = parser.parse("1 + 2", {});
 
-if (result.length === 2) {
-  // result[0] has type with outputSchema: "number"
-  const value = evaluate(result[0], { data: {}, nodes: [add] });
+if (!err) {
+  // evaluator is typed with the correct return type
+  const value = evaluator({});
   // value has type: number (not unknown!)
 
   // TypeScript will catch type errors:
@@ -568,7 +568,7 @@ if (result.length === 2) {
 
 ### createEvaluator()
 
-Creates a bound evaluator function with pre-configured node schemas. The returned function preserves **compile-time type inference** just like `evaluate()`.
+Creates a bound evaluator function with pre-configured node schemas. This is a lower-level API; most users should use the bound evaluator returned by `parser.parse()` instead.
 
 ```typescript
 function createEvaluator(nodes: readonly NodeSchema[]):
@@ -584,46 +584,15 @@ The returned evaluator function infers the return type from the AST's `outputSch
 #### Example
 
 ```typescript
-const evaluator = createEvaluator([numberLit, add, mul]);
+const eval = createEvaluator([numberLit, add, mul]);
 
-const result = parser.parse("1+2*3", {});
-if (result.length === 2) {
-  const value = evaluator(result[0], {});
-  // TypeScript infers: value: number
-  console.log(value); // 7
-}
+const [evaluator, err] = parser.parse("1+2*3", {});
+if (!err) {
+  // Using the bound evaluator (preferred)
+  const value = evaluator({});
 
-// With variables
-const result2 = parser.parse("x+y", { x: "number", y: "number" });
-if (result2.length === 2) {
-  const value = evaluator(result2[0], { x: 10, y: 20 });
-  // TypeScript infers: value: number
-  console.log(value); // 30
-}
-```
-
-#### Type Inference Example
-
-```typescript
-// Boolean expression
-const gt = defineNode({
-  name: "gt",
-  pattern: [lhs("number").as("left"), constVal(">"), rhs("number").as("right")],
-  precedence: 1,
-  resultType: "boolean",
-  eval: ({ left, right }) => left > right,
-});
-
-const evaluator = createEvaluator([gt]);
-const result = parser.parse("5 > 3", {});
-
-if (result.length === 2) {
-  const isGreater = evaluator(result[0], {});
-  // TypeScript infers: isGreater: boolean (not unknown!)
-
-  if (isGreater) {
-    console.log("5 is greater than 3");
-  }
+  // Or using the low-level createEvaluator
+  const value2 = eval(evaluator.ast, {});
 }
 ```
 
@@ -644,9 +613,9 @@ One of: `"number"`, `"string"`, `"boolean"`, `"null"`, `"undefined"`, `"unknown"
 #### Example
 
 ```typescript
-const result = parser.parse("1+2", {});
-if (result.length === 2) {
-  const type = infer(result[0]);
+const [evaluator, err] = parser.parse("1+2", {});
+if (!err) {
+  const type = infer(evaluator.ast);
   console.log(type); // "number"
 }
 ```
@@ -777,43 +746,46 @@ defineNode({ ..., resultType: 'garbage' });
 
 ### Runtime Validation
 
-When `evaluate()` is called, ArkType validates identifier values against their schemas at runtime:
+When the bound evaluator is called, ArkType validates data against the schema at runtime:
 
 ```typescript
-const result = parser.parse('x', { x: 'number >= 0' });
+const [evaluator, err] = parser.parse('x', { x: 'number >= 0' });
 
-if (result.length === 2) {
+if (!err) {
   // Works - 5 is >= 0
-  evaluate(result[0], { data: { x: 5 }, nodes: [] });
+  evaluator({ x: 5 });
 
-  // Throws at runtime: "Variable 'x' failed validation for schema 'number >= 0'"
-  evaluate(result[0], { data: { x: -5 }, nodes: [] });
+  // Throws at runtime: "Data validation failed: ..."
+  evaluator({ x: -5 });
 }
 ```
 
 #### Subtype Validation
 
 ```typescript
-const result = parser.parse('email', { email: 'string.email' });
+const [evaluator, err] = parser.parse('email', { email: 'string.email' });
 
-// Works - valid email format
-evaluate(result[0], { data: { email: 'test@example.com' }, nodes: [] });
+if (!err) {
+  // Works - valid email format
+  evaluator({ email: 'test@example.com' });
 
-// Throws - invalid email format
-evaluate(result[0], { data: { email: 'not-an-email' }, nodes: [] });
+  // Throws - invalid email format
+  evaluator({ email: 'not-an-email' });
+}
 ```
 
 #### Type Validation
 
 ```typescript
-const result = parser.parse('x', { x: 'number' });
+const [evaluator, err] = parser.parse('x', { x: 'number' });
 
-// Works - correct type
-evaluate(result[0], { data: { x: 42 }, nodes: [] });
+if (!err) {
+  // Works - correct type
+  evaluator({ x: 42 });
 
-// Throws - wrong type (string instead of number)
-evaluate(result[0], { data: { x: 'wrong' }, nodes: [] });
-```
+  // Throws - wrong type (string instead of number)
+  evaluator({ x: 'wrong' });
+}
 
 ### Computed Result Types
 
@@ -844,7 +816,7 @@ When parsing `true ? 1 : "hello"`:
 - `then` branch has `outputSchema: 'number'`
 - `else` branch has `outputSchema: 'string'`
 - Result has `outputSchema: 'number | string'`
-- `evaluate()` returns type `number | string`
+- The evaluator returns type `number | string`
 
 #### Single-Binding Propagation
 
@@ -855,9 +827,11 @@ For nodes with `resultType: 'unknown'` and exactly one binding (like parentheses
 // Inner expression has outputSchema: 'number'
 // Result has outputSchema: 'number' (propagated)
 
-const result = parser.parse('(1 + 2)', {});
-const value = evaluate(result[0], ctx);
-// TypeScript infers: value is number
+const [evaluator, err] = parser.parse('(1 + 2)', {});
+if (!err) {
+  const value = evaluator({});
+  // TypeScript infers: value is number
+}
 ```
 
 ---
@@ -870,12 +844,37 @@ The parser interface returned by `createParser()`.
 
 ```typescript
 interface Parser<TGrammar extends Grammar, TNodes extends readonly NodeSchema[]> {
-  parse<TInput extends string, TSchema extends Record<string, string>>(
+  parse<TInput extends string, const TSchema extends SchemaRecord>(
     input: ValidatedInput<TGrammar, TInput, Context<TSchema>>,
-    schema: TSchema
-  ): Parse<TGrammar, TInput, Context<TSchema>>;
+    schema: type.validate<TSchema>
+  ): ParseResult<ExtractAST<Parse<TGrammar, TInput, Context<TSchema>>>, TSchema>;
 
   readonly nodes: TNodes;
+}
+```
+
+#### ParseResult
+
+```typescript
+type ParseResult<TAST, TSchema extends SchemaRecord> =
+  | [Evaluator<TAST, TSchema>, null]
+  | [null, Error];
+```
+
+#### Evaluator
+
+The bound evaluator returned by `parser.parse()`:
+
+```typescript
+interface Evaluator<TAST, TSchema extends SchemaRecord> {
+  // Call signature - evaluates the expression
+  (data: SchemaRecordToData<TSchema>): SchemaToType<ExtractOutputSchema<TAST>>;
+
+  // The parsed AST
+  readonly ast: TAST;
+
+  // The schema used during parsing
+  readonly schema: TSchema;
 }
 ```
 

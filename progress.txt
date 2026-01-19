@@ -1378,3 +1378,154 @@ parser.parse('data', { data: { level1: { level2: { value: 'invalid' } } } });
 - `src/runtime/eval.test.ts`: Fixed test that was accidentally broken during debugging
 
 All 986 tests pass. TypeScript type checking passes. No lint errors (only pre-existing warnings).
+
+## Task 19 (PRD Task 12): Parser Returns Bound Evaluator (COMPLETED)
+
+Changed `parser.parse()` to return a bound evaluator instead of a raw `[AST, '']` tuple. The new API is more ergonomic and captures all necessary context.
+
+### Old API
+
+```typescript
+const result = parser.parse('x + 1', { x: 'number' });
+const value = evaluate(result[0], { data: { x: 5 }, nodes: [add, mul] });
+```
+
+### New API
+
+```typescript
+const [evaluator, err] = parser.parse('x + 1', { x: 'number' });
+if (!err) {
+  const value = evaluator({ x: 5 });  // Returns number
+  console.log(evaluator.ast);          // Access the parsed AST
+  console.log(evaluator.schema);       // Access the schema used
+}
+```
+
+### Implementation
+
+**New Types in `src/createParser.ts`:**
+
+```typescript
+// Extract outputSchema from AST for return type inference
+type ExtractOutputSchema<T> = T extends { outputSchema: infer S extends string } ? S : 'unknown';
+
+// Convert schema record to TypeScript data types
+type SchemaRecordToData<TSchema extends SchemaRecord> = {
+  [K in keyof TSchema]: TSchema[K] extends string
+    ? SchemaToType<TSchema[K]>
+    : TSchema[K] extends SchemaRecord
+      ? SchemaRecordToData<TSchema[K]>
+      : unknown;
+};
+
+// Bound evaluator returned by parser.parse()
+interface Evaluator<TAST, TSchema extends SchemaRecord> {
+  (data: SchemaRecordToData<TSchema>): SchemaToType<ExtractOutputSchema<TAST>>;
+  readonly ast: TAST;
+  readonly schema: TSchema;
+}
+
+// Parse result: [Evaluator, null] on success, [null, Error] on failure
+type ParseResult<TAST, TSchema extends SchemaRecord> =
+  | [Evaluator<TAST, TSchema>, null]
+  | [null, Error];
+```
+
+**Runtime Implementation:**
+
+1. Parse the input using existing `runtimeParse()`
+2. Check for parse failures (non-array result or non-empty remaining input)
+3. Create a bound evaluator function that:
+   - Validates data against the schema using ArkType
+   - Calls `evaluate()` with the captured AST and nodes
+4. Attach `ast` and `schema` properties to the evaluator
+5. Return `[evaluator, null]` on success, `[null, Error]` on failure
+
+**Data Validation:**
+
+- Added `validatorCache` to cache ArkType validators by schema key
+- Added `getValidator()` to get or create validators
+- Added `validateData()` to validate data against the schema at runtime
+- Throws `Error` with ArkType error summary if validation fails
+
+### Tests Added
+
+Created `src/createParser.bound-evaluator.test.ts` with 24 tests covering:
+
+**Parse Return Type:**
+- Returns tuple with evaluator and null on success
+- Returns tuple with null and error on parse failure
+- Returns tuple with null and error for invalid expression
+
+**Evaluator Properties:**
+- evaluator.ast contains the parsed AST
+- evaluator.schema contains the schema used for parsing
+
+**Evaluator Call Signature:**
+- Evaluator is callable with data
+- Evaluator returns correct value for simple expression
+- Evaluator returns correct value for expression with variables
+- Evaluator works with string expressions
+- Evaluator works with boolean expressions
+
+**Type Safety:**
+- Evaluator return type is inferred from AST outputSchema
+- Evaluator data parameter is type-safe
+- Evaluator works with complex schemas (nested, constraints, subtypes)
+
+**Runtime Data Validation:**
+- Evaluator validates data against schema at runtime
+- Evaluator throws for invalid data types
+- Evaluator throws for constraint violations (number >= 0)
+- Evaluator throws for subtype violations (string.email)
+
+**Error Handling:**
+- Parse error includes useful message
+- Parse error for empty remaining input
+
+### Test Migration
+
+Updated all existing tests to use the new API:
+
+- `createParser.test.ts`: 13 tests updated
+- `eval.test.ts`: 196 tests updated
+- `createParser.schema-validation.test.ts`: 33 tests updated
+- `comprehensive-type-safety.test.ts`: 10 tests updated
+- `type-safety.test.ts`: 48 tests updated
+- `string-escapes.test.ts`: 15 tests updated
+- `nested-object-test.test.ts`: 5 tests updated
+- `inference.test.ts`: 10 tests updated
+- `primitive-literals.test.ts`: 20 tests updated
+
+### Documentation Updates
+
+**README.md:**
+- Updated Quick Start examples to use new API
+- Updated Type-Safe Evaluation section
+- Updated Runtime Data Validation section
+- Updated all example code throughout
+- Updated API Reference section
+
+**docs/api-reference.md:**
+- Updated createParser() example
+- Updated evaluate() section
+- Updated createEvaluator() section (marked as lower-level API)
+- Added Parser interface documentation with ParseResult and Evaluator types
+
+### Files Modified
+
+- `src/createParser.ts`: Major refactoring for bound evaluator API
+- `src/createParser.bound-evaluator.test.ts`: New test file (24 tests)
+- `src/createParser.test.ts`: Updated to new API
+- `src/runtime/eval.test.ts`: Updated to new API
+- `src/createParser.schema-validation.test.ts`: Updated to new API
+- `src/comprehensive-type-safety.test.ts`: Updated to new API
+- `src/type-safety.test.ts`: Updated to new API
+- `src/string-escapes.test.ts`: Updated to new API
+- `src/nested-object-test.test.ts`: Updated to new API
+- `src/inference.test.ts`: Updated to new API
+- `src/primitive-literals.test.ts`: Updated to new API
+- `README.md`: Updated documentation
+- `docs/api-reference.md`: Updated documentation
+
+All 1011 tests pass. TypeScript type checking passes. Lint passes (warnings only).
