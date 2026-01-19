@@ -80,3 +80,11 @@ export {
 export { evaluate, createEvaluator } from "./runtime/eval.js";
 export type { EvalContext } from "./runtime/eval.js";
 
+// =============================================================================
+// Inference
+// =============================================================================
+
+export { infer } from "./runtime/infer.js";
+export type { InferredType } from "./runtime/infer.js";
+export type { Infer } from "./static/infer.js";
+

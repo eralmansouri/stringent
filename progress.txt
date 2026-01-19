@@ -287,3 +287,42 @@
 - src/index.ts (removed exports)
 - src/createParser.ts (fixed JSDoc comment)
 - PRD.md (marked task 1.5 as complete, updated architecture diagram)
+
+### 2026-01-18: Task 1.6 - Inference Tests
+
+**Completed:**
+- Created comprehensive `src/inference.test.ts` with 89 tests covering:
+  - **Runtime infer() function (45 tests):**
+    - Literal nodes (9 tests): number, decimal, string, single-quoted, empty string, true, false, null, undefined
+    - Identifier nodes (3 tests): known type from context, unknown type, multiple identifiers
+    - Binary operation nodes (7 tests): add, mul, eq, concat, nullCoalesce, chained, mixed precedence
+    - Parenthesized expressions (4 tests): simple, string, nested, precedence override
+    - Complex AST structures (6 tests): deeply nested, variables, string chain, equality, ternary, nested ternary
+    - Error cases (7 tests): null/undefined/primitive AST, missing outputSchema, non-string outputSchema
+  - **Static Infer<> type (27 tests):**
+    - Literal node types (6 tests): NumberNode, StringNode, NullNode, BooleanNode (true/false), UndefinedNode
+    - Identifier node types (3 tests): known type, string type, unknown type
+    - Binary node types (4 tests): number output, boolean output, string output, nested nodes
+    - Parsed expression types (9 tests): number, string, boolean, null, undefined, add, mul, eq, concat, identifier, complex
+    - Edge cases (5 tests): non-AST types return never (string, number, null, undefined, object without outputSchema)
+  - **Runtime/Type inference parity (12 tests):**
+    - Verifies runtime and type-level inference match for: number, string, boolean, null, undefined, add, mul, eq, concat, complex, identifier, expression with identifier
+  - **Complex AST structure inference (5 tests):**
+    - Deeply nested: 5-level add, 5-level mul, nested parens with operators, triple nested parens
+    - Mixed types: string concat + comparison, arithmetic with vars, string vars in concat
+    - Ternary: number branches, string branches, mixed branches, nested ternary
+    - Null coalescing: number fallback, string fallback, chained
+- Added exports to `src/index.ts`:
+  - Exported `infer` function from `src/runtime/infer.ts`
+  - Exported `InferredType` type from `src/runtime/infer.ts`
+  - Exported `Infer` type from `src/static/infer.ts`
+
+**Test Results:**
+- All 516 tests pass (89 new + 427 existing)
+- TypeScript typecheck passes
+- Build passes
+
+**Files Changed:**
+- src/index.ts (added inference exports)
+- src/inference.test.ts (new - 89 tests)
+- PRD.md (marked task 1.6 as complete)

@@ -124,12 +124,14 @@ Since this is a new project, consider these potential improvements:
 - Removed combinator exports from `src/index.ts`
 
 ### 1.6 Inference Tests
-- [ ] Test runtime infer() function
-- [ ] Test static Infer<> type
-- [ ] Test inference with complex AST structures
-- [ ] Ensure inference matches type-level expectations
+- [x] Test runtime infer() function
+- [x] Test static Infer<> type
+- [x] Test inference with complex AST structures
+- [x] Ensure inference matches type-level expectations
 
-**Files:** `src/runtime/infer.ts`, `src/static/infer.ts`
+**Completed:** Created comprehensive `src/inference.test.ts` with 89 tests.
+
+**Files:** `src/runtime/infer.ts`, `src/static/infer.ts`, `src/inference.test.ts`
 
 ---
 
