@@ -243,16 +243,26 @@ Since this is a new project, consider these potential improvements:
 **Files:** `README.md`
 
 ### 4.2 API Reference
-- [ ] Create `/docs` directory
-- [ ] Document createParser() API in detail
-- [ ] Document defineNode() and all options
-- [ ] Document all pattern element factories
-- [ ] Document Context type and usage
-- [ ] Document Grammar type structure
-- [ ] Document AST node types
+- [x] Create `/docs` directory
+- [x] Document createParser() API in detail
+- [x] Document defineNode() and all options
+- [x] Document all pattern element factories
+- [x] Document Context type and usage
+- [x] Document Grammar type structure
+- [x] Document AST node types
 - [ ] Generate API docs from JSDoc (typedoc)
 
-**Files:** `/docs/` (new directory)
+**Completed:** Created comprehensive `/docs/api-reference.md` with:
+- Full createParser() documentation with type safety examples
+- Complete defineNode() reference including precedence, configure, and eval
+- All pattern element factories (atoms: number, string, ident, nullLiteral, booleanLiteral, undefinedLiteral, constVal; expressions: lhs, rhs, expr)
+- The .as() method for naming bindings
+- Runtime functions: evaluate(), createEvaluator(), infer(), parseWithErrors()
+- All types: Parser, NodeSchema, Context, Grammar, AST node types
+- Error handling: error types, utilities, and factories
+- Type-level utilities: Parse, Infer, ComputeGrammar, SchemaToType, InferBindings
+
+**Files:** `/docs/api-reference.md` (new)
 
 ### 4.3 Architecture Documentation
 - [ ] Document precedence-based parsing algorithm

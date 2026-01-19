@@ -577,3 +577,50 @@
 - src/errors.ts (stricter ParseResultWithErrors type)
 - src/type-safety.test.ts (new - 48 tests)
 - PRD.md (marked task 3.3 as complete)
+
+### 2026-01-18: Task 4.2 - API Reference Documentation
+
+**Completed:**
+- Created `/docs` directory
+- Created comprehensive `/docs/api-reference.md` with complete API documentation
+
+**Documentation Contents:**
+- **Core API:**
+  - `createParser()` - Factory function with type safety examples and ValidatedInput explanation
+  - `defineNode()` - Full reference including all parameters (name, pattern, precedence, resultType, configure, eval)
+  - Precedence system explanation (lower = binds looser)
+- **Pattern Element Factories:**
+  - Atom factories: `number()`, `string(quotes)`, `ident()`, `nullLiteral()`, `booleanLiteral()`, `undefinedLiteral()`, `constVal(value)`
+  - Expression factories: `lhs(constraint?)`, `rhs(constraint?)`, `expr(constraint?)`
+  - The `.as()` method for naming bindings
+- **Runtime Functions:**
+  - `evaluate()` - Full signature, EvalContext interface, usage examples
+  - `createEvaluator()` - Convenience function for bound evaluators
+  - `infer()` - Runtime type inference
+  - `parseWithErrors()` - Detailed error information with ParseWithErrorsResult and RichParseError
+- **Types:**
+  - `Parser` interface with parse method and nodes property
+  - `NodeSchema` interface with all generic parameters
+  - `Context` interface and EmptyContext
+  - `Grammar` type structure
+  - All AST node types: ASTNode, NumberNode, StringNode, BooleanNode, NullNode, UndefinedNode, IdentNode, BinaryNode
+- **Error Handling:**
+  - ParseError, TypeMismatchError, NoMatchError type-level errors
+  - RichParseError runtime error with position tracking
+  - Error utilities: calculatePosition, createSnippet, formatParseError, formatErrors
+  - Error factories: noMatchError, typeMismatchError, unterminatedStringError, etc.
+- **Type-Level Utilities:**
+  - Parse<Grammar, Input, Context>
+  - Infer<T>
+  - ComputeGrammar<Nodes>
+  - SchemaToType<T>
+  - InferBindings<Pattern>
+  - InferEvaluatedBindings<Pattern>
+
+**Test Results:**
+- All 691 tests pass
+- TypeScript typecheck passes
+
+**Files Changed:**
+- docs/api-reference.md (new - comprehensive API documentation)
+- PRD.md (marked task 4.2 as complete)
