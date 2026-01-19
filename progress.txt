@@ -927,3 +927,71 @@
 - src/type-safety.test.ts (prefixed type-only variables)
 - src/types.test.ts (prefixed type-only variables, added eslint-disable)
 - PRD.md (marked task 6.1 as complete)
+
+### 2026-01-18: Task 6.2 - Performance Review
+
+**Completed:**
+- Created comprehensive performance benchmarks and documentation
+- Profiled parsing performance across various scenarios
+- Identified parsing characteristics and potential optimizations
+- Documented performance characteristics for users
+
+**Benchmarks Created (`src/performance.bench.ts`):**
+- **Simple Literals (6 benchmarks):**
+  - Number literal: ~31,600 ops/sec (0.032ms)
+  - Decimal number: ~13,400 ops/sec (0.075ms)
+  - Large number: ~7,000 ops/sec (0.143ms)
+  - String literals: ~11,100 ops/sec (0.090ms)
+  - Identifier: ~1,400 ops/sec (0.695ms)
+- **Binary Operations (6 benchmarks):**
+  - Simple addition: ~27,900 ops/sec (0.036ms)
+  - Simple multiplication: ~26,400 ops/sec (0.038ms)
+  - Mixed precedence: ~21,900 ops/sec (0.046ms)
+  - Three precedence levels: ~15,900 ops/sec (0.063ms)
+- **Chained Operations (8 benchmarks):**
+  - 5-element chain: ~9,500 ops/sec (0.105ms)
+  - 10-element chain: ~5,400 ops/sec (0.186ms)
+  - 20-element chain: ~2,700 ops/sec (0.369ms)
+  - 50-element chain: ~1,200 ops/sec (0.839ms)
+- **Nested Parentheses (6 benchmarks):**
+  - 5 levels: ~8,000 ops/sec (0.125ms)
+  - 10 levels: ~4,500 ops/sec (0.222ms)
+  - 20 levels: ~2,300 ops/sec (0.435ms)
+- **Complex Expressions (4 benchmarks)**
+- **Parser Creation (3 benchmarks)**
+- **Grammar Complexity (5 benchmarks)**
+- **String Parsing (5 benchmarks)**
+- **Context Resolution (4 benchmarks)**
+
+**Performance Documentation (`docs/performance.md`):**
+- Benchmark results tables
+- Time complexity analysis: O(n) linear scaling confirmed
+- Space complexity analysis
+- Scaling behavior documentation with examples
+- Current optimizations documented
+- Potential future optimizations identified
+- Guidance on when Stringent is appropriate vs. alternatives
+- Instructions for running benchmarks
+
+**Key Findings:**
+- Parser exhibits linear O(n) scaling with expression complexity
+- Doubling expression length roughly doubles parse time
+- No exponential blowup with nested constructs
+- Sub-millisecond parsing for typical DSL expressions
+- Performance adequate for interactive use cases (1000+ ops/sec)
+
+**Optimizations Identified:**
+- Grammar is rebuilt on each parse() call (potential optimization)
+- Current implementation prioritizes correctness and type safety
+- For most DSL use cases, current performance is more than adequate
+
+**Test Results:**
+- All 691 tests pass
+- TypeScript typecheck passes
+- Lint passes (0 errors, 109 warnings - intentional any in tests)
+
+**Files Changed:**
+- src/performance.bench.ts (new - 50+ benchmarks)
+- docs/performance.md (new - performance documentation)
+- package.json (added bench script)
+- PRD.md (marked task 6.2 as complete)
