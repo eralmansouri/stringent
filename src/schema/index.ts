@@ -341,7 +341,12 @@ export type EvalFn = <$>(values: Record<string, unknown>, ctx: $) => unknown;
  * - precedence: 1 or "atom" (not number | "atom")
  * - resultType: "number" (not string)
  *
+ * The resultType parameter is validated at compile time using arktype.
+ * Invalid type strings like 'garbage' will cause TypeScript errors.
+ * Valid arktype types include: primitives, subtypes (string.email), constraints (number >= 0), unions.
+ *
  * @example
+ * ```ts
  * const add = defineNode({
  *   name: "add",
  *   pattern: [lhs("number").as("left"), constVal("+"), rhs("number").as("right")],
@@ -349,6 +354,16 @@ export type EvalFn = <$>(values: Record<string, unknown>, ctx: $) => unknown;
  *   resultType: "number",
  *   eval: ({ left, right }) => left + right,  // left and right are already numbers
  * });
+ *
+ * // Valid resultType examples:
+ * // resultType: 'string'         // primitive
+ * // resultType: 'string.email'   // subtype
+ * // resultType: 'number >= 0'    // constraint
+ * // resultType: 'string | number' // union
+ *
+ * // Invalid - causes compile error:
+ * // resultType: 'garbage'
+ * ```
  */
 export function defineNode<
   const TName extends string,
@@ -359,7 +374,7 @@ export function defineNode<
   readonly name: TName;
   readonly pattern: TPattern;
   readonly precedence: TPrecedence;
-  readonly resultType: TResultType;
+  readonly resultType: type.validate<TResultType>;
   readonly configure?: <$>(bindings: InferBindings<TPattern>, ctx: $) => Record<string, unknown>;
   readonly eval?: <$>(
     values: InferEvaluatedBindings<TPattern>,
