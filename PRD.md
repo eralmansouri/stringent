@@ -1,555 +1,241 @@
-# Stringent Library - Polish & Enhancement Plan
+# Stringent v2 - Type Inference Fix
 
-## Overview
+## READ THIS FIRST
 
-**Stringent** is a type-safe expression parser for TypeScript that provides compile-time validation and inference. It parses expressions (like `values.password == values.confirmPassword`) against a schema at both compile-time and runtime, with full TypeScript type inference.
+**DO NOT WRITE A SINGLE LINE OF CODE** until you can explain, in your own words:
+1. What makes this library different from a regular expression parser
+2. Why returning `unknown` from `evaluate()` defeats the entire purpose
+3. How TypeScript's type system can infer return types from input types
 
-**Current State:** v0.0.2 (early development)
-**Goal:** Polish the library to be production-ready with comprehensive tests, documentation, and missing features.
-
----
-
-## Executive Summary
-
-### What Works Well
-
-- Sophisticated type-level parsing system
-- Precedence-based grammar handling
-- Type-runtime mirror pattern (same algorithm at compile and runtime)
-- Good JSDoc coverage on core APIs
-- Solid type-level tests (~90% coverage)
-
-### What Needs Work
-
-- Runtime tests are incomplete (~30% coverage)
-- No error/edge case tests
-- Missing primitive literals (null, boolean, undefined)
-- eval() function not implemented
-- No formal test infrastructure
-- Limited documentation beyond README
-- No real-world examples beyond arithmetic
+If you cannot explain these things, you are not ready to work on this codebase. Read the existing code. Read the tests. Understand the patterns. Then come back.
 
 ---
 
-## Architecture Overview
+## What Is Stringent?
 
-```
-src/
-├── index.ts              # Main API exports
-├── createParser.ts       # Parser factory (public API)
-├── context.ts            # Parse context (schema data)
-├── schema/               # Node schema definitions
-├── grammar/              # Grammar type computation
-├── parse/                # Type-level parsing
-├── primitive/            # Primitive parsers (number, string, ident)
-├── runtime/              # Runtime parser & inference
-└── static/               # Static type re-exports
+Stringent is a **compile-time type-safe** expression parser for TypeScript.
+
+There are thousands of expression parsers. What makes Stringent special is that **the types flow through everything**. When you parse `"1 + 2"`, TypeScript knows at compile time that the result is a number. When you parse `"true && false"`, TypeScript knows it's a boolean. When you parse `"hello" ++ "world"`, TypeScript knows it's a string.
+
+This is not about runtime. Runtime is easy. Any JavaScript can evaluate `1 + 2`. The hard part - the ENTIRE VALUE OF THIS LIBRARY - is that TypeScript's type system tracks the types through parsing and evaluation.
+
+---
+
+## The Problem We Need to Fix
+
+Currently, `evaluate()` returns `unknown`:
+
+```typescript
+const parser = createParser([addNode, mulNode] as const);
+const result = parser.parse('1 + 2', {});
+
+// result[0] has type: BinaryNode<"add", NumberNode, NumberNode, "number">
+// The AST knows its outputSchema is "number"
+
+const value = evaluate(result[0], ctx);
+// value has type: unknown
+// THIS IS WRONG. It should be: number
 ```
 
-### Key Files to Understand
+The AST node **already carries its type information** in the `outputSchema` field. The `evaluate` function just throws that information away and returns `unknown`.
 
-- `src/createParser.ts` - Main public API, creates type-safe parsers
-- `src/schema/index.ts` - defineNode() and pattern element factories
-- `src/runtime/parser.ts` - Core runtime parsing algorithm
-- `src/parse/index.ts` - Type-level Parse<> implementation
-- `src/grammar/index.ts` - Grammar computation from node schemas
+This defeats the entire purpose of the library.
 
 ---
 
-## Design Considerations (No Backward Compat Needed)
+## What Success Looks Like
 
-Since this is a new project, consider these potential improvements:
+After fixing this, the following should work:
 
-1. **Simplify Exports:** Currently exports many internal types. Consider a cleaner public API surface.
+### Example 1: Basic Arithmetic
+```typescript
+const parser = createParser([
+  defineNode({
+    name: 'add',
+    pattern: [lhs('number').as('left'), constVal('+'), rhs('number').as('right')],
+    precedence: 1,
+    resultType: 'number',
+    eval: ({ left, right }) => left + right,
+  }),
+] as const);
 
-2. **Rename Confusing APIs:**
-   - `constVal()` → could be `literal()` or `keyword()` for clarity
-   - Pattern element names could be more intuitive
+const result = parser.parse('1 + 2', {});
+const value = evaluate(result[0], ctx);
 
-3. **Remove Unused Code:** Combinators (Union, Tuple, Optional, Many) may not be needed in current design
+// TypeScript should know: typeof value === number
+// NOT unknown
+```
 
-4. **Consolidate Files:** Some small files could be merged for simpler structure
+### Example 2: Boolean Operations
+```typescript
+const parser = createParser([
+  defineNode({
+    name: 'and',
+    pattern: [lhs('boolean').as('left'), constVal('&&'), rhs('boolean').as('right')],
+    precedence: 1,
+    resultType: 'boolean',
+    eval: ({ left, right }) => left && right,
+  }),
+] as const);
 
-5. **Rethink Error Types:** Current error types are generic - could be redesigned for better DX
+const result = parser.parse('true && false', {});
+const value = evaluate(result[0], ctx);
 
----
+// TypeScript should know: typeof value === boolean
+```
 
-## Phase 1: Test Infrastructure & Core Testing
+### Example 3: String Concatenation
+```typescript
+const parser = createParser([
+  defineNode({
+    name: 'concat',
+    pattern: [lhs('string').as('left'), constVal('++'), rhs('string').as('right')],
+    precedence: 1,
+    resultType: 'string',
+    eval: ({ left, right }) => left + right,
+  }),
+] as const);
 
-### 1.1 Set Up Proper Test Infrastructure
+const result = parser.parse('"hello" ++ "world"', {});
+const value = evaluate(result[0], ctx);
 
-- [x] Install vitest or similar test framework
-- [x] Configure test scripts in package.json
-- [x] Set up test configuration (vitest.config.ts)
-- [x] Remove broken `tsx src/test.ts` reference
-- [x] Create test helpers/utilities file
+// TypeScript should know: typeof value === string
+```
 
-**Files:** `package.json`, `vitest.config.ts` (new)
+### Example 4: Mixed Types (Comparison)
+```typescript
+const parser = createParser([
+  defineNode({
+    name: 'eq',
+    pattern: [lhs('number').as('left'), constVal('=='), rhs('number').as('right')],
+    precedence: 1,
+    resultType: 'boolean',  // Numbers in, BOOLEAN out
+    eval: ({ left, right }) => left === right,
+  }),
+] as const);
 
-### 1.2 Runtime Parser Tests
+const result = parser.parse('1 == 2', {});
+const value = evaluate(result[0], ctx);
 
-- [x] Create `src/runtime/parser.test.ts` with comprehensive tests
-- [x] Test tokenization: numberLiteral, stringLiteral, identifierAtom
-- [x] Test parentheses handling and nesting
-- [x] Test operator precedence at runtime level
-- [x] Test grammar building from node schemas
-- [x] Test buildNodeResult field extraction
-- [x] Test whitespace handling between tokens
+// TypeScript should know: typeof value === boolean
+// Even though the operands are numbers, the RESULT is boolean
+```
 
-**Files:** `src/runtime/parser.ts`, `src/runtime/parser.test.ts` (new)
+### Example 5: The Type Comes From the AST
+```typescript
+// This is the key insight: the AST node carries its type
+type MyAST = BinaryNode<"add", NumberNode, NumberNode, "number">;
+//                                                      ^^^^^^^^
+//                                          This "number" is the outputSchema
 
-### 1.3 Error Handling Tests
+// When you call evaluate() on this AST, the return type should be `number`
+// because the AST's outputSchema is "number"
 
-- [x] Test invalid syntax errors (malformed expressions)
-- [x] Test type mismatch errors (constraint violations)
-- [x] Test no-match errors (unknown operators)
-- [x] Ensure errors have helpful messages
-- [x] Test error recovery behavior
-
-**Files:** `src/parse/index.ts`, `src/error-handling.test.ts` (new)
-
-### 1.4 Edge Case Tests
-
-- [x] Test deeply nested parentheses (10+ levels)
-- [x] Test long chained operations (a + b + c + d + e + ...)
-- [x] Test mixed precedence chains
-- [x] Test empty input handling
-- [x] Test whitespace-only input
-- [x] Test unicode identifiers
-- [x] Test very long string literals
-- [x] Test number edge cases (negative, decimals, scientific notation)
-
-### 1.5 Combinator Review
-
-- [x] Evaluate if Union, Tuple, Optional, Many combinators are needed
-- [x] If useful: add tests and document
-- [x] If not useful: **remove them entirely** (no backward compat concerns)
-- [x] Clean up any dead code paths
-
-**Completed:** Removed unused combinators (Union, Tuple, Optional, Many) and related files:
-
-- Deleted `src/combinators/index.ts`
-- Deleted `src/static/parser.ts` (only re-exported combinators)
-- Removed combinator exports from `src/index.ts`
-
-### 1.6 Inference Tests
-
-- [x] Test runtime infer() function
-- [x] Test static Infer<> type
-- [x] Test inference with complex AST structures
-- [x] Ensure inference matches type-level expectations
-
-**Completed:** Created comprehensive `src/inference.test.ts` with 89 tests.
-
-**Files:** `src/runtime/infer.ts`, `src/static/infer.ts`, `src/inference.test.ts`
-
----
-
-## Phase 2: Missing Features
-
-### 2.1 Add Missing Primitive Literals
-
-**TODO found in code:** `// todo: add null/boolean/undefined`
-
-- [x] Add `nullLiteral` atom (matches `null`)
-- [x] Add `booleanLiteral` atom (matches `true`/`false`)
-- [x] Add `undefinedLiteral` atom (matches `undefined`)
-- [x] Add corresponding type-level support in Parse<>
-- [x] Add tests for new literals
-- [x] Update exports in index.ts
-
-**Files:** `src/runtime/parser.ts:91`, `src/parse/index.ts`, `src/index.ts`
-
-### 2.2 Implement eval() Function
-
-**README states:** "Coming Soon"
-
-- [x] Design eval function signature
-- [x] Implement recursive AST evaluation
-- [x] Handle binary operators based on node type
-- [x] Handle identifier resolution from context
-- [x] Handle literal values
-- [x] Add type-safe return type inference
-- [x] Write comprehensive eval tests
-- [x] Update README to remove "Coming Soon"
-
-**Files:** `src/runtime/eval.ts` (new), `README.md`
-
-### 2.3 String Escape Handling
-
-- [x] Review current string parsing for escape sequences
-- [x] Add support for `\n`, `\t`, `\\`, `\"`, `\'`
-- [x] Add tests for escaped strings
-- [x] Handle unicode escapes (`\uXXXX`)
-
-**Completed:** Implemented custom string parser with proper escape handling.
-
-**Files:** `src/runtime/parser.ts`, `src/string-escapes.test.ts`
+// The evaluate function should be generic over the AST type
+// and use the outputSchema to determine the return type
+```
 
 ---
 
-## Phase 3: API Polish
+## What NOT to Do
 
-### 3.1 Error Messages
+1. **Do not just add type assertions.** `return result as number` is not a fix. The types must flow naturally.
 
-- [x] Improve ParseError messages with position info
-- [x] Add source position tracking during parsing
-- [x] Include snippet of problematic input in errors
-- [x] Make TypeMismatchError more descriptive
+2. **Do not break the runtime behavior.** The evaluate function works correctly at runtime. We're fixing the types, not the logic.
 
-**Completed:** Implemented comprehensive error system with:
+3. **Do not ignore edge cases.** What happens when `outputSchema` is not a known type? What about nested expressions?
 
-- `RichParseError` type with position (offset, line, column), message, and snippet
-- `SourcePosition` interface for position tracking
-- `parseWithErrors()` function that returns detailed error info on failure
-- Error creation utilities: `noMatchError`, `typeMismatchError`, `unterminatedStringError`, etc.
-- `formatParseError()` and `formatErrors()` for human-readable output
-- 62 tests covering position calculation, snippet creation, error formatting
-
-**Files:** `src/errors.ts` (new), `src/runtime/parser.ts`, `src/error-messages.test.ts` (new)
-
-### 3.2 API Consistency
-
-- [x] Review all exports for naming consistency
-- [x] Ensure factory functions follow consistent patterns
-- [x] **Remove legacy exports** (Number, String, Ident, Const) - no backward compat needed
-- [x] Redesign any awkward APIs for better ergonomics
-- [x] Simplify exports - only expose what's truly needed
-
-**Completed:** Cleaned up the public API surface:
-
-- Removed legacy capitalized factories: `Number`, `String`, `Ident`, `Const`
-- Removed legacy type exports: `IParser`, `ParseResult`, `Primitive`
-- Renamed internal factories to `createNumber`, `createString`, `createIdent`, `createConst` with `@internal` JSDoc
-- Public API now only exposes schema factories: `number()`, `string()`, `ident()`, `constVal()`, etc.
-- All 643 tests pass with the cleaned-up API
-
-### 3.3 Type Safety Review
-
-- [x] Audit for `any` types that could be stricter
-- [x] Ensure all public APIs have proper type inference
-- [x] Test that type errors are comprehensible
-- [x] Add type tests for common mistake scenarios
-
-**Completed:** Comprehensive type safety improvements:
-
-- Replaced 4 `any` type usages with stricter types (`unknown`, `ASTNode<string, unknown>`)
-- Created `src/type-safety.test.ts` with 48 tests covering:
-  - Public API type inference (createParser, defineNode, evaluate, infer, parseWithErrors)
-  - Parse result type inference (literals, binary operations, context-based typing)
-  - Type error comprehensibility (no match returns [], partial matches)
-  - Common mistake scenarios (pattern usage, precedence, expression roles)
-  - Schema factory types (all primitives and expression schemas)
-  - Infer type system (all node types, never for non-AST)
-- All 691 tests pass, TypeScript typecheck passes
-
-**Files:** `src/createParser.ts`, `src/runtime/parser.ts`, `src/errors.ts`, `src/type-safety.test.ts` (new)
+4. **Do not copy-paste solutions.** Understand WHY the fix works. If you can't explain it, you don't understand it.
 
 ---
 
-## Phase 4: Documentation
+## Tasks
 
-### 4.1 README Enhancement
+### Task 1: Understand the Codebase
 
-- [x] Add more usage examples beyond arithmetic
-- [x] Document all pattern elements with examples
-- [x] Add comparison operators example
-- [x] Add field validation example
-- [x] Add conditional expression example
-- [x] Document error handling patterns
-- [x] Add TypeScript version requirements
-- [x] Add badges (npm version, build status, etc.)
+**DO NOT SKIP THIS TASK.**
 
-**Files:** `README.md`
+Before writing any code, you must be able to answer:
 
-### 4.2 API Reference
+- [ ] What is the `outputSchema` field on AST nodes? Where does it come from?
+- [ ] How does `parser.parse()` preserve type information from input to output?
+- [ ] What existing type utilities does the codebase have for mapping schema strings to TypeScript types?
+- [ ] Why does the current `evaluate()` function lose type information?
 
-- [x] Create `/docs` directory
-- [x] Document createParser() API in detail
-- [x] Document defineNode() and all options
-- [x] Document all pattern element factories
-- [x] Document Context type and usage
-- [x] Document Grammar type structure
-- [x] Document AST node types
-- [x] Generate API docs from JSDoc (typedoc)
+Write your answers in `progress.txt`. If you cannot answer these questions, keep reading the code until you can.
 
-**Completed:** Created comprehensive `/docs/api-reference.md` with:
+**Files to study:**
+- `src/createParser.ts` - How the parser preserves types
+- `src/parse/index.ts` - How parsing infers output types
+- `src/schema/index.ts` - The `SchemaToType` utility and related types
+- `src/static/infer.ts` - The `Infer` type
+- `src/runtime/eval.ts` - The current (broken) evaluate function
+- `src/primitive/index.ts` - AST node types with `outputSchema`
 
-- Full createParser() documentation with type safety examples
-- Complete defineNode() reference including precedence, configure, and eval
-- All pattern element factories (atoms: number, string, ident, nullLiteral, booleanLiteral, undefinedLiteral, constVal; expressions: lhs, rhs, expr)
-- The .as() method for naming bindings
-- Runtime functions: evaluate(), createEvaluator(), infer(), parseWithErrors()
-- All types: Parser, NodeSchema, Context, Grammar, AST node types
-- Error handling: error types, utilities, and factories
-- Type-level utilities: Parse, Infer, ComputeGrammar, SchemaToType, InferBindings
-- Typedoc configuration for auto-generated API docs from JSDoc comments
-- Scripts: `docs` and `docs:watch` added to package.json
-- Generated docs output to `/docs/api/` (gitignored)
+### Task 2: Fix `evaluate()` Return Type
 
-**Files:** `/docs/api-reference.md` (new), `typedoc.json` (new)
+- [x] `evaluate()` returns `number` when AST has `outputSchema: "number"`
+- [x] `evaluate()` returns `string` when AST has `outputSchema: "string"`
+- [x] `evaluate()` returns `boolean` when AST has `outputSchema: "boolean"`
+- [x] `evaluate()` returns `null` when AST has `outputSchema: "null"`
+- [x] `evaluate()` returns `undefined` when AST has `outputSchema: "undefined"`
+- [x] `evaluate()` returns `unknown` for unknown outputSchema
+- [x] Runtime behavior unchanged (all existing tests pass)
 
-### 4.3 Architecture Documentation
+**Do not change the runtime behavior.** The function already works correctly. You are only fixing the TypeScript types.
 
-- [x] Document precedence-based parsing algorithm
-- [x] Document type-runtime mirror pattern
-- [x] Document lhs/rhs/expr role system
-- [x] Create architecture diagram
-- [x] Document grammar computation
+### Task 3: Fix `createEvaluator()` Return Type
 
-**Completed:** Created comprehensive `/docs/architecture.md` with:
+- [x] `createEvaluator()` returns a function with proper return type inference
+- [x] The returned evaluator infers types the same way `evaluate()` does
 
-- Overview of core components and file structure
-- Precedence-based parsing algorithm with level-based recursive descent
-- Type-runtime mirror pattern showing parallel implementations
-- LHS/RHS/Expr role system for avoiding left-recursion and controlling associativity
-- Grammar computation process from node schemas
-- ASCII architecture diagrams showing data flow
-- Expression parsing walkthrough example (`2 + 3 * 4`)
-- Key design decisions and rationale
+### Task 4: Add Type-Level Tests
 
-**Files:** `/docs/architecture.md` (new)
+Create tests that verify the TYPE inference works, not just the runtime behavior.
 
-### 4.4 Examples
+**Example of a type-level test:**
+```typescript
+import { expectTypeOf } from 'vitest';
 
-- [x] Create `/examples` directory
-- [x] Add basic arithmetic example
-- [x] Add comparison operators example
-- [x] Add form validation example
-- [x] Add conditional/ternary example
-- [x] Add custom operators example
+it('evaluate returns number for number outputSchema', () => {
+  const ast = { node: 'literal', value: 42, outputSchema: 'number' } as const;
+  const result = evaluate(ast, ctx);
 
-**Completed:** Created `/examples` directory with 5 comprehensive examples:
+  // This is a TYPE assertion, not a runtime assertion
+  expectTypeOf(result).toEqualTypeOf<number>();
+});
+```
 
-- `basic-arithmetic.ts` - Addition, subtraction, multiplication, division, exponentiation with precedence
-- `comparison-operators.ts` - Equality, inequality, less/greater than, filter system example
-- `form-validation.ts` - Password confirmation, age validation, email validation, custom operators
-- `conditional-ternary.ts` - Ternary expressions, grade calculator, value clamping
-- `custom-operators.ts` - String DSL, custom operators (divides, between), nullish coalescing, unit conversion
+- [x] Type tests for `evaluate()` with all primitive types (number, string, boolean, null, undefined)
+- [x] Type tests for `evaluate()` with parsed expressions from `parser.parse()`
+- [x] Type tests for `evaluate()` with nested expressions
+- [x] Type tests for `createEvaluator()` helper
 
-**Files:** `/examples/` (new directory)
+### Task 5: Update Documentation
 
-### 4.5 Contributing Guide
-
-- [x] Create CONTRIBUTING.md
-- [x] Document development setup
-- [x] Document test running
-- [x] Document code patterns and conventions
-- [x] Add pull request template
-
-**Completed:** Created comprehensive CONTRIBUTING.md with:
-
-- Development setup instructions (prerequisites, getting started, available scripts)
-- Test running guide (all test commands, file locations, writing tests)
-- Code patterns and conventions (type-runtime mirror pattern, file organization, naming conventions, TypeScript guidelines)
-- Architecture overview reference
-- Making changes workflow
-- Pull request process with checklist
-- Created `.github/PULL_REQUEST_TEMPLATE.md` with sections for summary, type of change, test plan, and checklist
-
-**Files:** `CONTRIBUTING.md` (new), `.github/PULL_REQUEST_TEMPLATE.md` (new)
+- [ ] Update README to show type-safe evaluation examples
+- [ ] Update API reference (`docs/api-reference.md`) with correct return types
+- [ ] Add examples showing compile-time type inference in action
 
 ---
 
-## Phase 5: Build & CI
+## Acceptance Criteria
 
-### 5.1 Build Configuration
+The fix is complete when:
 
-- [x] Review tsconfig.json settings
-- [x] Ensure source maps are generated
-- [x] Review dist output structure
-- [x] Add minification if appropriate
-
-**Completed:** Enhanced build configuration for production readiness:
-
-- Added `sourceMap: true` to tsconfig.json for JavaScript source maps
-- Added `declarationMap: true` to tsconfig.json for TypeScript declaration source maps
-- Updated tsconfig.build.json to exclude test-helpers.ts and examples from build
-- Cleaned stale `combinators` folder from dist output
-- Minification not added: Library is small (320KB including source maps, ~1400 lines JS), and libraries should provide unminified code for bundlers to tree-shake and optimize
-
-**Files:** `tsconfig.json`, `tsconfig.build.json`
-
-### 5.2 CI Pipeline
-
-- [x] Add GitHub Actions workflow
-- [x] Run tests on PR
-- [x] Run type checking on PR
-- [x] Run build verification
-- [x] Add test coverage reporting
-
-**Completed:** Created `.github/workflows/ci.yml` with comprehensive CI pipeline:
-
-- **Test job:** Runs on Node.js 18, 20, and 22 matrix
-  - Type checking (`pnpm typecheck`)
-  - Tests (`pnpm test`)
-  - Build verification (`pnpm build`)
-- **Coverage job:** Runs on Node.js 20
-  - Generates test coverage with `@vitest/coverage-v8`
-  - Uploads to Codecov for coverage tracking
-- Triggers on push to main and pull requests to main
-- Uses pnpm v9 with caching for fast installs
-
-**Files:** `.github/workflows/ci.yml` (new)
-
-### 5.3 Package.json Cleanup
-
-- [x] Fix broken test script
-- [x] Add proper scripts (test, test:watch, build, lint)
-- [x] Review dependencies
-- [x] Add engines field (Node.js version)
-- [x] Add keywords for npm discovery
-
-**Completed:** Package.json is now production-ready:
-
-- Scripts: `build`, `typecheck`, `lint`, `test`, `test:watch`, `test:coverage`, `prepublishOnly`
-- Added `engines` field requiring Node.js >=18.0.0
-- Expanded keywords for npm discoverability: type-safe, compile-time, type-level, expression-parser, dsl, ast, grammar, validation, inference
-- Reviewed dependencies: hotscript correctly remains a devDependency (type-only imports)
+1. `evaluate(ast, ctx)` returns the correct TypeScript type based on `ast.outputSchema`
+2. `createEvaluator(nodes)(ast, data)` returns the correct TypeScript type
+3. All existing tests still pass (runtime behavior unchanged)
+4. New type-level tests verify the type inference
+5. No use of `any` or unsafe type assertions in the fix
+6. The fix is documented with examples
 
 ---
 
-## Phase 6: Final Polish
+## Remember
 
-### 6.1 Code Quality
+The runtime already works. We're not fixing bugs in the evaluation logic. We're fixing the TypeScript types so that the compile-time type safety - THE ENTIRE POINT OF THIS LIBRARY - actually works.
 
-- [x] Add ESLint configuration
-- [x] Add Prettier configuration
-- [x] Fix any linting issues
-- [x] Ensure consistent code style
+If your fix involves `as any` or `as unknown` or ignoring type errors, you have not fixed the problem. You have hidden it.
 
-**Completed:** Set up comprehensive code quality tooling:
-
-- **ESLint (v9):** Flat config with typescript-eslint, eslint-config-prettier
-  - TypeScript-aware linting with project service
-  - `@typescript-eslint/no-explicit-any` as warning for gradual adoption
-  - `@typescript-eslint/no-unused-vars` with underscore prefix pattern
-  - Examples directory excluded (demo code, not production)
-- **Prettier (v3.8):** Consistent code formatting
-  - Single quotes, 2-space indent, 100 char line width
-  - ES5 trailing commas, LF line endings
-- **Scripts added:**
-  - `lint`: Run ESLint on src/
-  - `lint:fix`: Auto-fix ESLint issues
-  - `format`: Format with Prettier
-  - `format:check`: Check formatting
-- **109 warnings remain:** Intentional `any` usages in test files for edge case testing
-
-**Files:** `eslint.config.js` (new), `.prettierrc` (new), `.prettierignore` (new), `package.json`
-
-### 6.2 Performance Review
-
-- [x] Profile parsing performance
-- [x] Identify any obvious optimizations
-- [x] Document performance characteristics
-
-**Completed:** Created comprehensive performance analysis and documentation:
-
-- **Benchmarks (`src/performance.bench.ts`):** 50+ benchmarks covering:
-  - Simple literals (number, string, identifier)
-  - Binary operations (single, mixed precedence, three levels)
-  - Chained operations (5, 10, 20, 50 elements)
-  - Nested parentheses (5, 10, 20 levels)
-  - Complex expressions
-  - Parser creation overhead
-  - Grammar complexity (multiple operators at same precedence)
-  - String parsing (short, medium, long, with escapes)
-  - Context resolution (small, medium, large contexts)
-- **Performance documentation (`docs/performance.md`):** Complete performance guide including:
-  - Benchmark results tables
-  - Time/space complexity analysis
-  - Scaling behavior documentation (linear scaling confirmed)
-  - Current optimizations and potential future optimizations
-  - Guidance on when Stringent is appropriate vs. alternatives
-- **Key findings:**
-  - Linear O(n) scaling with expression complexity
-  - ~31,000 ops/sec for simple number literals
-  - ~27,000 ops/sec for simple binary operations
-  - ~1,200 ops/sec for 50-element chains
-  - Sub-millisecond parsing for typical expressions
-- **Added `bench` script to package.json**
-
-**Files:** `src/performance.bench.ts` (new), `docs/performance.md` (new), `package.json`
-
-### 6.3 Pre-1.0 Checklist
-
-- [x] All tests pass
-- [x] Test coverage > 80%
-- [x] All TODO comments resolved
-- [x] Documentation complete
-- [x] No breaking API changes pending
-- [x] Version bump to 1.0.0-beta
-
-**Completed:** Verified all pre-1.0 requirements met:
-
-- **All tests pass:** 691 tests passing across 12 test files
-- **Test coverage > 80%:** 95.03% statement, 89.95% branch, 96.61% function, 94.72% line coverage
-- **All TODO comments resolved:** No TODO, FIXME, or HACK comments remain in source code
-- **Documentation complete:** README, API reference, architecture docs, performance docs, contributing guide, 5 examples
-- **No breaking API changes pending:** Public API is stable and well-organized
-- **Version bump:** Updated from 0.0.2 to 1.0.0-beta
-
-**Files Changed:** `package.json` (version bump)
-
----
-
-## Priority Order
-
-**Critical (Must Have for Production):**
-
-1. Test infrastructure setup (1.1)
-2. Runtime parser tests (1.2)
-3. Error handling tests (1.3)
-4. Missing primitives (2.1)
-
-**High (Important for Quality):** 5. Edge case tests (1.4) 6. eval() implementation (2.2) 7. README enhancement (4.1) 8. Package.json cleanup (5.3)
-
-**Medium (Nice to Have):** 9. API reference docs (4.2) 10. Examples (4.4) 11. CI pipeline (5.2) 12. Contributing guide (4.5)
-
-**Low (Future Enhancement):** 13. Architecture docs (4.3) 14. Code quality tools (6.1) 15. Performance review (6.2)
-
----
-
-## Files Quick Reference
-
-| File                    | Purpose            | Key Changes Needed                      |
-| ----------------------- | ------------------ | --------------------------------------- |
-| `src/runtime/parser.ts` | Runtime parsing    | Add null/bool/undefined, improve errors |
-| `src/parse/index.ts`    | Type-level parsing | Match runtime changes                   |
-| `src/index.ts`          | Public exports     | Export new primitives                   |
-| `package.json`          | Project config     | Fix scripts, add dev deps               |
-| `README.md`             | Documentation      | Expand examples                         |
-| `vitest.config.ts`      | Test config        | Create new                              |
-| `src/runtime/eval.ts`   | Expression eval    | Create new                              |
-| `/docs/`                | API docs           | Create new                              |
-| `/examples/`            | Usage examples     | Create new                              |
-
----
-
-## Notes for Implementation Agents
-
-1. **Type-Runtime Parity:** Any change to runtime parsing MUST have corresponding type-level changes. The library's value prop is that types and runtime stay in sync.
-
-2. **No Backward Compatibility Required:** This is a new project (v0.0.2). Feel free to:
-   - Remove legacy exports (Number, String, Ident, Const)
-   - Rename/redesign APIs for better ergonomics
-   - Break existing behavior if it improves the design
-   - Clean up exports to only expose what's truly needed
-
-3. **Test Philosophy:** Most existing tests are type-level (compile-time). Runtime tests should verify actual parsing behavior, not just types.
-
-4. **Dependencies:** The library uses `@sinclair/parsebox` for tokenization, `hotscript` for type manipulation, and `arktype` for validation.
-
-5. **Expression Roles:** The lhs/rhs/expr system is critical for correct precedence. Understand this before modifying grammar handling.
-
-6. **Design Freedom:** Prioritize clean, intuitive APIs. If something feels awkward, redesign it rather than documenting around it.
-
-- [x] - FIX ALL THESE ERRORS WHAT?????
-
-**Completed:** Fixed all TypeScript errors in `src/performance.bench.ts`:
-
-- Added required second argument (schema) to all `parser.parse()` calls - the parser's `parse` method signature requires `(input, schema)` where schema is a `Record<string, string>`
-- Fixed context objects - changed from `{ data: { x: 'number' } }` to flat `{ x: 'number' }` format (the wrapping in `{ data: ... }` happens internally)
-- Added type assertions (`as '1'` or `as '"hello"'`) for dynamically generated benchmark inputs to satisfy TypeScript's literal type validation
-
-**Files Changed:** `src/performance.bench.ts`
+Understand first. Then code.

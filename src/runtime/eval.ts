@@ -10,7 +10,26 @@
  * 3. Returns the computed result
  */
 
-import type { NodeSchema } from '../schema/index.js';
+import type { NodeSchema, SchemaToType } from '../schema/index.js';
+
+// =============================================================================
+// Type Utilities for evaluate()
+// =============================================================================
+
+/**
+ * Extract the outputSchema from an AST node type.
+ * Returns the literal schema string if present, otherwise 'unknown'.
+ */
+type ExtractOutputSchema<T> = T extends { outputSchema: infer S extends string } ? S : 'unknown';
+
+/**
+ * A type that represents any AST node with an outputSchema field.
+ * This is used as a constraint for the evaluate() function.
+ */
+export type ASTNodeWithSchema<TSchema extends string = string> = {
+  readonly node: string;
+  readonly outputSchema: TSchema;
+};
 
 /**
  * Evaluation context that includes both the parse context and node schemas.
@@ -25,9 +44,17 @@ export interface EvalContext<TSchema extends Record<string, unknown> = Record<st
 /**
  * Evaluate an AST node to produce a runtime value.
  *
+ * The return type is inferred from the AST node's `outputSchema` field:
+ * - `outputSchema: "number"` → returns `number`
+ * - `outputSchema: "string"` → returns `string`
+ * - `outputSchema: "boolean"` → returns `boolean`
+ * - `outputSchema: "null"` → returns `null`
+ * - `outputSchema: "undefined"` → returns `undefined`
+ * - Other/unknown → returns `unknown`
+ *
  * @param ast - The parsed AST node to evaluate
  * @param ctx - The evaluation context containing variable values and node schemas
- * @returns The evaluated value
+ * @returns The evaluated value with the type derived from the AST's outputSchema
  *
  * @example
  * ```ts
@@ -47,11 +74,12 @@ export interface EvalContext<TSchema extends Record<string, unknown> = Record<st
  *
  * if (result.length === 2) {
  *   const value = evaluate(result[0], { data: {}, nodes: [add] });
+ *   // value has type: number (not unknown!)
  *   // value === 3
  * }
  * ```
  */
-export function evaluate(ast: unknown, ctx: EvalContext): unknown {
+export function evaluate<T>(ast: T, ctx: EvalContext): SchemaToType<ExtractOutputSchema<T>> {
   if (typeof ast !== 'object' || ast === null) {
     throw new Error(`Invalid AST node: expected object, got ${typeof ast}`);
   }
@@ -65,10 +93,14 @@ export function evaluate(ast: unknown, ctx: EvalContext): unknown {
 
   const nodeType = node.node as string;
 
+  // The return type alias for casting - the runtime behavior is correct,
+  // we just need to tell TypeScript what type to expect
+  type ReturnType = SchemaToType<ExtractOutputSchema<T>>;
+
   // Handle literal nodes (number, string, boolean, null, undefined)
   if (nodeType === 'literal') {
     if ('value' in node) {
-      return node.value;
+      return node.value as ReturnType;
     }
     throw new Error(`Literal node missing 'value' property`);
   }
@@ -82,7 +114,7 @@ export function evaluate(ast: unknown, ctx: EvalContext): unknown {
     if (!(name in ctx.data)) {
       throw new Error(`Undefined variable: ${name}`);
     }
-    return ctx.data[name];
+    return ctx.data[name] as ReturnType;
   }
 
   // Handle const nodes (operators, keywords) - these shouldn't be evaluated directly
@@ -95,7 +127,7 @@ export function evaluate(ast: unknown, ctx: EvalContext): unknown {
     if (!('inner' in node)) {
       throw new Error(`Parentheses node missing 'inner' property`);
     }
-    return evaluate(node.inner, ctx);
+    return evaluate(node.inner, ctx) as ReturnType;
   }
 
   // Look up the node schema for this node type
@@ -126,7 +158,7 @@ export function evaluate(ast: unknown, ctx: EvalContext): unknown {
   }
 
   // Call the eval function with evaluated bindings
-  return nodeSchema.eval(evaluatedBindings, ctx.data);
+  return nodeSchema.eval(evaluatedBindings, ctx.data) as SchemaToType<ExtractOutputSchema<T>>;
 }
 
 /**
@@ -135,8 +167,14 @@ export function evaluate(ast: unknown, ctx: EvalContext): unknown {
  * This is a convenience function that pre-binds the node schemas,
  * so you only need to pass the AST and variable values when evaluating.
  *
+ * The returned evaluator function preserves type inference:
+ * - The return type is derived from the AST's `outputSchema` field
+ * - `outputSchema: "number"` → returns `number`
+ * - `outputSchema: "string"` → returns `string`
+ * - etc.
+ *
  * @param nodes - The node schemas with eval functions
- * @returns An evaluator function
+ * @returns An evaluator function with type inference
  *
  * @example
  * ```ts
@@ -145,15 +183,16 @@ export function evaluate(ast: unknown, ctx: EvalContext): unknown {
  * const result = parser.parse("1+2*3", {});
  * if (result.length === 2) {
  *   const value = evaluator(result[0], {});
+ *   // value has type: number (inferred from AST's outputSchema)
  *   // value === 7
  * }
  * ```
  */
 export function createEvaluator(nodes: readonly NodeSchema[]) {
-  return function evaluator<TData extends Record<string, unknown>>(
-    ast: unknown,
+  return function evaluator<T, TData extends Record<string, unknown>>(
+    ast: T,
     data: TData
-  ): unknown {
+  ): SchemaToType<ExtractOutputSchema<T>> {
     return evaluate(ast, { data, nodes });
   };
 }

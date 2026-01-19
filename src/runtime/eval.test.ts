@@ -7,9 +7,10 @@
  * 3. Parentheses nodes forward to inner expression
  * 4. Binary operations with eval functions compute correctly
  * 5. Error cases are handled appropriately
+ * 6. Type inference works correctly (Task 2/3/4 - PRD)
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, expectTypeOf } from 'vitest';
 import { evaluate, createEvaluator } from './eval.js';
 import { defineNode, lhs, rhs, constVal, expr, createParser } from '../index.js';
 
@@ -777,5 +778,331 @@ describe('evaluate - integration with createParser', () => {
     expect(result.length).toBe(2);
     const value = evaluate(result[0], { data: {}, nodes: allNodes });
     expect(value).toBe('hello' + 'world'); // Token.String strips quotes
+  });
+});
+
+// =============================================================================
+// Type Inference Tests (Task 2, 3, 4 from PRD)
+// =============================================================================
+
+/**
+ * These tests verify that the type inference for evaluate() and createEvaluator()
+ * works correctly at the TYPE level, not just at runtime.
+ *
+ * The key insight: the AST node's `outputSchema` field determines the return type:
+ * - outputSchema: "number" → returns number
+ * - outputSchema: "string" → returns string
+ * - outputSchema: "boolean" → returns boolean
+ * - outputSchema: "null" → returns null
+ * - outputSchema: "undefined" → returns undefined
+ * - Other/unknown → returns unknown
+ */
+
+describe('evaluate - type inference (Task 2)', () => {
+  it('returns number when AST has outputSchema: "number"', () => {
+    const ast = { node: 'literal', value: 42, outputSchema: 'number' } as const;
+    const result = evaluate(ast, { data: {}, nodes: [] });
+
+    // Type-level assertion: result should be number
+    expectTypeOf(result).toEqualTypeOf<number>();
+
+    // Runtime assertion: value should be correct
+    expect(result).toBe(42);
+  });
+
+  it('returns string when AST has outputSchema: "string"', () => {
+    const ast = { node: 'literal', value: 'hello', outputSchema: 'string' } as const;
+    const result = evaluate(ast, { data: {}, nodes: [] });
+
+    // Type-level assertion: result should be string
+    expectTypeOf(result).toEqualTypeOf<string>();
+
+    // Runtime assertion
+    expect(result).toBe('hello');
+  });
+
+  it('returns boolean when AST has outputSchema: "boolean"', () => {
+    const ast = { node: 'literal', value: true, outputSchema: 'boolean' } as const;
+    const result = evaluate(ast, { data: {}, nodes: [] });
+
+    // Type-level assertion: result should be boolean
+    expectTypeOf(result).toEqualTypeOf<boolean>();
+
+    // Runtime assertion
+    expect(result).toBe(true);
+  });
+
+  it('returns null when AST has outputSchema: "null"', () => {
+    const ast = { node: 'literal', value: null, outputSchema: 'null' } as const;
+    const result = evaluate(ast, { data: {}, nodes: [] });
+
+    // Type-level assertion: result should be null
+    expectTypeOf(result).toEqualTypeOf<null>();
+
+    // Runtime assertion
+    expect(result).toBe(null);
+  });
+
+  it('returns undefined when AST has outputSchema: "undefined"', () => {
+    const ast = { node: 'literal', value: undefined, outputSchema: 'undefined' } as const;
+    const result = evaluate(ast, { data: {}, nodes: [] });
+
+    // Type-level assertion: result should be undefined
+    expectTypeOf(result).toEqualTypeOf<undefined>();
+
+    // Runtime assertion
+    expect(result).toBe(undefined);
+  });
+
+  it('returns unknown for unknown outputSchema', () => {
+    const ast = { node: 'literal', value: 'custom', outputSchema: 'custom' } as const;
+    const result = evaluate(ast, { data: {}, nodes: [] });
+
+    // Type-level assertion: result should be unknown
+    expectTypeOf(result).toEqualTypeOf<unknown>();
+
+    // Runtime assertion
+    expect(result).toBe('custom');
+  });
+
+  it('infers type from parsed expressions - number', () => {
+    const result = parser.parse('1+2', {});
+    expect(result.length).toBe(2);
+
+    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+
+    // Type-level assertion: value should be number (from outputSchema: "number")
+    expectTypeOf(value).toEqualTypeOf<number>();
+
+    // Runtime assertion
+    expect(value).toBe(3);
+  });
+
+  it('infers type from parsed expressions - boolean', () => {
+    const result = parser.parse('true&&false', {});
+    expect(result.length).toBe(2);
+
+    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+
+    // Type-level assertion: value should be boolean (from outputSchema: "boolean")
+    expectTypeOf(value).toEqualTypeOf<boolean>();
+
+    // Runtime assertion
+    expect(value).toBe(false);
+  });
+
+  it('infers type from parsed expressions - string', () => {
+    const result = parser.parse('"hello"++"world"', {});
+    expect(result.length).toBe(2);
+
+    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+
+    // Type-level assertion: value should be string (from outputSchema: "string")
+    expectTypeOf(value).toEqualTypeOf<string>();
+
+    // Runtime assertion
+    expect(value).toBe('helloworld');
+  });
+
+  it('infers type from comparison operations - numbers in, boolean out', () => {
+    const result = parser.parse('1<2', {});
+    expect(result.length).toBe(2);
+
+    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+
+    // Type-level assertion: even though operands are numbers, result is boolean
+    expectTypeOf(value).toEqualTypeOf<boolean>();
+
+    // Runtime assertion
+    expect(value).toBe(true);
+  });
+
+  it('infers type from nested expressions', () => {
+    const result = parser.parse('(1+2)*3', {});
+    expect(result.length).toBe(2);
+
+    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+
+    // Type-level assertion: result should be number
+    expectTypeOf(value).toEqualTypeOf<number>();
+
+    // Runtime assertion
+    expect(value).toBe(9);
+  });
+});
+
+describe('createEvaluator - type inference (Task 3)', () => {
+  const evaluator = createEvaluator(allNodes);
+
+  it('returns correct type from createEvaluator - number', () => {
+    const ast = { node: 'literal', value: 42, outputSchema: 'number' } as const;
+    const result = evaluator(ast, {});
+
+    // Type-level assertion: result should be number
+    expectTypeOf(result).toEqualTypeOf<number>();
+
+    // Runtime assertion
+    expect(result).toBe(42);
+  });
+
+  it('returns correct type from createEvaluator - string', () => {
+    const ast = { node: 'literal', value: 'hello', outputSchema: 'string' } as const;
+    const result = evaluator(ast, {});
+
+    // Type-level assertion: result should be string
+    expectTypeOf(result).toEqualTypeOf<string>();
+
+    // Runtime assertion
+    expect(result).toBe('hello');
+  });
+
+  it('returns correct type from createEvaluator - boolean', () => {
+    const ast = { node: 'literal', value: true, outputSchema: 'boolean' } as const;
+    const result = evaluator(ast, {});
+
+    // Type-level assertion: result should be boolean
+    expectTypeOf(result).toEqualTypeOf<boolean>();
+
+    // Runtime assertion
+    expect(result).toBe(true);
+  });
+
+  it('returns correct type from createEvaluator - parsed expression', () => {
+    const result = parser.parse('1+2', {});
+    expect(result.length).toBe(2);
+
+    const value = evaluator(result[0], {});
+
+    // Type-level assertion: result should be number
+    expectTypeOf(value).toEqualTypeOf<number>();
+
+    // Runtime assertion
+    expect(value).toBe(3);
+  });
+
+  it('returns correct type from createEvaluator with variables', () => {
+    const result = parser.parse('x+y', { x: 'number', y: 'number' });
+    expect(result.length).toBe(2);
+
+    const value = evaluator(result[0], { x: 10, y: 20 });
+
+    // Type-level assertion: result should be number
+    expectTypeOf(value).toEqualTypeOf<number>();
+
+    // Runtime assertion
+    expect(value).toBe(30);
+  });
+});
+
+describe('evaluate - type inference edge cases (Task 4)', () => {
+  it('handles identifier nodes with manually constructed AST', () => {
+    // Manually construct an identifier node with known outputSchema
+    // This tests that evaluate() correctly infers the type from outputSchema
+    const ast = {
+      node: 'identifier',
+      name: 'x',
+      outputSchema: 'number',
+    } as const;
+
+    const value = evaluate(ast, { data: { x: 42 }, nodes: [] });
+
+    // Type-level assertion: identifier with outputSchema: "number" returns number
+    expectTypeOf(value).toEqualTypeOf<number>();
+
+    // Runtime assertion
+    expect(value).toBe(42);
+  });
+
+  it('handles identifier nodes from parser - runtime check', () => {
+    // Note: When using the parser, the compile-time type may be more complex
+    // due to grammar type inference. This test verifies runtime behavior.
+    const simpleParser = createParser([add, mul] as const);
+    const result = simpleParser.parse('x', { x: 'number' });
+    expect(result.length).toBe(2);
+
+    const value = evaluate(result[0], { data: { x: 42 }, nodes: [add, mul] });
+
+    // Runtime assertion - the value is correct
+    expect(value).toBe(42);
+  });
+
+  it('handles parentheses - compile-time type is unknown', () => {
+    // Note: The parentheses node is defined with resultType: "unknown" in the grammar,
+    // so at compile time TypeScript infers outputSchema: "unknown".
+    // At runtime, the parser correctly propagates the inner expression's outputSchema,
+    // but the compile-time type system doesn't have this information.
+    const result = parser.parse('(42)', {});
+    expect(result.length).toBe(2);
+
+    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+
+    // Type-level assertion: parentheses have outputSchema: "unknown" at compile time
+    expectTypeOf(value).toEqualTypeOf<unknown>();
+
+    // Runtime assertion - at runtime, the value is correctly evaluated
+    expect(value).toBe(42);
+  });
+
+  it('handles deeply nested parentheses - compile-time type is unknown', () => {
+    const simpleParser = createParser([add, mul] as const);
+    const result = simpleParser.parse('((1+2))', {});
+    expect(result.length).toBe(2);
+
+    const value = evaluate(result[0], { data: {}, nodes: [add, mul] });
+
+    // Type-level assertion: nested parentheses have outputSchema: "unknown" at compile time
+    expectTypeOf(value).toEqualTypeOf<unknown>();
+
+    // Runtime assertion
+    expect(value).toBe(3);
+  });
+
+  it('handles equality returning boolean from any operands', () => {
+    // Numbers compared
+    const numResult = parser.parse('1==1', {});
+    expect(numResult.length).toBe(2);
+    const numValue = evaluate(numResult[0], { data: {}, nodes: allNodes });
+    expectTypeOf(numValue).toEqualTypeOf<boolean>();
+    expect(numValue).toBe(true);
+
+    // Strings compared
+    const strResult = parser.parse('"a"=="b"', {});
+    expect(strResult.length).toBe(2);
+    const strValue = evaluate(strResult[0], { data: {}, nodes: allNodes });
+    expectTypeOf(strValue).toEqualTypeOf<boolean>();
+    expect(strValue).toBe(false);
+  });
+
+  it('handles ternary with unknown result type', () => {
+    // Ternary has resultType: "unknown", so the result type is unknown
+    const result = parser.parse('true?1:2', {});
+    expect(result.length).toBe(2);
+
+    const value = evaluate(result[0], { data: {}, nodes: allNodes });
+
+    // Type-level assertion: ternary has outputSchema: "unknown"
+    expectTypeOf(value).toEqualTypeOf<unknown>();
+
+    // Runtime assertion
+    expect(value).toBe(1);
+  });
+
+  it('evaluates manually constructed AST with known types', () => {
+    // You can always manually construct AST with known outputSchema
+    // for type inference to work correctly
+    const ast = {
+      node: 'literal',
+      outputSchema: 'number',
+      value: 42,
+      raw: '42',
+    } as const;
+
+    const value = evaluate(ast, { data: {}, nodes: [] });
+
+    // Type-level assertion: manually constructed AST has known type
+    expectTypeOf(value).toEqualTypeOf<number>();
+
+    // Runtime assertion
+    expect(value).toBe(42);
   });
 });
