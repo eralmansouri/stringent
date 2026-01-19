@@ -52,3 +52,46 @@
 **Files Changed:**
 - src/runtime/parser.test.ts (new - 69 tests)
 - PRD.md (marked task 1.2 as complete)
+
+### 2026-01-18: Task 1.3 - Error Handling Tests
+
+**Completed:**
+- Created comprehensive `src/error-handling.test.ts` with 79 tests covering:
+  - **Invalid syntax errors (23 tests):**
+    - Malformed numbers (3 tests): multiple decimal points, letter prefix, just decimal
+    - Malformed strings (4 tests): unterminated double/single quotes, empty unterminated, mismatched quotes
+    - Malformed parentheses (7 tests): unclosed, empty, multiple unclosed, mismatched nesting, nested empty, extra closing, whitespace-only content
+    - Malformed operators (4 tests): operator-only, trailing operator, double operators, operator at start
+    - Invalid characters (5 tests): @, #, backticks, curly braces, square brackets
+  - **Type mismatch errors (12 tests):**
+    - LHS constraint violations (3 tests): number op with string lhs, string op with number lhs, context-based type checking
+    - RHS constraint violations (2 tests): number op with string rhs, string op with number rhs
+    - Expr constraint violations (1 test): constraint fails in middle position (ternary)
+    - Constraint with unknown types (1 test): unknown identifier cannot satisfy constraint
+    - Type-level tests (2 tests): runtime verification, TypeMismatchError type structure
+  - **No-match errors (8 tests):**
+    - Unknown operators (3 tests): single char, multi-char, no grammar rules
+    - Empty/whitespace input (5 tests): empty, spaces, newlines, tabs, mixed whitespace
+    - Type-level tests (3 tests): no match returns [], empty input returns [], NoMatchError type structure
+  - **Error messages and infer() errors (14 tests):**
+    - infer() with invalid AST (9 tests): null, undefined, primitives, object without outputSchema, empty object, non-string outputSchema, array
+    - infer() with valid AST (5 tests): literal, string, identifier, binary operation, nested operation
+    - ParseError type structure (2 tests): __error marker, message property
+  - **Error recovery behavior (14 tests):**
+    - Partial parsing/backtracking (3 tests): valid prefix with invalid suffix, valid token with invalid following, multiple operators via backtracking
+    - Fallback to atoms (3 tests): number atom, string atom, identifier when no operator matches
+    - Parentheses recovery (2 tests): valid content in unclosed parens, valid parens with trailing content
+    - Multiple failure modes (2 tests): partial parse remaining input, mixed valid/invalid sequences
+    - Whitespace handling (2 tests): leading whitespace before invalid, trailing whitespace preservation
+  - **Edge cases (8 tests):**
+    - Boundary conditions (3 tests): single characters, extremely long valid input, extremely long invalid input
+    - Special string contents (3 tests): special characters, parentheses, operators inside strings
+    - Context-based scenarios (2 tests): empty context, partial context
+
+**Test Results:**
+- All 205 tests pass (79 new + 126 existing)
+- TypeScript typecheck passes
+
+**Files Changed:**
+- src/error-handling.test.ts (new - 79 tests)
+- PRD.md (marked task 1.3 as complete)

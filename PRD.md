@@ -95,13 +95,13 @@ Since this is a new project, consider these potential improvements:
 **Files:** `src/runtime/parser.ts`, `src/runtime/parser.test.ts` (new)
 
 ### 1.3 Error Handling Tests
-- [ ] Test invalid syntax errors (malformed expressions)
-- [ ] Test type mismatch errors (constraint violations)
-- [ ] Test no-match errors (unknown operators)
-- [ ] Ensure errors have helpful messages
-- [ ] Test error recovery behavior
+- [x] Test invalid syntax errors (malformed expressions)
+- [x] Test type mismatch errors (constraint violations)
+- [x] Test no-match errors (unknown operators)
+- [x] Ensure errors have helpful messages
+- [x] Test error recovery behavior
 
-**Files:** `src/parse/index.ts`, error test files
+**Files:** `src/parse/index.ts`, `src/error-handling.test.ts` (new)
 
 ### 1.4 Edge Case Tests
 - [ ] Test deeply nested parentheses (10+ levels)
