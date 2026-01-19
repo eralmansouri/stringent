@@ -11,7 +11,7 @@
 // Main API: defineNode & createParser
 // =============================================================================
 
-export { defineNode, number, string, ident, constVal, lhs, rhs, expr } from "./schema/index.js";
+export { defineNode, number, string, ident, constVal, lhs, rhs, expr, nullLiteral, booleanLiteral, undefinedLiteral } from "./schema/index.js";
 export type {
   NodeSchema,
   PatternSchema,
@@ -19,6 +19,9 @@ export type {
   StringSchema,
   IdentSchema,
   ConstSchema,
+  NullSchema,
+  BooleanSchema,
+  UndefinedSchema,
   ExprSchema,
   ExprRole,
   Precedence,
@@ -52,6 +55,9 @@ export type {
   StringNode,
   IdentNode,
   ConstNode,
+  NullNode,
+  BooleanNode,
+  UndefinedNode,
 } from "./primitive/index.js";
 
 // =============================================================================

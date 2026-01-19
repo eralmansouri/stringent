@@ -136,12 +136,12 @@ Since this is a new project, consider these potential improvements:
 ### 2.1 Add Missing Primitive Literals
 **TODO found in code:** `// todo: add null/boolean/undefined`
 
-- [ ] Add `nullLiteral` atom (matches `null`)
-- [ ] Add `booleanLiteral` atom (matches `true`/`false`)
-- [ ] Add `undefinedLiteral` atom (matches `undefined`)
-- [ ] Add corresponding type-level support in Parse<>
-- [ ] Add tests for new literals
-- [ ] Update exports in index.ts
+- [x] Add `nullLiteral` atom (matches `null`)
+- [x] Add `booleanLiteral` atom (matches `true`/`false`)
+- [x] Add `undefinedLiteral` atom (matches `undefined`)
+- [x] Add corresponding type-level support in Parse<>
+- [x] Add tests for new literals
+- [x] Update exports in index.ts
 
 **Files:** `src/runtime/parser.ts:91`, `src/parse/index.ts`, `src/index.ts`
 

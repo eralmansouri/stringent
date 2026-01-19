@@ -158,3 +158,52 @@
 **Files Changed:**
 - src/edge-cases.test.ts (new - 89 tests)
 - PRD.md (marked task 1.4 as complete)
+
+### 2026-01-18: Task 2.1 - Add Missing Primitive Literals
+
+**Completed:**
+- Added null, boolean, and undefined literal support at both runtime and type levels
+- **Schema types and factories (`src/schema/index.ts`):**
+  - Added `NullSchema`, `BooleanSchema`, `UndefinedSchema` interfaces
+  - Added `nullLiteral()`, `booleanLiteral()`, `undefinedLiteral()` factory functions
+  - Updated `PatternSchemaBase` to include new schema types
+  - Updated `SchemaToType` to handle "null" and "undefined" strings
+  - Updated `InferNodeType` and `InferEvaluatedType` for new schemas
+- **Runtime parsers (`src/runtime/parser.ts`):**
+  - Added `parseNull()`, `parseBoolean()`, `parseUndefined()` functions
+  - Each parser ensures keywords are not part of longer identifiers (e.g., "nullable" is identifier, not null)
+  - Added `nullAtom`, `booleanAtom`, `undefinedAtom` node definitions
+  - Updated `BUILT_IN_ATOMS` to include new atoms (placed before identifierAtom for correct precedence)
+  - Updated `parseElement()` switch to handle new schema kinds
+- **Type-level parsing (`src/parse/index.ts`):**
+  - Added `ParseNullPrimitive`, `ParseBooleanPrimitive`, `ParseBooleanFalse`, `ParseUndefinedPrimitive` types
+  - Each type correctly handles word boundary detection (prevents matching keywords within identifiers)
+  - Updated `ParseElement` to handle new schema types
+- **Primitive types (`src/primitive/index.ts`):**
+  - Fixed `BooleanNode` to use `node: "literal"` and `outputSchema: "boolean"` for consistency
+- **Exports (`src/index.ts`):**
+  - Exported new factory functions: `nullLiteral`, `booleanLiteral`, `undefinedLiteral`
+  - Exported new schema types: `NullSchema`, `BooleanSchema`, `UndefinedSchema`
+  - Exported new node types: `NullNode`, `BooleanNode`, `UndefinedNode`
+- **Tests (`src/primitive-literals.test.ts` - 58 tests):**
+  - Runtime parsing tests for null, true, false, undefined keywords
+  - Keyword vs identifier disambiguation tests (e.g., "nullable" is identifier, not null)
+  - Type-level parsing tests with correct type inference
+  - createParser integration tests with boolean operators, nullish coalescing, equality operators
+  - Edge cases: whitespace handling, case sensitivity, underscore/dollar prefixes, number suffixes
+- Updated `src/error-handling.test.ts` to use non-keyword identifier in ternary test
+
+**Test Results:**
+- All 352 tests pass (58 new + 294 existing)
+- TypeScript typecheck passes
+- Build passes
+
+**Files Changed:**
+- src/schema/index.ts (added schema types and factories)
+- src/runtime/parser.ts (added runtime parsers and atoms)
+- src/parse/index.ts (added type-level parsing)
+- src/primitive/index.ts (fixed BooleanNode type)
+- src/index.ts (updated exports)
+- src/primitive-literals.test.ts (new - 58 tests)
+- src/error-handling.test.ts (updated test to use non-keyword identifier)
+- PRD.md (marked task 2.1 as complete)
