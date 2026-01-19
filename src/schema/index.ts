@@ -16,7 +16,7 @@ import type {
   NullNode,
   BooleanNode,
   UndefinedNode,
-} from "../primitive/index.js";
+} from '../primitive/index.js';
 
 // =============================================================================
 // Pattern Element Schemas
@@ -26,35 +26,34 @@ export interface Schema<TKind extends string> {
 }
 
 /** Number literal pattern element */
-export interface NumberSchema extends Schema<"number"> {}
+export interface NumberSchema extends Schema<'number'> {}
 
 /** String literal pattern element */
 export interface StringSchema<
-  TQuotes extends readonly string[] = readonly string[]
-> extends Schema<"string"> {
+  TQuotes extends readonly string[] = readonly string[],
+> extends Schema<'string'> {
   readonly quotes: TQuotes;
 }
 
 /** Identifier pattern element */
-export interface IdentSchema extends Schema<"ident"> {}
+export interface IdentSchema extends Schema<'ident'> {}
 
 /** Constant (exact match) pattern element */
-export interface ConstSchema<TValue extends string = string>
-  extends Schema<"const"> {
+export interface ConstSchema<TValue extends string = string> extends Schema<'const'> {
   readonly value: TValue;
 }
 
 /** Null literal pattern element */
-export interface NullSchema extends Schema<"null"> {}
+export interface NullSchema extends Schema<'null'> {}
 
 /** Boolean literal pattern element */
-export interface BooleanSchema extends Schema<"boolean"> {}
+export interface BooleanSchema extends Schema<'boolean'> {}
 
 /** Undefined literal pattern element */
-export interface UndefinedSchema extends Schema<"undefined"> {}
+export interface UndefinedSchema extends Schema<'undefined'> {}
 
 /** Expression role determines which grammar level is used */
-export type ExprRole = "lhs" | "rhs" | "expr";
+export type ExprRole = 'lhs' | 'rhs' | 'expr';
 
 /** Recursive expression pattern element with optional type constraint and role */
 export interface ExprSchema<
@@ -65,8 +64,8 @@ export interface ExprSchema<
    * using arktype.type.validate<> (see createBox example: https://arktype.io/docs/generics).
    **/
   TConstraint extends string = string,
-  TRole extends ExprRole = ExprRole
-> extends Schema<"expr"> {
+  TRole extends ExprRole = ExprRole,
+> extends Schema<'expr'> {
   readonly constraint?: TConstraint;
   readonly role: TRole;
 }
@@ -97,7 +96,7 @@ export type PatternSchemaBase =
  */
 export type NamedSchema<
   TSchema extends PatternSchemaBase = PatternSchemaBase,
-  TName extends string = string
+  TName extends string = string,
 > = TSchema & {
   readonly __named: true;
   readonly name: TName;
@@ -131,28 +130,27 @@ function withAs<TSchema extends PatternSchemaBase>(
 // =============================================================================
 
 /** Create a number literal pattern element */
-export const number = () => withAs<NumberSchema>({ kind: "number" });
+export const number = () => withAs<NumberSchema>({ kind: 'number' });
 
 /** Create a string literal pattern element */
-export const string = <const TQuotes extends readonly string[]>(
-  quotes: TQuotes
-) => withAs<StringSchema<TQuotes>>({ kind: "string", quotes });
+export const string = <const TQuotes extends readonly string[]>(quotes: TQuotes) =>
+  withAs<StringSchema<TQuotes>>({ kind: 'string', quotes });
 
 /** Create an identifier pattern element */
-export const ident = () => withAs<IdentSchema>({ kind: "ident" });
+export const ident = () => withAs<IdentSchema>({ kind: 'ident' });
 
 /** Create a constant (exact match) pattern element */
 export const constVal = <const TValue extends string>(value: TValue) =>
-  withAs<ConstSchema<TValue>>({ kind: "const", value });
+  withAs<ConstSchema<TValue>>({ kind: 'const', value });
 
 /** Create a null literal pattern element */
-export const nullLiteral = () => withAs<NullSchema>({ kind: "null" });
+export const nullLiteral = () => withAs<NullSchema>({ kind: 'null' });
 
 /** Create a boolean literal pattern element */
-export const booleanLiteral = () => withAs<BooleanSchema>({ kind: "boolean" });
+export const booleanLiteral = () => withAs<BooleanSchema>({ kind: 'boolean' });
 
 /** Create an undefined literal pattern element */
-export const undefinedLiteral = () => withAs<UndefinedSchema>({ kind: "undefined" });
+export const undefinedLiteral = () => withAs<UndefinedSchema>({ kind: 'undefined' });
 
 /**
  * Create a LEFT-HAND SIDE expression element.
@@ -169,10 +167,10 @@ export const undefinedLiteral = () => withAs<UndefinedSchema>({ kind: "undefined
  * ```
  */
 export const lhs = <const TConstraint extends string>(constraint?: TConstraint) =>
-  withAs<ExprSchema<TConstraint, "lhs">>({
-    kind: "expr",
+  withAs<ExprSchema<TConstraint, 'lhs'>>({
+    kind: 'expr',
     constraint: constraint,
-    role: "lhs",
+    role: 'lhs',
   });
 
 /**
@@ -190,10 +188,10 @@ export const lhs = <const TConstraint extends string>(constraint?: TConstraint) 
  * ```
  */
 export const rhs = <const TConstraint extends string>(constraint?: TConstraint) =>
-  withAs<ExprSchema<TConstraint, "rhs">>({
-    kind: "expr",
+  withAs<ExprSchema<TConstraint, 'rhs'>>({
+    kind: 'expr',
     constraint: constraint as TConstraint,
-    role: "rhs",
+    role: 'rhs',
   });
 
 /**
@@ -216,10 +214,10 @@ export const rhs = <const TConstraint extends string>(constraint?: TConstraint) 
  * ```
  */
 export const expr = <const TConstraint extends string>(constraint?: TConstraint) =>
-  withAs<ExprSchema<TConstraint, "expr">>({
-    kind: "expr",
+  withAs<ExprSchema<TConstraint, 'expr'>>({
+    kind: 'expr',
     constraint: constraint as TConstraint,
-    role: "expr",
+    role: 'expr',
   });
 
 // =============================================================================
@@ -243,7 +241,7 @@ export interface NodeSchema<
   TName extends string = string,
   TPattern extends readonly PatternSchema[] = readonly PatternSchema[],
   TPrecedence extends Precedence = Precedence,
-  TResultType extends string = string
+  TResultType extends string = string,
 > {
   readonly name: TName;
   readonly pattern: TPattern;
@@ -319,16 +317,13 @@ export function defineNode<
   const TName extends string,
   const TPattern extends readonly PatternSchema[],
   const TPrecedence extends Precedence,
-  const TResultType extends string
+  const TResultType extends string,
 >(config: {
   readonly name: TName;
   readonly pattern: TPattern;
   readonly precedence: TPrecedence;
   readonly resultType: TResultType;
-  readonly configure?: <$>(
-    bindings: InferBindings<TPattern>,
-    ctx: $
-  ) => Record<string, unknown>;
+  readonly configure?: <$>(bindings: InferBindings<TPattern>, ctx: $) => Record<string, unknown>;
   readonly eval?: <$>(
     values: InferEvaluatedBindings<TPattern>,
     ctx: $
@@ -342,14 +337,13 @@ export function defineNode<
 // =============================================================================
 
 /** Extract the operator from a binary pattern (second element should be ConstSchema) */
-export type ExtractOperator<T extends readonly PatternSchema[]> =
-  T extends readonly [
-    PatternSchema,
-    infer Op extends ConstSchema,
-    PatternSchema
-  ]
-    ? Op["value"]
-    : never;
+export type ExtractOperator<T extends readonly PatternSchema[]> = T extends readonly [
+  PatternSchema,
+  infer Op extends ConstSchema,
+  PatternSchema,
+]
+  ? Op['value']
+  : never;
 
 // =============================================================================
 // Binding Inference
@@ -359,13 +353,17 @@ export type ExtractOperator<T extends readonly PatternSchema[]> =
  * Map a schema type string to its TypeScript runtime type.
  * Used for eval return types and evaluated bindings.
  */
-export type SchemaToType<T extends string> =
-  T extends "number" ? number
-  : T extends "string" ? string
-  : T extends "boolean" ? boolean
-  : T extends "null" ? null
-  : T extends "undefined" ? undefined
-  : unknown;
+export type SchemaToType<T extends string> = T extends 'number'
+  ? number
+  : T extends 'string'
+    ? string
+    : T extends 'boolean'
+      ? boolean
+      : T extends 'null'
+        ? null
+        : T extends 'undefined'
+          ? undefined
+          : unknown;
 
 /**
  * Infer the AST node type from a pattern schema.
@@ -374,31 +372,45 @@ export type SchemaToType<T extends string> =
  * Note: ExprSchema maps to `unknown` since the actual type depends on the constraint
  * and what's parsed. The runtime parser will fill this in.
  */
-export type InferNodeType<TSchema extends PatternSchemaBase> =
-  TSchema extends NumberSchema ? NumberNode
-  : TSchema extends StringSchema ? StringNode
-  : TSchema extends IdentSchema ? IdentNode
-  : TSchema extends ConstSchema ? ConstNode
-  : TSchema extends NullSchema ? NullNode
-  : TSchema extends BooleanSchema ? BooleanNode
-  : TSchema extends UndefinedSchema ? UndefinedNode
-  : TSchema extends ExprSchema<infer C> ? { outputSchema: C }
-  : never;
+export type InferNodeType<TSchema extends PatternSchemaBase> = TSchema extends NumberSchema
+  ? NumberNode
+  : TSchema extends StringSchema
+    ? StringNode
+    : TSchema extends IdentSchema
+      ? IdentNode
+      : TSchema extends ConstSchema
+        ? ConstNode
+        : TSchema extends NullSchema
+          ? NullNode
+          : TSchema extends BooleanSchema
+            ? BooleanNode
+            : TSchema extends UndefinedSchema
+              ? UndefinedNode
+              : TSchema extends ExprSchema<infer C>
+                ? { outputSchema: C }
+                : never;
 
 /**
  * Infer the evaluated value type from a pattern schema.
  * For ExprSchema, uses the constraint to determine the runtime type.
  */
-export type InferEvaluatedType<TSchema extends PatternSchemaBase> =
-  TSchema extends NumberSchema ? number
-  : TSchema extends StringSchema ? string
-  : TSchema extends IdentSchema ? unknown
-  : TSchema extends ConstSchema ? never  // constants are matched, not captured as values
-  : TSchema extends NullSchema ? null
-  : TSchema extends BooleanSchema ? boolean
-  : TSchema extends UndefinedSchema ? undefined
-  : TSchema extends ExprSchema<infer C extends string> ? SchemaToType<C>
-  : never;
+export type InferEvaluatedType<TSchema extends PatternSchemaBase> = TSchema extends NumberSchema
+  ? number
+  : TSchema extends StringSchema
+    ? string
+    : TSchema extends IdentSchema
+      ? unknown
+      : TSchema extends ConstSchema
+        ? never // constants are matched, not captured as values
+        : TSchema extends NullSchema
+          ? null
+          : TSchema extends BooleanSchema
+            ? boolean
+            : TSchema extends UndefinedSchema
+              ? undefined
+              : TSchema extends ExprSchema<infer C extends string>
+                ? SchemaToType<C>
+                : never;
 
 /**
  * Extract all NamedSchema entries from a pattern tuple as a union.
@@ -426,7 +438,7 @@ type ExtractNamedSchemas<TPattern extends readonly PatternSchema[]> =
  * ```
  */
 export type InferBindings<TPattern extends readonly PatternSchema[]> = {
-  [K in ExtractNamedSchemas<TPattern> as K["name"]]: InferNodeType<K["schema"]>;
+  [K in ExtractNamedSchemas<TPattern> as K['name']]: InferNodeType<K['schema']>;
 };
 
 /**
@@ -445,5 +457,5 @@ export type InferBindings<TPattern extends readonly PatternSchema[]> = {
  * ```
  */
 export type InferEvaluatedBindings<TPattern extends readonly PatternSchema[]> = {
-  [K in ExtractNamedSchemas<TPattern> as K["name"]]: InferEvaluatedType<K["schema"]>;
+  [K in ExtractNamedSchemas<TPattern> as K['name']]: InferEvaluatedType<K['schema']>;
 };

@@ -10,12 +10,12 @@
  * DO NOT remove the $ generic parameter - it ensures schema type information
  * flows through the parser chain. See CLAUDE.md for details.
  */
-import { Token } from "@sinclair/parsebox";
-import type { Context } from "../context.js";
-import type { ToNumber } from "hotscript/dist/internals/numbers/impl/utils.js";
+import { Token } from '@sinclair/parsebox';
+import type { Context } from '../context.js';
+import type { ToNumber } from 'hotscript/dist/internals/numbers/impl/utils.js';
 
 // Re-export Context for convenience
-export type { Context } from "../context.js";
+export type { Context } from '../context.js';
 
 // =============================================================================
 // Core Types
@@ -44,93 +44,68 @@ export interface ASTNode<TType extends string = string, TOutputSchema = unknown>
 
 export interface IdentNode<
   TName extends string = string,
-  TOutputSchema = "unknown"
-> extends ASTNode<"identifier", TOutputSchema> {
+  TOutputSchema = 'unknown',
+> extends ASTNode<'identifier', TOutputSchema> {
   name: TName;
 }
 
-export type NumberNode<TValue extends string = string> = ASTNode<
-  "literal",
-  "number"
-> & { raw: TValue; value: ToNumber<TValue> };
+export type NumberNode<TValue extends string = string> = ASTNode<'literal', 'number'> & {
+  raw: TValue;
+  value: ToNumber<TValue>;
+};
 
-export type StringNode<TValue extends string = string> = ASTNode<
-  "literal",
-  "string"
-> & { raw: TValue; value: TValue };
+export type StringNode<TValue extends string = string> = ASTNode<'literal', 'string'> & {
+  raw: TValue;
+  value: TValue;
+};
 
-export type NullNode = ASTNode<"literal", "null"> & {
-  raw: "null";
+export type NullNode = ASTNode<'literal', 'null'> & {
+  raw: 'null';
   value: null;
 };
-export type UndefinedNode = ASTNode<"literal", "undefined"> & {
-  raw: "undefined";
+export type UndefinedNode = ASTNode<'literal', 'undefined'> & {
+  raw: 'undefined';
   value: undefined;
 };
 
-export type BooleanNode<TValue extends string = string> = ASTNode<
-  "literal",
-  "boolean"
-> & { raw: TValue; value: TValue extends "true" ? true : false };
+export type BooleanNode<TValue extends string = string> = ASTNode<'literal', 'boolean'> & {
+  raw: TValue;
+  value: TValue extends 'true' ? true : false;
+};
 
-export type LiteralNode =
-  | NumberNode
-  | StringNode
-  | NullNode
-  | UndefinedNode
-  | BooleanNode;
+export type LiteralNode = NumberNode | StringNode | NullNode | UndefinedNode | BooleanNode;
 
-export type ConstNode<TValue extends string = string> = ASTNode<
-  "const",
-  TValue
->;
+export type ConstNode<TValue extends string = string> = ASTNode<'const', TValue>;
 
 // =============================================================================
 // Parse Result Types (computed from input)
 // =============================================================================
 
 /** Computed parse result for Number */
-export type ParseNumber<TInput extends string> = Token.TNumber<TInput> extends [
-  infer V extends string,
-  infer R extends string
-]
-  ? [NumberNode<V>, R]
-  : [];
+export type ParseNumber<TInput extends string> =
+  Token.TNumber<TInput> extends [infer V extends string, infer R extends string]
+    ? [NumberNode<V>, R]
+    : [];
 
 /** Computed parse result for String */
-export type ParseString<
-  TQuotes extends string[],
-  TInput extends string
-> = Token.TString<TQuotes, TInput> extends [
-  infer V extends string,
-  infer R extends string
-]
-  ? [StringNode<V>, R]
-  : [];
+export type ParseString<TQuotes extends string[], TInput extends string> =
+  Token.TString<TQuotes, TInput> extends [infer V extends string, infer R extends string]
+    ? [StringNode<V>, R]
+    : [];
 
 /** Computed parse result for Ident - looks up value type from schema */
-export type ParseIdent<
-  TInput extends string,
-  $ extends Context
-> = Token.TIdent<TInput> extends [
-  infer V extends string,
-  infer R extends string
-]
-  ? V extends keyof $["data"]
-    ? [IdentNode<V, $["data"][V]>, R]
-    : [IdentNode<V>, R]
-  : [];
+export type ParseIdent<TInput extends string, $ extends Context> =
+  Token.TIdent<TInput> extends [infer V extends string, infer R extends string]
+    ? V extends keyof $['data']
+      ? [IdentNode<V, $['data'][V]>, R]
+      : [IdentNode<V>, R]
+    : [];
 
 /** Computed parse result for Const */
-export type ParseConst<
-  TValue extends string,
-  TInput extends string
-> = Token.TConst<TValue, TInput> extends [
-  infer _V extends string,
-  infer R extends string
-]
-  ? [ConstNode<TValue>, R]
-  : [];
+export type ParseConst<TValue extends string, TInput extends string> =
+  Token.TConst<TValue, TInput> extends [infer _V extends string, infer R extends string]
+    ? [ConstNode<TValue>, R]
+    : [];
 
 // =============================================================================
 // IParser Interface
@@ -141,10 +116,7 @@ export type ParseConst<
  * Context is generic to preserve type information.
  */
 export interface IParser {
-  parse<TInput extends string, $ extends Context>(
-    input: TInput,
-    $: $
-  ): [] | [unknown, string];
+  parse<TInput extends string, $ extends Context>(input: TInput, $: $): [] | [unknown, string];
 }
 
 // =============================================================================
@@ -153,21 +125,18 @@ export interface IParser {
 
 /** Number primitive - parses numeric literals using Token.Number */
 class _Number {
-  readonly __primitive = "number" as const;
+  readonly __primitive = 'number' as const;
 
-  parse<TInput extends string, $ extends Context>(
-    input: TInput,
-    _$: $
-  ): ParseNumber<TInput> {
+  parse<TInput extends string, $ extends Context>(input: TInput, _$: $): ParseNumber<TInput> {
     // Runtime type is [] | [string, string], but TypeScript computes exact type
     const result = Token.Number(input) as [] | [string, string];
     if (result.length !== 2) return [] as ParseNumber<TInput>;
     return [
       {
-        node: "literal",
+        node: 'literal',
         raw: result[0],
         value: +result[0],
-        outputSchema: "number",
+        outputSchema: 'number',
       },
       result[1],
     ] as unknown as ParseNumber<TInput>;
@@ -176,7 +145,7 @@ class _Number {
 
 /** String primitive - parses quoted string literals using Token.String */
 class _String<TQuotes extends string[]> {
-  readonly __primitive = "string" as const;
+  readonly __primitive = 'string' as const;
   readonly quotes: TQuotes;
 
   constructor(quotes: TQuotes) {
@@ -191,10 +160,10 @@ class _String<TQuotes extends string[]> {
     if (result.length !== 2) return [] as ParseString<TQuotes, TInput>;
     return [
       {
-        node: "literal",
+        node: 'literal',
         raw: result[0],
         value: result[0],
-        outputSchema: "string",
+        outputSchema: 'string',
       },
       result[1],
     ] as unknown as ParseString<TQuotes, TInput>;
@@ -203,19 +172,16 @@ class _String<TQuotes extends string[]> {
 
 /** Identifier primitive - parses identifiers using Token.Ident */
 class _Ident {
-  readonly __primitive = "ident" as const;
+  readonly __primitive = 'ident' as const;
 
-  parse<TInput extends string, $ extends Context>(
-    input: TInput,
-    $: $
-  ): ParseIdent<TInput, $> {
+  parse<TInput extends string, $ extends Context>(input: TInput, $: $): ParseIdent<TInput, $> {
     const result = Token.Ident(input) as [] | [string, string];
     if (result.length !== 2) return [] as ParseIdent<TInput, $>;
     const name = result[0];
     const data = $.data as Record<string, string>;
-    const valueType = name in data ? data[name] : "unknown";
+    const valueType = name in data ? data[name] : 'unknown';
     return [
-      { node: "identifier", name, outputSchema: valueType },
+      { node: 'identifier', name, outputSchema: valueType },
       result[1],
     ] as unknown as ParseIdent<TInput, $>;
   }
@@ -223,7 +189,7 @@ class _Ident {
 
 /** Const primitive - parses exact string matches using Token.Const */
 class _Const<TValue extends string> {
-  readonly __primitive = "const" as const;
+  readonly __primitive = 'const' as const;
   readonly value: TValue;
 
   constructor(value: TValue) {
@@ -237,7 +203,7 @@ class _Const<TValue extends string> {
     const result = Token.Const(this.value, input) as [] | [string, string];
     if (result.length !== 2) return [] as ParseConst<TValue, TInput>;
     return [
-      { node: "const", outputSchema: JSON.stringify(this.value) },
+      { node: 'const', outputSchema: JSON.stringify(this.value) },
       result[1],
     ] as unknown as ParseConst<TValue, TInput>;
   }
@@ -251,9 +217,8 @@ class _Const<TValue extends string> {
 export const createNumber = (): _Number => new _Number();
 
 /** @internal */
-export const createString = <TQuotes extends string[]>(
-  quotes: [...TQuotes]
-): _String<TQuotes> => new _String(quotes);
+export const createString = <TQuotes extends string[]>(quotes: [...TQuotes]): _String<TQuotes> =>
+  new _String(quotes);
 
 /** @internal */
 export const createIdent = (): _Ident => new _Ident();

@@ -8,17 +8,17 @@
  *   3. Base case: try atoms (last level)
  */
 
-import { Token } from "@sinclair/parsebox";
-import type { Context } from "../context.js";
-import type { ComputeGrammar, Grammar } from "../grammar/index.js";
-import type { Parse } from "../parse/index.js";
+import { Token } from '@sinclair/parsebox';
+import type { Context } from '../context.js';
+import type { ComputeGrammar, Grammar } from '../grammar/index.js';
+import type { Parse } from '../parse/index.js';
 import type {
   NodeSchema,
   PatternSchema,
   StringSchema,
   ConstSchema,
   ExprSchema,
-} from "../schema/index.js";
+} from '../schema/index.js';
 import {
   defineNode,
   number,
@@ -29,7 +29,7 @@ import {
   nullLiteral,
   booleanLiteral,
   undefinedLiteral,
-} from "../schema/index.js";
+} from '../schema/index.js';
 
 import {
   ASTNode,
@@ -39,7 +39,7 @@ import {
   NullNode,
   BooleanNode,
   UndefinedNode,
-} from "../primitive/index.js";
+} from '../primitive/index.js';
 
 // =============================================================================
 // Built-in Atoms
@@ -60,58 +60,58 @@ const ATOM_PRECEDENCE = 0;
 
 /** Number literal atom - matches numeric literals */
 const numberLiteral = defineNode({
-  name: "numberLiteral",
+  name: 'numberLiteral',
   pattern: [number()],
   precedence: ATOM_PRECEDENCE,
-  resultType: "number",
+  resultType: 'number',
 });
 
 /** String literal atom - matches strings with " or ' quotes */
 const stringLiteral = defineNode({
-  name: "stringLiteral",
+  name: 'stringLiteral',
   pattern: [string(['"', "'"])],
   precedence: ATOM_PRECEDENCE,
-  resultType: "string",
+  resultType: 'string',
 });
 
 /** Identifier atom - matches identifiers */
 const identifierAtom = defineNode({
-  name: "identifier",
+  name: 'identifier',
   pattern: [ident()],
   precedence: ATOM_PRECEDENCE,
-  resultType: "unknown",
+  resultType: 'unknown',
 });
 
 /** Parentheses atom - matches ( expr ) for grouping */
 const parentheses = defineNode({
-  name: "parentheses",
-  pattern: [constVal("("), expr().as("inner"), constVal(")")],
+  name: 'parentheses',
+  pattern: [constVal('('), expr().as('inner'), constVal(')')],
   precedence: ATOM_PRECEDENCE,
-  resultType: "unknown",
+  resultType: 'unknown',
 });
 
 /** Null literal atom - matches the keyword null */
 const nullAtom = defineNode({
-  name: "nullLiteral",
+  name: 'nullLiteral',
   pattern: [nullLiteral()],
   precedence: ATOM_PRECEDENCE,
-  resultType: "null",
+  resultType: 'null',
 });
 
 /** Boolean literal atom - matches true or false */
 const booleanAtom = defineNode({
-  name: "booleanLiteral",
+  name: 'booleanLiteral',
   pattern: [booleanLiteral()],
   precedence: ATOM_PRECEDENCE,
-  resultType: "boolean",
+  resultType: 'boolean',
 });
 
 /** Undefined literal atom - matches the keyword undefined */
 const undefinedAtom = defineNode({
-  name: "undefinedLiteral",
+  name: 'undefinedLiteral',
   pattern: [undefinedLiteral()],
   precedence: ATOM_PRECEDENCE,
-  resultType: "undefined",
+  resultType: 'undefined',
 });
 
 /** All built-in atoms, used as the last level of the grammar */
@@ -141,10 +141,10 @@ function parseNumber(input: string): ParseResult {
   if (result.length === 0) return [];
   return [
     {
-      node: "literal",
+      node: 'literal',
       raw: result[0],
       value: +result[0],
-      outputSchema: "number",
+      outputSchema: 'number',
     } as NumberNode<(typeof result)[0]>,
     result[1],
   ];
@@ -158,32 +158,32 @@ function parseNumber(input: string): ParseResult {
  * @returns The processed string with escape sequences converted
  */
 export function processEscapeSequences(str: string): string {
-  let result = "";
+  let result = '';
   let i = 0;
   while (i < str.length) {
-    if (str[i] === "\\") {
+    if (str[i] === '\\') {
       if (i + 1 >= str.length) {
         // Trailing backslash - keep as-is
-        result += "\\";
+        result += '\\';
         i++;
         continue;
       }
       const next = str[i + 1];
       switch (next) {
-        case "n":
-          result += "\n";
+        case 'n':
+          result += '\n';
           i += 2;
           break;
-        case "t":
-          result += "\t";
+        case 't':
+          result += '\t';
           i += 2;
           break;
-        case "r":
-          result += "\r";
+        case 'r':
+          result += '\r';
           i += 2;
           break;
-        case "\\":
-          result += "\\";
+        case '\\':
+          result += '\\';
           i += 2;
           break;
         case '"':
@@ -194,23 +194,23 @@ export function processEscapeSequences(str: string): string {
           result += "'";
           i += 2;
           break;
-        case "0":
-          result += "\0";
+        case '0':
+          result += '\0';
           i += 2;
           break;
-        case "b":
-          result += "\b";
+        case 'b':
+          result += '\b';
           i += 2;
           break;
-        case "f":
-          result += "\f";
+        case 'f':
+          result += '\f';
           i += 2;
           break;
-        case "v":
-          result += "\v";
+        case 'v':
+          result += '\v';
           i += 2;
           break;
-        case "x": {
+        case 'x': {
           // \xHH - two hex digits
           if (i + 3 < str.length) {
             const hex = str.slice(i + 2, i + 4);
@@ -221,11 +221,11 @@ export function processEscapeSequences(str: string): string {
             }
           }
           // Invalid \x escape - keep as-is
-          result += "\\x";
+          result += '\\x';
           i += 2;
           break;
         }
-        case "u": {
+        case 'u': {
           // \uHHHH - four hex digits
           if (i + 5 < str.length) {
             const hex = str.slice(i + 2, i + 6);
@@ -236,13 +236,13 @@ export function processEscapeSequences(str: string): string {
             }
           }
           // Invalid \u escape - keep as-is
-          result += "\\u";
+          result += '\\u';
           i += 2;
           break;
         }
         default:
           // Unknown escape - keep backslash and character
-          result += "\\" + next;
+          result += '\\' + next;
           i += 2;
           break;
       }
@@ -263,7 +263,7 @@ function parseStringLiteral(
   input: string
 ): [] | [rawContent: string, remaining: string] {
   // Trim leading whitespace
-  const trimmed = input.replace(/^[\s]*/, "");
+  const trimmed = input.replace(/^[\s]*/, '');
   if (trimmed.length === 0) return [];
 
   // Check for opening quote
@@ -272,13 +272,13 @@ function parseStringLiteral(
 
   // Find closing quote, respecting escape sequences
   let i = openQuote.length;
-  let rawContent = "";
+  let rawContent = '';
 
   while (i < trimmed.length) {
     const char = trimmed[i];
 
     // Check for escape sequence
-    if (char === "\\") {
+    if (char === '\\') {
       if (i + 1 < trimmed.length) {
         // Include both the backslash and the escaped character in raw content
         rawContent += char + trimmed[i + 1];
@@ -313,10 +313,10 @@ function parseString(quotes: readonly string[], input: string): ParseResult {
   const processedValue = processEscapeSequences(rawValue);
   return [
     {
-      node: "literal",
+      node: 'literal',
       raw: rawValue,
       value: processedValue,
-      outputSchema: "string",
+      outputSchema: 'string',
     } as StringNode<(typeof result)[0]>,
     result[1],
   ];
@@ -327,11 +327,9 @@ function parseIdent(input: string, context: Context): ParseResult {
   if (result.length === 0) return [];
   const name = result[0];
   const valueType =
-    name in context.data
-      ? (context.data as Record<string, string>)[name]
-      : "unknown";
+    name in context.data ? (context.data as Record<string, string>)[name] : 'unknown';
   return [
-    { node: "identifier", name, outputSchema: valueType } as IdentNode<
+    { node: 'identifier', name, outputSchema: valueType } as IdentNode<
       typeof name,
       typeof valueType
     >,
@@ -342,11 +340,11 @@ function parseIdent(input: string, context: Context): ParseResult {
 function parseConst(value: string, input: string): ParseResult {
   const result = Token.Const(value, input) as [] | [string, string];
   if (result.length === 0) return [];
-  return [{ node: "const", outputSchema: JSON.stringify(value) }, result[1]];
+  return [{ node: 'const', outputSchema: JSON.stringify(value) }, result[1]];
 }
 
 function parseNull(input: string): ParseResult {
-  const result = Token.Const("null", input) as [] | [string, string];
+  const result = Token.Const('null', input) as [] | [string, string];
   if (result.length === 0) return [];
   // Ensure it's not part of a longer identifier (e.g., "nullable")
   const remaining = result[1];
@@ -355,10 +353,10 @@ function parseNull(input: string): ParseResult {
   }
   return [
     {
-      node: "literal",
-      raw: "null",
+      node: 'literal',
+      raw: 'null',
       value: null,
-      outputSchema: "null",
+      outputSchema: 'null',
     } as NullNode,
     remaining,
   ];
@@ -366,36 +364,36 @@ function parseNull(input: string): ParseResult {
 
 function parseBoolean(input: string): ParseResult {
   // Try "true" first
-  let result = Token.Const("true", input) as [] | [string, string];
+  let result = Token.Const('true', input) as [] | [string, string];
   if (result.length === 2) {
     const remaining = result[1];
     // Ensure it's not part of a longer identifier (e.g., "trueName")
     if (remaining.length === 0 || !/^[a-zA-Z0-9_$]/.test(remaining)) {
       return [
         {
-          node: "literal",
-          raw: "true",
+          node: 'literal',
+          raw: 'true',
           value: true,
-          outputSchema: "boolean",
-        } as BooleanNode<"true">,
+          outputSchema: 'boolean',
+        } as BooleanNode<'true'>,
         remaining,
       ];
     }
   }
 
   // Try "false"
-  result = Token.Const("false", input) as [] | [string, string];
+  result = Token.Const('false', input) as [] | [string, string];
   if (result.length === 2) {
     const remaining = result[1];
     // Ensure it's not part of a longer identifier (e.g., "falsePositive")
     if (remaining.length === 0 || !/^[a-zA-Z0-9_$]/.test(remaining)) {
       return [
         {
-          node: "literal",
-          raw: "false",
+          node: 'literal',
+          raw: 'false',
           value: false,
-          outputSchema: "boolean",
-        } as BooleanNode<"false">,
+          outputSchema: 'boolean',
+        } as BooleanNode<'false'>,
         remaining,
       ];
     }
@@ -405,7 +403,7 @@ function parseBoolean(input: string): ParseResult {
 }
 
 function parseUndefined(input: string): ParseResult {
-  const result = Token.Const("undefined", input) as [] | [string, string];
+  const result = Token.Const('undefined', input) as [] | [string, string];
   if (result.length === 0) return [];
   // Ensure it's not part of a longer identifier (e.g., "undefinedVar")
   const remaining = result[1];
@@ -414,10 +412,10 @@ function parseUndefined(input: string): ParseResult {
   }
   return [
     {
-      node: "literal",
-      raw: "undefined",
+      node: 'literal',
+      raw: 'undefined',
       value: undefined,
-      outputSchema: "undefined",
+      outputSchema: 'undefined',
     } as UndefinedNode,
     remaining,
   ];
@@ -468,25 +466,21 @@ export function buildGrammar(operators: readonly NodeSchema[]): Grammar {
 /**
  * Parse a single pattern element (non-Expr).
  */
-function parseElement(
-  element: PatternSchema,
-  input: string,
-  context: Context
-): ParseResult {
+function parseElement(element: PatternSchema, input: string, context: Context): ParseResult {
   switch (element.kind) {
-    case "number":
+    case 'number':
       return parseNumber(input);
-    case "string":
+    case 'string':
       return parseString((element as StringSchema).quotes, input);
-    case "ident":
+    case 'ident':
       return parseIdent(input, context);
-    case "const":
+    case 'const':
       return parseConst((element as ConstSchema).value, input);
-    case "null":
+    case 'null':
       return parseNull(input);
-    case "boolean":
+    case 'boolean':
       return parseBoolean(input);
-    case "undefined":
+    case 'undefined':
       return parseUndefined(input);
     default:
       return [];
@@ -509,35 +503,17 @@ function parseElementWithLevel(
   nextLevels: Grammar,
   fullGrammar: Grammar
 ): ParseResult {
-  if (element.kind === "expr") {
+  if (element.kind === 'expr') {
     const exprElement = element as ExprSchema;
     const constraint = exprElement.constraint;
     const role = exprElement.role;
 
-    if (role === "lhs") {
-      return parseExprWithConstraint(
-        nextLevels,
-        input,
-        context,
-        constraint,
-        fullGrammar
-      );
-    } else if (role === "rhs") {
-      return parseExprWithConstraint(
-        currentLevels,
-        input,
-        context,
-        constraint,
-        fullGrammar
-      );
+    if (role === 'lhs') {
+      return parseExprWithConstraint(nextLevels, input, context, constraint, fullGrammar);
+    } else if (role === 'rhs') {
+      return parseExprWithConstraint(currentLevels, input, context, constraint, fullGrammar);
     } else {
-      return parseExprWithConstraint(
-        fullGrammar,
-        input,
-        context,
-        constraint,
-        fullGrammar
-      );
+      return parseExprWithConstraint(fullGrammar, input, context, constraint, fullGrammar);
     }
   }
   return parseElement(element, input, context);
@@ -589,7 +565,7 @@ function extractBindings(
     const child = children[i];
 
     // Check if element is a NamedSchema (has __named and name properties)
-    if ("__named" in element && element.__named === true) {
+    if ('__named' in element && element.__named === true) {
       bindings[(element as { name: string }).name] = child;
     }
   }
@@ -608,11 +584,7 @@ function extractBindings(
  * Special case: If resultType is "unknown" and there's a single expr binding,
  * we propagate that binding's outputSchema (for generic parentheses, etc.).
  */
-function buildNodeResult(
-  nodeSchema: NodeSchema,
-  children: ASTNode[],
-  context: Context
-): ASTNode {
+function buildNodeResult(nodeSchema: NodeSchema, children: ASTNode[], context: Context): ASTNode {
   const bindings = extractBindings(nodeSchema.pattern, children);
 
   // Single unnamed child → passthrough (atom behavior)
@@ -621,15 +593,13 @@ function buildNodeResult(
   }
 
   // Apply configure() if provided, otherwise use bindings directly
-  const fields = nodeSchema.configure
-    ? nodeSchema.configure(bindings, context)
-    : bindings;
+  const fields = nodeSchema.configure ? nodeSchema.configure(bindings, context) : bindings;
 
   // Determine output schema:
   // - If resultType is "unknown" and there's a single expr binding, use its outputSchema
   // - Otherwise use the node's static resultType
   let outputSchema = nodeSchema.resultType;
-  if (outputSchema === "unknown") {
+  if (outputSchema === 'unknown') {
     const bindingKeys = Object.keys(bindings);
     if (bindingKeys.length === 1) {
       const singleBinding = bindings[bindingKeys[0]] as {
@@ -709,14 +679,7 @@ function parseNodes(
   fullGrammar: Grammar
 ): ParseResult {
   for (const node of nodes) {
-    const result = parseNodePattern(
-      node,
-      input,
-      context,
-      currentLevels,
-      nextLevels,
-      fullGrammar
-    );
+    const result = parseNodePattern(node, input, context, currentLevels, nextLevels, fullGrammar);
     if (result.length === 2) return result;
   }
   return [];
@@ -742,14 +705,7 @@ function parseLevels(
   const nextLevels = levels.slice(1);
 
   // Try nodes at current level
-  const result = parseNodes(
-    currentNodes,
-    input,
-    context,
-    levels,
-    nextLevels,
-    fullGrammar
-  );
+  const result = parseNodes(currentNodes, input, context, levels, nextLevels, fullGrammar);
 
   if (result.length === 2) {
     return result;
@@ -777,7 +733,7 @@ function parseLevels(
 export function parse<
   const TNodes extends readonly NodeSchema[],
   const TInput extends string,
-  const TContext extends Context
+  const TContext extends Context,
 >(
   nodes: TNodes,
   input: TInput,
@@ -800,14 +756,16 @@ import {
   type ParseResultWithErrors,
   noMatchError,
   emptyInputError,
-} from "../errors.js";
+} from '../errors.js';
 
 export type { RichParseError, ParseResultWithErrors };
 
 /**
  * Result from parseWithErrors - includes rich error information on failure.
  */
-export interface ParseWithErrorsResult<T extends ASTNode<string, unknown> = ASTNode<string, unknown>> {
+export interface ParseWithErrorsResult<
+  T extends ASTNode<string, unknown> = ASTNode<string, unknown>,
+> {
   /** Whether parsing was successful */
   readonly success: boolean;
   /** The parsed AST node (only present if success is true) */
@@ -843,12 +801,8 @@ export interface ParseWithErrorsResult<T extends ASTNode<string, unknown> = ASTN
 export function parseWithErrors<
   const TNodes extends readonly NodeSchema[],
   const TInput extends string,
-  const TContext extends Context
->(
-  nodes: TNodes,
-  input: TInput,
-  context: TContext
-): ParseWithErrorsResult {
+  const TContext extends Context,
+>(nodes: TNodes, input: TInput, context: TContext): ParseWithErrorsResult {
   // Handle empty/whitespace-only input
   if (input.trim().length === 0) {
     return {
@@ -885,13 +839,9 @@ export function parseWithErrors<
  * Find the offset where parsing failed by tracking the furthest successful parse.
  * This helps provide more accurate error positions.
  */
-function findFailureOffset(
-  grammar: Grammar,
-  input: string,
-  context: Context
-): number {
+function findFailureOffset(grammar: Grammar, input: string, context: Context): number {
   // Start by trimming leading whitespace since the parser does this
-  const trimmed = input.replace(/^[\s]*/, "");
+  const trimmed = input.replace(/^[\s]*/, '');
   const leadingWs = input.length - trimmed.length;
 
   if (trimmed.length === 0) {
@@ -942,17 +892,17 @@ export function formatParseError(error: RichParseError): string {
 
   lines.push(`Error at line ${position.line}, column ${position.column}:`);
   lines.push(`  ${message}`);
-  lines.push("");
+  lines.push('');
   lines.push(`  ${snippet}`);
 
   if (error.context) {
     const ctx = error.context;
     if (ctx.expected && ctx.actual) {
-      lines.push("");
+      lines.push('');
       lines.push(`  Expected: ${ctx.expected}`);
       lines.push(`  Actual:   ${ctx.actual}`);
     }
   }
 
-  return lines.join("\n");
+  return lines.join('\n');
 }

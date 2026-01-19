@@ -10,7 +10,7 @@
  * 3. Returns the computed result
  */
 
-import type { NodeSchema } from "../schema/index.js";
+import type { NodeSchema } from '../schema/index.js';
 
 /**
  * Evaluation context that includes both the parse context and node schemas.
@@ -52,30 +52,30 @@ export interface EvalContext<TSchema extends Record<string, unknown> = Record<st
  * ```
  */
 export function evaluate(ast: unknown, ctx: EvalContext): unknown {
-  if (typeof ast !== "object" || ast === null) {
+  if (typeof ast !== 'object' || ast === null) {
     throw new Error(`Invalid AST node: expected object, got ${typeof ast}`);
   }
 
   const node = ast as Record<string, unknown>;
 
   // Check for the 'node' property that indicates the node type
-  if (!("node" in node) || typeof node.node !== "string") {
+  if (!('node' in node) || typeof node.node !== 'string') {
     throw new Error(`Invalid AST node: missing 'node' property`);
   }
 
   const nodeType = node.node as string;
 
   // Handle literal nodes (number, string, boolean, null, undefined)
-  if (nodeType === "literal") {
-    if ("value" in node) {
+  if (nodeType === 'literal') {
+    if ('value' in node) {
       return node.value;
     }
     throw new Error(`Literal node missing 'value' property`);
   }
 
   // Handle identifier nodes - look up value in context
-  if (nodeType === "identifier") {
-    if (!("name" in node) || typeof node.name !== "string") {
+  if (nodeType === 'identifier') {
+    if (!('name' in node) || typeof node.name !== 'string') {
       throw new Error(`Identifier node missing 'name' property`);
     }
     const name = node.name as string;
@@ -86,13 +86,13 @@ export function evaluate(ast: unknown, ctx: EvalContext): unknown {
   }
 
   // Handle const nodes (operators, keywords) - these shouldn't be evaluated directly
-  if (nodeType === "const") {
+  if (nodeType === 'const') {
     throw new Error(`Cannot evaluate const node directly`);
   }
 
   // Handle parentheses - just evaluate the inner expression
-  if (nodeType === "parentheses") {
-    if (!("inner" in node)) {
+  if (nodeType === 'parentheses') {
+    if (!('inner' in node)) {
       throw new Error(`Parentheses node missing 'inner' property`);
     }
     return evaluate(node.inner, ctx);
@@ -101,7 +101,9 @@ export function evaluate(ast: unknown, ctx: EvalContext): unknown {
   // Look up the node schema for this node type
   const nodeSchema = ctx.nodes.find((n) => n.name === nodeType);
   if (!nodeSchema) {
-    throw new Error(`Unknown node type: ${nodeType}. Make sure to pass all node schemas to evaluate().`);
+    throw new Error(
+      `Unknown node type: ${nodeType}. Make sure to pass all node schemas to evaluate().`
+    );
   }
 
   if (!nodeSchema.eval) {
@@ -114,7 +116,7 @@ export function evaluate(ast: unknown, ctx: EvalContext): unknown {
   // Get the pattern to determine which fields are named bindings
   for (const element of nodeSchema.pattern) {
     // Check if this is a named schema (has __named and name)
-    if ("__named" in element && element.__named === true && "name" in element) {
+    if ('__named' in element && element.__named === true && 'name' in element) {
       const bindingName = (element as { name: string }).name;
       if (bindingName in node) {
         // Recursively evaluate the child node

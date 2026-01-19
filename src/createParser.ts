@@ -7,11 +7,11 @@
  *   - Runtime parsing that mirrors the type structure
  */
 
-import type { NodeSchema } from "./schema/index.js";
-import type { ComputeGrammar, Grammar } from "./grammar/index.js";
-import type { Parse } from "./parse/index.js";
-import type { Context } from "./context.js";
-import { parse as runtimeParse } from "./runtime/parser.js";
+import type { NodeSchema } from './schema/index.js';
+import type { ComputeGrammar, Grammar } from './grammar/index.js';
+import type { Parse } from './parse/index.js';
+import type { Context } from './context.js';
+import { parse as runtimeParse } from './runtime/parser.js';
 
 // =============================================================================
 // Parser Interface
@@ -23,10 +23,7 @@ import { parse as runtimeParse } from "./runtime/parser.js";
  * TGrammar: The computed grammar type from node schemas
  * TNodes: The tuple of node schemas
  */
-export interface Parser<
-  TGrammar extends Grammar,
-  TNodes extends readonly NodeSchema[]
-> {
+export interface Parser<TGrammar extends Grammar, TNodes extends readonly NodeSchema[]> {
   /**
    * Parse an input string.
    *
@@ -50,11 +47,8 @@ export interface Parser<
   readonly nodes: TNodes;
 }
 
-type ValidatedInput<
-  TGrammar extends Grammar,
-  TInput extends string,
-  $ extends Context
-> = Parse<TGrammar, TInput, $> extends [unknown, ""] ? TInput : never;
+type ValidatedInput<TGrammar extends Grammar, TInput extends string, $ extends Context> =
+  Parse<TGrammar, TInput, $> extends [unknown, ''] ? TInput : never;
 
 // =============================================================================
 // createParser Factory

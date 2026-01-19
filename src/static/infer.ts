@@ -7,7 +7,7 @@
  * so inference is simpler - just extract the outputSchema field.
  */
 
-import type { Context } from "../context.js";
+import type { Context } from '../context.js';
 
 /**
  * Infer the result type of an AST node.
@@ -23,8 +23,6 @@ import type { Context } from "../context.js";
  * type Add = Infer<BinaryNode<"add", NumberNode<"1">, NumberNode<"2">, "number">, {}>; // "number"
  * ```
  */
-export type Infer<AST, $ extends Context> =
+export type Infer<AST, _$ extends Context> =
   // Extract outputSchema from any node that has it
-  AST extends { outputSchema: infer R extends string }
-    ? R
-    : never;
+  AST extends { outputSchema: infer R extends string } ? R : never;

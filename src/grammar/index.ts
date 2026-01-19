@@ -10,17 +10,9 @@
  *   // level 0 (lowest prec) → level 1 → atoms (last)
  */
 
-import type {
-  Pipe,
-  Numbers,
-  Objects,
-  Tuples,
-  Fn,
-  Unions,
-  Call,
-} from "hotscript";
-import type { NodeSchema } from "../schema/index.js";
-import type { BUILT_IN_ATOMS } from "../runtime/parser.js";
+import type { Pipe, Numbers, Objects, Tuples, Fn, Unions, Call } from 'hotscript';
+import type { NodeSchema } from '../schema/index.js';
+import type { BUILT_IN_ATOMS } from '../runtime/parser.js';
 
 // =============================================================================
 // Grammar Type
@@ -48,7 +40,7 @@ export type BuiltInAtoms = typeof BUILT_IN_ATOMS;
  * Entry format: [precedence, nodes[]]
  */
 interface SortByPrecedence extends Fn {
-  return: Call<Numbers.LessThanOrEqual, this["arg0"][0], this["arg1"][0]>;
+  return: Call<Numbers.LessThanOrEqual, this['arg0'][0], this['arg1'][0]>;
 }
 
 // =============================================================================
@@ -66,11 +58,11 @@ interface SortByPrecedence extends Fn {
 type ComputeOperatorLevels<TNodes extends readonly NodeSchema[]> = Pipe<
   [...TNodes],
   [
-    Tuples.GroupBy<Objects.Get<"precedence">>,
+    Tuples.GroupBy<Objects.Get<'precedence'>>,
     Objects.Entries,
     Unions.ToTuple,
     Tuples.Sort<SortByPrecedence>,
-    Tuples.Map<Tuples.At<1>>
+    Tuples.Map<Tuples.At<1>>,
   ]
 >;
 

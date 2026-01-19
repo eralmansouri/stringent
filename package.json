@@ -44,7 +44,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "lint": "tsc --noEmit",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"examples/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"examples/**/*.ts\"",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -57,11 +60,17 @@
     "arktype": "^2.1.29"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
     "@types/node": "^22.10.5",
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.5",
     "hotscript": "^1.0.13",
+    "prettier": "^3.8.0",
     "tsx": "^4.21.0",
     "typedoc": "^0.28.16",
     "typescript": "^5.7.2",
+    "typescript-eslint": "^8.53.0",
     "vitest": "^4.0.17"
   }
 }

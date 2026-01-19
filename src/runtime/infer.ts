@@ -7,7 +7,7 @@
  * so inference is simpler - just extract the outputSchema field.
  */
 
-import type { Context } from "../context.js";
+import type { Context } from '../context.js';
 
 export type InferredType = string;
 
@@ -27,14 +27,14 @@ export type InferredType = string;
  * ```
  */
 export function infer(ast: unknown, _context: Context): InferredType {
-  if (typeof ast !== "object" || ast === null) {
+  if (typeof ast !== 'object' || ast === null) {
     throw new Error(`Invalid AST node: ${ast}`);
   }
 
   const node = ast as Record<string, unknown>;
 
   // Nodes with outputSchema (new architecture)
-  if ("outputSchema" in node && typeof node.outputSchema === "string") {
+  if ('outputSchema' in node && typeof node.outputSchema === 'string') {
     return node.outputSchema;
   }
 

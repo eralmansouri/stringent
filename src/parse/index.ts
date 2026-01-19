@@ -13,9 +13,9 @@
  * 3. Continue until atoms (last element)
  */
 
-import type { Token } from "@sinclair/parsebox";
-import type { Context } from "../context.js";
-import type { Grammar } from "../grammar/index.js";
+import type { Token } from '@sinclair/parsebox';
+import type { Context } from '../context.js';
+import type { Grammar } from '../grammar/index.js';
 import type {
   NodeSchema,
   PatternSchema,
@@ -28,7 +28,7 @@ import type {
   NullSchema,
   BooleanSchema,
   UndefinedSchema,
-} from "../schema/index.js";
+} from '../schema/index.js';
 import type {
   NumberNode,
   StringNode,
@@ -37,7 +37,7 @@ import type {
   NullNode,
   BooleanNode,
   UndefinedNode,
-} from "../primitive/index.js";
+} from '../primitive/index.js';
 
 // =============================================================================
 // Error Types
@@ -52,11 +52,11 @@ export interface ParseError<TMessage extends string = string> {
 /** Type mismatch error (expression has wrong type) */
 export type TypeMismatchError<
   TExpected extends string,
-  TActual extends string
+  TActual extends string,
 > = ParseError<`Type mismatch: expected ${TExpected}, got ${TActual}`>;
 
 /** No match error (no grammar rule matched) */
-export type NoMatchError = ParseError<"No grammar rule matched">;
+export type NoMatchError = ParseError<'No grammar rule matched'>;
 
 // =============================================================================
 // AST Node Types
@@ -67,7 +67,7 @@ export interface BinaryNode<
   TName extends string = string,
   TLeft = unknown,
   TRight = unknown,
-  TOutputSchema extends string = string
+  TOutputSchema extends string = string,
 > {
   readonly node: TName;
   readonly outputSchema: TOutputSchema;
@@ -84,45 +84,94 @@ type ParseNumberPrimitive<TInput extends string> =
     ? [NumberNode<V>, R]
     : [];
 
-type ParseStringPrimitive<
-  TQuotes extends readonly string[],
-  TInput extends string
-> = Token.TString<[...TQuotes], TInput> extends [
-  infer V extends string,
-  infer R extends string
-]
-  ? [StringNode<V>, R]
-  : [];
+type ParseStringPrimitive<TQuotes extends readonly string[], TInput extends string> =
+  Token.TString<[...TQuotes], TInput> extends [infer V extends string, infer R extends string]
+    ? [StringNode<V>, R]
+    : [];
 
-type ParseIdentPrimitive<
-  TInput extends string,
-  TContext extends Context
-> = Token.TIdent<TInput> extends [
-  infer V extends string,
-  infer R extends string
-]
-  ? V extends keyof TContext["data"]
-    ? [IdentNode<V, TContext["data"][V] & string>, R]
-    : [IdentNode<V, "unknown">, R]
-  : [];
+type ParseIdentPrimitive<TInput extends string, TContext extends Context> =
+  Token.TIdent<TInput> extends [infer V extends string, infer R extends string]
+    ? V extends keyof TContext['data']
+      ? [IdentNode<V, TContext['data'][V] & string>, R]
+      : [IdentNode<V, 'unknown'>, R]
+    : [];
 
-type ParseConstPrimitive<
-  TValue extends string,
-  TInput extends string
-> = Token.TConst<TValue, TInput> extends [
-  infer _V extends string,
-  infer R extends string
-]
-  ? [ConstNode<TValue>, R]
-  : [];
+type ParseConstPrimitive<TValue extends string, TInput extends string> =
+  Token.TConst<TValue, TInput> extends [infer _V extends string, infer R extends string]
+    ? [ConstNode<TValue>, R]
+    : [];
 
 /**
  * Parse null literal - matches "null" keyword followed by non-identifier char.
  */
 type ParseNullPrimitive<TInput extends string> =
-  Token.TConst<"null", TInput> extends [string, infer R extends string]
+  Token.TConst<'null', TInput> extends [string, infer R extends string]
     ? R extends `${infer C}${string}`
-      ? C extends "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z" | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z" | "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "_" | "$"
+      ? C extends
+          | 'a'
+          | 'b'
+          | 'c'
+          | 'd'
+          | 'e'
+          | 'f'
+          | 'g'
+          | 'h'
+          | 'i'
+          | 'j'
+          | 'k'
+          | 'l'
+          | 'm'
+          | 'n'
+          | 'o'
+          | 'p'
+          | 'q'
+          | 'r'
+          | 's'
+          | 't'
+          | 'u'
+          | 'v'
+          | 'w'
+          | 'x'
+          | 'y'
+          | 'z'
+          | 'A'
+          | 'B'
+          | 'C'
+          | 'D'
+          | 'E'
+          | 'F'
+          | 'G'
+          | 'H'
+          | 'I'
+          | 'J'
+          | 'K'
+          | 'L'
+          | 'M'
+          | 'N'
+          | 'O'
+          | 'P'
+          | 'Q'
+          | 'R'
+          | 'S'
+          | 'T'
+          | 'U'
+          | 'V'
+          | 'W'
+          | 'X'
+          | 'Y'
+          | 'Z'
+          | '0'
+          | '1'
+          | '2'
+          | '3'
+          | '4'
+          | '5'
+          | '6'
+          | '7'
+          | '8'
+          | '9'
+          | '_'
+          | '$'
         ? [] // Part of a longer identifier
         : [NullNode, R]
       : [NullNode, R] // End of input
@@ -132,30 +181,222 @@ type ParseNullPrimitive<TInput extends string> =
  * Parse boolean literal - matches "true" or "false" keywords followed by non-identifier char.
  */
 type ParseBooleanPrimitive<TInput extends string> =
-  Token.TConst<"true", TInput> extends [string, infer R extends string]
+  Token.TConst<'true', TInput> extends [string, infer R extends string]
     ? R extends `${infer C}${string}`
-      ? C extends "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z" | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z" | "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "_" | "$"
+      ? C extends
+          | 'a'
+          | 'b'
+          | 'c'
+          | 'd'
+          | 'e'
+          | 'f'
+          | 'g'
+          | 'h'
+          | 'i'
+          | 'j'
+          | 'k'
+          | 'l'
+          | 'm'
+          | 'n'
+          | 'o'
+          | 'p'
+          | 'q'
+          | 'r'
+          | 's'
+          | 't'
+          | 'u'
+          | 'v'
+          | 'w'
+          | 'x'
+          | 'y'
+          | 'z'
+          | 'A'
+          | 'B'
+          | 'C'
+          | 'D'
+          | 'E'
+          | 'F'
+          | 'G'
+          | 'H'
+          | 'I'
+          | 'J'
+          | 'K'
+          | 'L'
+          | 'M'
+          | 'N'
+          | 'O'
+          | 'P'
+          | 'Q'
+          | 'R'
+          | 'S'
+          | 'T'
+          | 'U'
+          | 'V'
+          | 'W'
+          | 'X'
+          | 'Y'
+          | 'Z'
+          | '0'
+          | '1'
+          | '2'
+          | '3'
+          | '4'
+          | '5'
+          | '6'
+          | '7'
+          | '8'
+          | '9'
+          | '_'
+          | '$'
         ? ParseBooleanFalse<TInput> // Check if "false" matches instead
-        : [BooleanNode<"true">, R]
-      : [BooleanNode<"true">, R]
+        : [BooleanNode<'true'>, R]
+      : [BooleanNode<'true'>, R]
     : ParseBooleanFalse<TInput>;
 
 type ParseBooleanFalse<TInput extends string> =
-  Token.TConst<"false", TInput> extends [string, infer R extends string]
+  Token.TConst<'false', TInput> extends [string, infer R extends string]
     ? R extends `${infer C}${string}`
-      ? C extends "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z" | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z" | "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "_" | "$"
+      ? C extends
+          | 'a'
+          | 'b'
+          | 'c'
+          | 'd'
+          | 'e'
+          | 'f'
+          | 'g'
+          | 'h'
+          | 'i'
+          | 'j'
+          | 'k'
+          | 'l'
+          | 'm'
+          | 'n'
+          | 'o'
+          | 'p'
+          | 'q'
+          | 'r'
+          | 's'
+          | 't'
+          | 'u'
+          | 'v'
+          | 'w'
+          | 'x'
+          | 'y'
+          | 'z'
+          | 'A'
+          | 'B'
+          | 'C'
+          | 'D'
+          | 'E'
+          | 'F'
+          | 'G'
+          | 'H'
+          | 'I'
+          | 'J'
+          | 'K'
+          | 'L'
+          | 'M'
+          | 'N'
+          | 'O'
+          | 'P'
+          | 'Q'
+          | 'R'
+          | 'S'
+          | 'T'
+          | 'U'
+          | 'V'
+          | 'W'
+          | 'X'
+          | 'Y'
+          | 'Z'
+          | '0'
+          | '1'
+          | '2'
+          | '3'
+          | '4'
+          | '5'
+          | '6'
+          | '7'
+          | '8'
+          | '9'
+          | '_'
+          | '$'
         ? [] // Part of a longer identifier
-        : [BooleanNode<"false">, R]
-      : [BooleanNode<"false">, R]
+        : [BooleanNode<'false'>, R]
+      : [BooleanNode<'false'>, R]
     : [];
 
 /**
  * Parse undefined literal - matches "undefined" keyword followed by non-identifier char.
  */
 type ParseUndefinedPrimitive<TInput extends string> =
-  Token.TConst<"undefined", TInput> extends [string, infer R extends string]
+  Token.TConst<'undefined', TInput> extends [string, infer R extends string]
     ? R extends `${infer C}${string}`
-      ? C extends "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z" | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z" | "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "_" | "$"
+      ? C extends
+          | 'a'
+          | 'b'
+          | 'c'
+          | 'd'
+          | 'e'
+          | 'f'
+          | 'g'
+          | 'h'
+          | 'i'
+          | 'j'
+          | 'k'
+          | 'l'
+          | 'm'
+          | 'n'
+          | 'o'
+          | 'p'
+          | 'q'
+          | 'r'
+          | 's'
+          | 't'
+          | 'u'
+          | 'v'
+          | 'w'
+          | 'x'
+          | 'y'
+          | 'z'
+          | 'A'
+          | 'B'
+          | 'C'
+          | 'D'
+          | 'E'
+          | 'F'
+          | 'G'
+          | 'H'
+          | 'I'
+          | 'J'
+          | 'K'
+          | 'L'
+          | 'M'
+          | 'N'
+          | 'O'
+          | 'P'
+          | 'Q'
+          | 'R'
+          | 'S'
+          | 'T'
+          | 'U'
+          | 'V'
+          | 'W'
+          | 'X'
+          | 'Y'
+          | 'Z'
+          | '0'
+          | '1'
+          | '2'
+          | '3'
+          | '4'
+          | '5'
+          | '6'
+          | '7'
+          | '8'
+          | '9'
+          | '_'
+          | '$'
         ? [] // Part of a longer identifier
         : [UndefinedNode, R]
       : [UndefinedNode, R] // End of input
@@ -172,22 +413,22 @@ type ParseUndefinedPrimitive<TInput extends string> =
 type ParseElement<
   TElement extends PatternSchema,
   TInput extends string,
-  TContext extends Context
+  TContext extends Context,
 > = TElement extends NumberSchema
   ? ParseNumberPrimitive<TInput>
   : TElement extends StringSchema<infer Q>
-  ? ParseStringPrimitive<Q, TInput>
-  : TElement extends IdentSchema
-  ? ParseIdentPrimitive<TInput, TContext>
-  : TElement extends ConstSchema<infer V>
-  ? ParseConstPrimitive<V, TInput>
-  : TElement extends NullSchema
-  ? ParseNullPrimitive<TInput>
-  : TElement extends BooleanSchema
-  ? ParseBooleanPrimitive<TInput>
-  : TElement extends UndefinedSchema
-  ? ParseUndefinedPrimitive<TInput>
-  : never; // ExprSchema is handled by ParseElementWithLevel
+    ? ParseStringPrimitive<Q, TInput>
+    : TElement extends IdentSchema
+      ? ParseIdentPrimitive<TInput, TContext>
+      : TElement extends ConstSchema<infer V>
+        ? ParseConstPrimitive<V, TInput>
+        : TElement extends NullSchema
+          ? ParseNullPrimitive<TInput>
+          : TElement extends BooleanSchema
+            ? ParseBooleanPrimitive<TInput>
+            : TElement extends UndefinedSchema
+              ? ParseUndefinedPrimitive<TInput>
+              : never; // ExprSchema is handled by ParseElementWithLevel
 
 /**
  * Parse a tuple of pattern elements.
@@ -203,10 +444,10 @@ type ParsePatternTuple<
   TCurrentLevels extends Grammar,
   TNextLevels extends Grammar,
   TFullGrammar extends Grammar,
-  TAcc extends unknown[] = []
+  TAcc extends unknown[] = [],
 > = TPattern extends readonly [
   infer First extends PatternSchema,
-  ...infer Rest extends readonly PatternSchema[]
+  ...infer Rest extends readonly PatternSchema[],
 ]
   ? ParseElementWithLevel<
       First,
@@ -233,9 +474,7 @@ type ParsePatternTuple<
  * The constraint property is optional, so we exclude undefined from the result.
  * Returns the constraint string type, or undefined if not constrained.
  */
-type ExtractConstraint<T> = T extends { constraint: infer C extends string }
-  ? C
-  : undefined;
+type ExtractConstraint<T> = T extends { constraint: infer C extends string } ? C : undefined;
 
 /**
  * Parse an expression element based on its role.
@@ -255,13 +494,31 @@ type ParseElementWithLevel<
   TContext extends Context,
   TCurrentLevels extends Grammar,
   TNextLevels extends Grammar,
-  TFullGrammar extends Grammar
-> = TElement extends { kind: "expr"; role: infer Role }
-  ? Role extends "lhs"
-    ? ParseExprWithConstraint<TNextLevels, TInput, TContext, ExtractConstraint<TElement>, TFullGrammar>
-    : Role extends "rhs"
-    ? ParseExprWithConstraint<TCurrentLevels, TInput, TContext, ExtractConstraint<TElement>, TFullGrammar>
-    : ParseExprWithConstraint<TFullGrammar, TInput, TContext, ExtractConstraint<TElement>, TFullGrammar>
+  TFullGrammar extends Grammar,
+> = TElement extends { kind: 'expr'; role: infer Role }
+  ? Role extends 'lhs'
+    ? ParseExprWithConstraint<
+        TNextLevels,
+        TInput,
+        TContext,
+        ExtractConstraint<TElement>,
+        TFullGrammar
+      >
+    : Role extends 'rhs'
+      ? ParseExprWithConstraint<
+          TCurrentLevels,
+          TInput,
+          TContext,
+          ExtractConstraint<TElement>,
+          TFullGrammar
+        >
+      : ParseExprWithConstraint<
+          TFullGrammar,
+          TInput,
+          TContext,
+          ExtractConstraint<TElement>,
+          TFullGrammar
+        >
   : ParseElement<TElement, TInput, TContext>;
 
 // =============================================================================
@@ -277,17 +534,18 @@ type ParseNodePattern<
   TContext extends Context,
   TCurrentLevels extends Grammar,
   TNextLevels extends Grammar,
-  TFullGrammar extends Grammar
-> = ParsePatternTuple<
-  TNode["pattern"],
-  TInput,
-  TContext,
-  TCurrentLevels,
-  TNextLevels,
-  TFullGrammar
-> extends [infer Children extends unknown[], infer Rest extends string]
-  ? [BuildNodeResult<TNode, Children>, Rest]
-  : [];
+  TFullGrammar extends Grammar,
+> =
+  ParsePatternTuple<
+    TNode['pattern'],
+    TInput,
+    TContext,
+    TCurrentLevels,
+    TNextLevels,
+    TFullGrammar
+  > extends [infer Children extends unknown[], infer Rest extends string]
+    ? [BuildNodeResult<TNode, Children>, Rest]
+    : [];
 
 /**
  * Extract bindings from pattern and children (recursive zip).
@@ -296,10 +554,10 @@ type ParseNodePattern<
 type ExtractBindings<
   TPattern extends readonly PatternSchema[],
   TChildren extends unknown[],
-  TAcc extends {} = {}
+  TAcc extends {} = {},
 > = TPattern extends readonly [
   infer First extends PatternSchema,
-  ...infer RestPattern extends readonly PatternSchema[]
+  ...infer RestPattern extends readonly PatternSchema[],
 ]
   ? TChildren extends [infer Child, ...infer RestChildren]
     ? First extends NamedSchema<PatternSchemaBase, infer Name>
@@ -310,8 +568,8 @@ type ExtractBindings<
             [P in keyof TAcc | Name]: P extends Name
               ? Child
               : P extends keyof TAcc
-              ? TAcc[P]
-              : never;
+                ? TAcc[P]
+                : never;
           }
         >
       : ExtractBindings<RestPattern, RestChildren, TAcc>
@@ -325,19 +583,17 @@ type ExtractBindings<
  * - Single unnamed child: passthrough (atom behavior)
  * - Otherwise: bindings become node fields
  */
-type BuildNodeResult<
-  TNode extends NodeSchema,
-  TChildren extends unknown[]
-> = ExtractBindings<TNode["pattern"], TChildren> extends infer Bindings
-  ? keyof Bindings extends never
-    ? TChildren extends [infer Only]
-      ? Only // Single unnamed element - passthrough (atom)
-      : never // Multiple unnamed children - error
-    : {
-        readonly node: TNode["name"];
-        readonly outputSchema: TNode["resultType"];
-      } & Bindings
-  : never;
+type BuildNodeResult<TNode extends NodeSchema, TChildren extends unknown[]> =
+  ExtractBindings<TNode['pattern'], TChildren> extends infer Bindings
+    ? keyof Bindings extends never
+      ? TChildren extends [infer Only]
+        ? Only // Single unnamed element - passthrough (atom)
+        : never // Multiple unnamed children - error
+      : {
+          readonly node: TNode['name'];
+          readonly outputSchema: TNode['resultType'];
+        } & Bindings
+    : never;
 
 // =============================================================================
 // Expression Parsing with Constraint
@@ -351,17 +607,18 @@ type ParseExprWithConstraint<
   TInput extends string,
   TContext extends Context,
   TConstraint extends string | undefined,
-  TFullGrammar extends Grammar
-> = ParseLevels<TStartLevels, TInput, TContext, TFullGrammar> extends [
-  infer Node extends { outputSchema: string },
-  infer Rest extends string
-]
-  ? TConstraint extends string
-    ? Node["outputSchema"] extends TConstraint
-      ? [Node, Rest]
-      : [] // Type mismatch - backtrack
-    : [Node, Rest]
-  : [];
+  TFullGrammar extends Grammar,
+> =
+  ParseLevels<TStartLevels, TInput, TContext, TFullGrammar> extends [
+    infer Node extends { outputSchema: string },
+    infer Rest extends string,
+  ]
+    ? TConstraint extends string
+      ? Node['outputSchema'] extends TConstraint
+        ? [Node, Rest]
+        : [] // Type mismatch - backtrack
+      : [Node, Rest]
+    : [];
 
 // =============================================================================
 // Level Parsing
@@ -376,28 +633,17 @@ type ParseNodes<
   TContext extends Context,
   TCurrentLevels extends Grammar,
   TNextLevels extends Grammar,
-  TFullGrammar extends Grammar
+  TFullGrammar extends Grammar,
 > = TNodes extends readonly [
   infer First extends NodeSchema,
-  ...infer Rest extends readonly NodeSchema[]
+  ...infer Rest extends readonly NodeSchema[],
 ]
-  ? ParseNodePattern<
-      First,
-      TInput,
-      TContext,
-      TCurrentLevels,
-      TNextLevels,
-      TFullGrammar
-    > extends [infer R, infer Remaining extends string]
+  ? ParseNodePattern<First, TInput, TContext, TCurrentLevels, TNextLevels, TFullGrammar> extends [
+      infer R,
+      infer Remaining extends string,
+    ]
     ? [R, Remaining]
-    : ParseNodes<
-        Rest,
-        TInput,
-        TContext,
-        TCurrentLevels,
-        TNextLevels,
-        TFullGrammar
-      >
+    : ParseNodes<Rest, TInput, TContext, TCurrentLevels, TNextLevels, TFullGrammar>
   : [];
 
 /**
@@ -412,26 +658,22 @@ type ParseLevels<
   TLevels extends Grammar,
   TInput extends string,
   TContext extends Context,
-  TFullGrammar extends Grammar
+  TFullGrammar extends Grammar,
 > = TLevels extends readonly [
   infer CurrentNodes extends readonly NodeSchema[],
-  ...infer NextNodes extends Grammar
+  ...infer NextNodes extends Grammar,
 ]
   ? // Multiple levels remaining - try current, fallback to rest
-    ParseNodes<
-      CurrentNodes,
-      TInput,
-      TContext,
-      TLevels,
-      NextNodes,
-      TFullGrammar
-    > extends [infer R, infer Remaining extends string]
+    ParseNodes<CurrentNodes, TInput, TContext, TLevels, NextNodes, TFullGrammar> extends [
+      infer R,
+      infer Remaining extends string,
+    ]
     ? [R, Remaining]
     : ParseLevels<NextNodes, TInput, TContext, TFullGrammar>
   : TLevels extends readonly [infer LastNodes extends readonly NodeSchema[]]
-  ? // Single level (atoms) - try nodes, atoms use self as next
-    ParseNodes<LastNodes, TInput, TContext, TLevels, TLevels, TFullGrammar>
-  : []; // Empty grammar - no match
+    ? // Single level (atoms) - try nodes, atoms use self as next
+      ParseNodes<LastNodes, TInput, TContext, TLevels, TLevels, TFullGrammar>
+    : []; // Empty grammar - no match
 
 // =============================================================================
 // Main Parse Type
@@ -449,5 +691,5 @@ type ParseLevels<
 export type Parse<
   TGrammar extends Grammar,
   TInput extends string,
-  TContext extends Context
+  TContext extends Context,
 > = ParseLevels<TGrammar, TInput, TContext, TGrammar>;

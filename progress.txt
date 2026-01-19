@@ -871,3 +871,59 @@
 - CONTRIBUTING.md (new - comprehensive contributing guide)
 - .github/PULL_REQUEST_TEMPLATE.md (new - PR template)
 - PRD.md (marked task 4.5 as complete)
+
+### 2026-01-18: Task 6.1 - Code Quality
+
+**Completed:**
+- Set up ESLint and Prettier for comprehensive code quality tooling
+- Installed dependencies: eslint, @eslint/js, typescript-eslint, prettier, eslint-config-prettier, eslint-plugin-prettier
+- **ESLint Configuration (`eslint.config.js`):**
+  - ESLint v9 flat config format
+  - TypeScript-eslint for TypeScript-aware linting
+  - Prettier integration via eslint-config-prettier and eslint-plugin-prettier
+  - Project service for type-aware rules using tsconfig.json
+  - `@typescript-eslint/no-explicit-any` as warning (gradual adoption)
+  - `@typescript-eslint/no-unused-vars` with underscore prefix pattern (`_varName`)
+  - Examples directory excluded (demo code, not production code)
+  - Ignores: dist/, node_modules/, docs/api/, *.js, *.cjs
+- **Prettier Configuration (`.prettierrc`):**
+  - Single quotes
+  - 2-space indentation
+  - 100 character line width
+  - ES5 trailing commas
+  - LF line endings
+  - Bracket spacing enabled
+- **Prettier Ignore (`.prettierignore`):**
+  - dist/, node_modules/, docs/api/, pnpm-lock.yaml, .pnpm-store/
+- **Package.json Scripts:**
+  - `lint`: Run ESLint on src/
+  - `lint:fix`: Auto-fix ESLint issues
+  - `format`: Format files with Prettier
+  - `format:check`: Check formatting without writing
+- **Fixed lint errors in test files:**
+  - Added @ts-expect-error description where required
+  - Prefixed type-only variables with underscore (_varName)
+  - Removed unused imports
+  - Added eslint-disable comment for unavoidable Function type usage
+- **Remaining warnings:** 109 `@typescript-eslint/no-explicit-any` warnings
+  - All in test files for intentional edge case testing
+  - `any` is used to test error handling with invalid input types
+
+**Test Results:**
+- All 691 tests pass
+- TypeScript typecheck passes
+- Lint passes (0 errors, 109 warnings)
+
+**Files Changed:**
+- eslint.config.js (new - ESLint v9 flat config)
+- .prettierrc (new - Prettier configuration)
+- .prettierignore (new - Prettier ignore patterns)
+- package.json (added lint scripts and dev dependencies)
+- src/createParser.test.ts (fixed @ts-expect-error description)
+- src/error-handling.test.ts (prefixed type-only variable)
+- src/parse/index.test.ts (prefixed type-only variables)
+- src/primitive-literals.test.ts (removed unused import)
+- src/static/infer.ts (prefixed unused type parameter)
+- src/type-safety.test.ts (prefixed type-only variables)
+- src/types.test.ts (prefixed type-only variables, added eslint-disable)
+- PRD.md (marked task 6.1 as complete)
