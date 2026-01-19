@@ -1753,4 +1753,401 @@ describe('evaluate - data-schema connection (Task 6)', () => {
       });
     });
   });
+
+  // ===========================================================================
+  // Task 8: Fix Evaluate Return Type with ArkType
+  // ===========================================================================
+  //
+  // These tests verify that evaluate() correctly infers the TypeScript return
+  // type based on the AST's outputSchema field, using arktype's type inference
+  // for advanced types like subtypes, constraints, and unions.
+  // ===========================================================================
+
+  describe('evaluate - return type inference with arktype (Task 8)', () => {
+    describe('primitive types - return type inference', () => {
+      it('infers number return type from outputSchema: "number"', () => {
+        const ast = {
+          node: 'literal',
+          value: 42,
+          outputSchema: 'number',
+        } as const;
+
+        const result = evaluate(ast, { data: {}, nodes: allNodes });
+
+        // Type-level assertion: result should be number
+        expectTypeOf(result).toEqualTypeOf<number>();
+
+        // Runtime assertion
+        expect(result).toBe(42);
+      });
+
+      it('infers string return type from outputSchema: "string"', () => {
+        const ast = {
+          node: 'literal',
+          value: 'hello',
+          outputSchema: 'string',
+        } as const;
+
+        const result = evaluate(ast, { data: {}, nodes: allNodes });
+
+        // Type-level assertion: result should be string
+        expectTypeOf(result).toEqualTypeOf<string>();
+
+        // Runtime assertion
+        expect(result).toBe('hello');
+      });
+
+      it('infers boolean return type from outputSchema: "boolean"', () => {
+        const ast = {
+          node: 'literal',
+          value: true,
+          outputSchema: 'boolean',
+        } as const;
+
+        const result = evaluate(ast, { data: {}, nodes: allNodes });
+
+        // Type-level assertion: result should be boolean
+        expectTypeOf(result).toEqualTypeOf<boolean>();
+
+        // Runtime assertion
+        expect(result).toBe(true);
+      });
+
+      it('infers null return type from outputSchema: "null"', () => {
+        const ast = {
+          node: 'literal',
+          value: null,
+          outputSchema: 'null',
+        } as const;
+
+        const result = evaluate(ast, { data: {}, nodes: allNodes });
+
+        // Type-level assertion: result should be null
+        expectTypeOf(result).toEqualTypeOf<null>();
+
+        // Runtime assertion
+        expect(result).toBe(null);
+      });
+
+      it('infers undefined return type from outputSchema: "undefined"', () => {
+        const ast = {
+          node: 'literal',
+          value: undefined,
+          outputSchema: 'undefined',
+        } as const;
+
+        const result = evaluate(ast, { data: {}, nodes: allNodes });
+
+        // Type-level assertion: result should be undefined
+        expectTypeOf(result).toEqualTypeOf<undefined>();
+
+        // Runtime assertion
+        expect(result).toBe(undefined);
+      });
+    });
+
+    describe('arktype subtypes - return type inference', () => {
+      it('infers string return type from outputSchema: "string.email"', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'email',
+          outputSchema: 'string.email',
+        } as const;
+
+        const result = evaluate(ast, { data: { email: 'test@example.com' }, nodes: allNodes });
+
+        // Type-level assertion: result should be string (not string.email brand type)
+        expectTypeOf(result).toEqualTypeOf<string>();
+
+        // Runtime assertion
+        expect(result).toBe('test@example.com');
+      });
+
+      it('infers string return type from outputSchema: "string.uuid"', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'id',
+          outputSchema: 'string.uuid',
+        } as const;
+
+        const validUuid = '550e8400-e29b-41d4-a716-446655440000';
+        const result = evaluate(ast, { data: { id: validUuid }, nodes: allNodes });
+
+        // Type-level assertion: result should be string
+        expectTypeOf(result).toEqualTypeOf<string>();
+
+        // Runtime assertion
+        expect(result).toBe(validUuid);
+      });
+
+      it('infers string return type from outputSchema: "string.url"', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'url',
+          outputSchema: 'string.url',
+        } as const;
+
+        const result = evaluate(ast, { data: { url: 'https://example.com' }, nodes: allNodes });
+
+        // Type-level assertion: result should be string
+        expectTypeOf(result).toEqualTypeOf<string>();
+
+        // Runtime assertion
+        expect(result).toBe('https://example.com');
+      });
+
+      it('infers number return type from outputSchema: "number.integer"', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'count',
+          outputSchema: 'number.integer',
+        } as const;
+
+        const result = evaluate(ast, { data: { count: 42 }, nodes: allNodes });
+
+        // Type-level assertion: result should be number
+        expectTypeOf(result).toEqualTypeOf<number>();
+
+        // Runtime assertion
+        expect(result).toBe(42);
+      });
+    });
+
+    describe('arktype constraints - return type inference', () => {
+      it('infers number return type from outputSchema: "number >= 0"', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'amount',
+          outputSchema: 'number >= 0',
+        } as const;
+
+        const result = evaluate(ast, { data: { amount: 100 }, nodes: allNodes });
+
+        // Type-level assertion: result should be number
+        expectTypeOf(result).toEqualTypeOf<number>();
+
+        // Runtime assertion
+        expect(result).toBe(100);
+      });
+
+      it('infers number return type from outputSchema: "number > 0"', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'positive',
+          outputSchema: 'number > 0',
+        } as const;
+
+        const result = evaluate(ast, { data: { positive: 1 }, nodes: allNodes });
+
+        // Type-level assertion: result should be number
+        expectTypeOf(result).toEqualTypeOf<number>();
+
+        // Runtime assertion
+        expect(result).toBe(1);
+      });
+
+      it('infers number return type from outputSchema: "1 <= number <= 100"', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'percentage',
+          outputSchema: '1 <= number <= 100',
+        } as const;
+
+        const result = evaluate(ast, { data: { percentage: 50 }, nodes: allNodes });
+
+        // Type-level assertion: result should be number
+        expectTypeOf(result).toEqualTypeOf<number>();
+
+        // Runtime assertion
+        expect(result).toBe(50);
+      });
+
+      it('infers string return type from outputSchema: "string >= 8"', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'password',
+          outputSchema: 'string >= 8',
+        } as const;
+
+        const result = evaluate(ast, { data: { password: 'longpassword' }, nodes: allNodes });
+
+        // Type-level assertion: result should be string
+        expectTypeOf(result).toEqualTypeOf<string>();
+
+        // Runtime assertion
+        expect(result).toBe('longpassword');
+      });
+    });
+
+    describe('arktype unions - return type inference', () => {
+      it('infers string | number return type from outputSchema: "string | number"', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'value',
+          outputSchema: 'string | number',
+        } as const;
+
+        // Test with string value
+        const result1 = evaluate(ast, { data: { value: 'hello' }, nodes: allNodes });
+        expectTypeOf(result1).toEqualTypeOf<string | number>();
+        expect(result1).toBe('hello');
+
+        // Test with number value
+        const result2 = evaluate(ast, { data: { value: 42 }, nodes: allNodes });
+        expectTypeOf(result2).toEqualTypeOf<string | number>();
+        expect(result2).toBe(42);
+      });
+
+      it('infers boolean | number return type from outputSchema: "boolean | number"', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'flag',
+          outputSchema: 'boolean | number',
+        } as const;
+
+        // Test with boolean value
+        const result1 = evaluate(ast, { data: { flag: true }, nodes: allNodes });
+        expectTypeOf(result1).toEqualTypeOf<boolean | number>();
+        expect(result1).toBe(true);
+
+        // Test with number value
+        const result2 = evaluate(ast, { data: { flag: 0 }, nodes: allNodes });
+        expectTypeOf(result2).toEqualTypeOf<boolean | number>();
+        expect(result2).toBe(0);
+      });
+
+      it('infers string | number | boolean return type from outputSchema: "string | number | boolean"', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'any',
+          outputSchema: 'string | number | boolean',
+        } as const;
+
+        const result = evaluate(ast, { data: { any: 'test' }, nodes: allNodes });
+        expectTypeOf(result).toEqualTypeOf<string | number | boolean>();
+        expect(result).toBe('test');
+      });
+
+      it('infers null | undefined return type from outputSchema: "null | undefined"', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'nullable',
+          outputSchema: 'null | undefined',
+        } as const;
+
+        // Test with null value
+        const result1 = evaluate(ast, { data: { nullable: null }, nodes: allNodes });
+        expectTypeOf(result1).toEqualTypeOf<null | undefined>();
+        expect(result1).toBe(null);
+
+        // Test with undefined value
+        const result2 = evaluate(ast, { data: { nullable: undefined }, nodes: allNodes });
+        expectTypeOf(result2).toEqualTypeOf<null | undefined>();
+        expect(result2).toBe(undefined);
+      });
+    });
+
+    describe('arktype arrays - return type inference', () => {
+      it('infers string[] return type from outputSchema: "string[]"', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'items',
+          outputSchema: 'string[]',
+        } as const;
+
+        const result = evaluate(ast, { data: { items: ['a', 'b', 'c'] }, nodes: allNodes });
+
+        // Type-level assertion: result should be string[]
+        expectTypeOf(result).toEqualTypeOf<string[]>();
+
+        // Runtime assertion
+        expect(result).toEqual(['a', 'b', 'c']);
+      });
+
+      it('infers number[] return type from outputSchema: "number[]"', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'numbers',
+          outputSchema: 'number[]',
+        } as const;
+
+        const result = evaluate(ast, { data: { numbers: [1, 2, 3] }, nodes: allNodes });
+
+        // Type-level assertion: result should be number[]
+        expectTypeOf(result).toEqualTypeOf<number[]>();
+
+        // Runtime assertion
+        expect(result).toEqual([1, 2, 3]);
+      });
+
+      it('infers (string | number)[] return type from outputSchema: "(string | number)[]"', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'mixed',
+          outputSchema: '(string | number)[]',
+        } as const;
+
+        const result = evaluate(ast, { data: { mixed: ['a', 1, 'b', 2] }, nodes: allNodes });
+
+        // Type-level assertion: result should be (string | number)[]
+        expectTypeOf(result).toEqualTypeOf<(string | number)[]>();
+
+        // Runtime assertion
+        expect(result).toEqual(['a', 1, 'b', 2]);
+      });
+    });
+
+    describe('createEvaluator - return type inference with arktype', () => {
+      it('infers string return type for subtype', () => {
+        const evaluator = createEvaluator(allNodes);
+        const ast = {
+          node: 'identifier',
+          name: 'email',
+          outputSchema: 'string.email',
+        } as const;
+
+        const result = evaluator(ast, { email: 'test@example.com' });
+
+        // Type-level assertion
+        expectTypeOf(result).toEqualTypeOf<string>();
+
+        // Runtime assertion
+        expect(result).toBe('test@example.com');
+      });
+
+      it('infers number return type for constraint', () => {
+        const evaluator = createEvaluator(allNodes);
+        const ast = {
+          node: 'identifier',
+          name: 'amount',
+          outputSchema: 'number >= 0',
+        } as const;
+
+        const result = evaluator(ast, { amount: 100 });
+
+        // Type-level assertion
+        expectTypeOf(result).toEqualTypeOf<number>();
+
+        // Runtime assertion
+        expect(result).toBe(100);
+      });
+
+      it('infers union return type', () => {
+        const evaluator = createEvaluator(allNodes);
+        const ast = {
+          node: 'identifier',
+          name: 'value',
+          outputSchema: 'string | number',
+        } as const;
+
+        const result = evaluator(ast, { value: 'hello' });
+
+        // Type-level assertion
+        expectTypeOf(result).toEqualTypeOf<string | number>();
+
+        // Runtime assertion
+        expect(result).toBe('hello');
+      });
+    });
+  });
 });

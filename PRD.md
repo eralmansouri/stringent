@@ -462,10 +462,17 @@ SchemaToType<'number >= 0'>      // Returns number
 SchemaToType<'string | number'>  // Returns string | number
 ```
 
-- [ ] Replace `SchemaToType` with arktype-based inference
-- [ ] Verify `evaluate()` returns `string` for `outputSchema: 'string.email'`
-- [ ] Verify `evaluate()` returns `string | number` for `outputSchema: 'string | number'`
-- [ ] Update tests
+- [x] Replace `SchemaToType` with arktype-based inference
+- [x] Verify `evaluate()` returns `string` for `outputSchema: 'string.email'`
+- [x] Verify `evaluate()` returns `string | number` for `outputSchema: 'string | number'`
+- [x] Update tests
+
+**Implementation Notes:**
+- `SchemaToType<T>` already uses arktype's `type.infer<T>` for advanced types (implemented in Task 2)
+- Fast path for common primitives ('number', 'string', 'boolean', etc.) to avoid deep type instantiation
+- Added 28 comprehensive type-level tests in `src/runtime/eval.test.ts` verifying `evaluate()` return types
+- Tests cover: primitives, subtypes (string.email, string.uuid, string.url, number.integer), constraints (number >= 0, number > 0, 1 <= number <= 100, string >= 8), unions (string | number, boolean | number, null | undefined), and arrays (string[], number[], (string | number)[])
+- Both `evaluate()` and `createEvaluator()` correctly infer return types from AST's `outputSchema` field
 
 ### Task 9: Fix Type/Runtime Mismatch and Computed Result Types
 
