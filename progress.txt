@@ -653,3 +653,135 @@ Fixed pre-existing bug in `src/schema/constraint-validation.test.ts:462` where `
 - `src/schema/constraint-validation.test.ts`: Fixed bug (changed `precedence: 'atom'` to `precedence: 0`)
 
 All 860 tests pass. TypeScript type checking passes. No lint errors (only pre-existing warnings).
+
+## Task 12 (PRD Task 6 completion): Add Runtime ArkType Validation (COMPLETED)
+
+Completed the deferred item from Task 6: "Add runtime validation using arktype".
+
+### Implementation
+
+Updated `src/runtime/eval.ts`:
+
+**1. Added arktype import:**
+```typescript
+import { type, Type } from 'arktype';
+```
+
+**2. Added validator caching for performance:**
+```typescript
+const validatorCache = new Map<string, Type>();
+
+function getValidator(schema: string): Type {
+  let validator = validatorCache.get(schema);
+  if (!validator) {
+    validator = type(schema as never) as Type;
+    validatorCache.set(schema, validator);
+  }
+  return validator;
+}
+```
+
+**3. Added validation function:**
+```typescript
+function validateValue(value: unknown, schema: string, variableName: string): void {
+  if (schema === 'unknown' || schema === 'never') {
+    return; // Skip validation for generic schemas
+  }
+
+  const validator = getValidator(schema);
+  const result = validator(value);
+
+  if (result instanceof type.errors) {
+    throw new Error(
+      `Variable '${variableName}' failed validation for schema '${schema}': ${result.summary}`
+    );
+  }
+}
+```
+
+**4. Integrated validation into identifier evaluation:**
+```typescript
+// Handle identifier nodes - look up value in context and validate against schema
+if (nodeType === 'identifier') {
+  // ... existing code to get name and value ...
+
+  // Validate value against arktype schema at runtime
+  if ('outputSchema' in node && typeof node.outputSchema === 'string') {
+    validateValue(value, node.outputSchema, name);
+  }
+
+  return value as ReturnType;
+}
+```
+
+### Runtime Validation Behavior
+
+**Now the evaluator validates identifier values against their arktype schemas:**
+
+- `'number >= 0'` - Throws if value is negative
+- `'number > 0'` - Throws if value is zero or negative
+- `'number.integer'` - Throws if value is not an integer
+- `'1 <= number <= 100'` - Throws if value is out of range
+- `'string.email'` - Throws if value is not a valid email
+- `'string.uuid'` - Throws if value is not a valid UUID
+- `'string >= 8'` - Throws if string length is less than 8
+- `'string | number'` - Throws if value is neither string nor number
+- Basic type constraints - Throws if value doesn't match type
+
+### Tests Added
+
+Added 27 new tests in `src/runtime/eval.test.ts` under "evaluate - runtime arktype constraint validation":
+
+**Number constraints (7 tests):**
+- validates number >= 0 constraint - accepts valid value
+- validates number >= 0 constraint - accepts zero
+- validates number >= 0 constraint - rejects negative value
+- validates number > 0 constraint - rejects zero
+- validates number.integer constraint - rejects float
+- validates number.integer constraint - accepts integer
+- validates range constraint 1 <= number <= 100
+
+**String constraints (6 tests):**
+- validates string.email constraint - accepts valid email
+- validates string.email constraint - rejects invalid email
+- validates string.uuid constraint - accepts valid uuid
+- validates string.uuid constraint - rejects invalid uuid
+- validates string length constraint - rejects too short
+- validates string length constraint - accepts valid length
+
+**Basic type constraints (5 tests):**
+- validates number type - rejects string
+- validates string type - rejects number
+- validates boolean type - rejects string
+- validates null type - rejects undefined
+- validates undefined type - rejects null
+
+**Union type constraints (3 tests):**
+- validates string | number union - accepts string
+- validates string | number union - accepts number
+- validates string | number union - rejects boolean
+
+**Parsed expressions with constraints (3 tests):**
+- validates parsed identifier with number >= 0 constraint
+- validates parsed identifier with string.email constraint
+- validates parsed expression with two constrained identifiers
+
+**createEvaluator with constraints (1 test):**
+- validates constraint in createEvaluator
+
+**Edge cases (2 tests):**
+- skips validation for unknown schema
+- validates nested identifier in expression
+
+### Existing Test Updates
+
+Updated 2 existing tests that now throw runtime errors in addition to type errors:
+- "rejects wrong data types (type error)" → "rejects wrong data types (type error and runtime error)"
+- Updated both in evaluate() and createEvaluator() sections
+
+### Files Modified
+
+- `src/runtime/eval.ts`: Added arktype import, validator cache, validateValue function, integrated validation into identifier handling
+- `src/runtime/eval.test.ts`: Added 27 new tests, updated 2 existing tests
+
+All 887 tests pass. TypeScript type checking passes. No lint errors (only pre-existing warnings).

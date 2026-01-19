@@ -8,8 +8,10 @@
  * 1. Recursively evaluates child nodes first
  * 2. Passes evaluated values to the node's eval function
  * 3. Returns the computed result
+ * 4. Validates values against arktype constraints at runtime
  */
 
+import { type, Type } from 'arktype';
 import type { NodeSchema, SchemaToType } from '../schema/index.js';
 
 // =============================================================================
@@ -102,6 +104,62 @@ export interface EvalContext<TData = Record<string, unknown>> {
   nodes: readonly NodeSchema[];
 }
 
+// =============================================================================
+// Runtime ArkType Validation
+// =============================================================================
+
+/**
+ * Cache for arktype validators to avoid re-creating them for each evaluation.
+ * Maps schema strings to their compiled validators.
+ */
+const validatorCache = new Map<string, Type>();
+
+/**
+ * Get or create an arktype validator for a given schema string.
+ * Uses a cache to avoid re-creating validators for frequently used schemas.
+ *
+ * @param schema - The arktype schema string (e.g., 'number >= 0', 'string.email')
+ * @returns The compiled arktype validator
+ */
+function getValidator(schema: string): Type {
+  let validator = validatorCache.get(schema);
+  if (!validator) {
+    // Create and cache the validator
+    // Note: Invalid schemas will cause arktype to throw at compile time
+    // At runtime, we trust the schema was validated at parse time
+    validator = type(schema as never) as Type;
+    validatorCache.set(schema, validator);
+  }
+  return validator;
+}
+
+/**
+ * Validate a value against an arktype schema at runtime.
+ * Throws an error if the value doesn't match the schema constraints.
+ *
+ * @param value - The value to validate
+ * @param schema - The arktype schema string (e.g., 'number >= 0', 'string.email')
+ * @param variableName - The name of the variable (for error messages)
+ * @throws Error if the value doesn't match the schema constraints
+ */
+function validateValue(value: unknown, schema: string, variableName: string): void {
+  // Skip validation for generic schemas that don't have runtime constraints
+  // These basic types are handled by TypeScript's compile-time checking
+  if (schema === 'unknown' || schema === 'never') {
+    return;
+  }
+
+  const validator = getValidator(schema);
+  const result = validator(value);
+
+  // arktype returns the value if valid, or an ArkErrors object if invalid
+  if (result instanceof type.errors) {
+    throw new Error(
+      `Variable '${variableName}' failed validation for schema '${schema}': ${result.summary}`
+    );
+  }
+}
+
 /**
  * Evaluate an AST node to produce a runtime value.
  *
@@ -172,7 +230,7 @@ export function evaluate<T, TData extends ExtractRequiredData<T>>(
   // Internal eval context for recursive calls (typed at runtime level)
   const internalCtx = ctx as EvalContext<Record<string, unknown>>;
 
-  // Handle identifier nodes - look up value in context
+  // Handle identifier nodes - look up value in context and validate against schema
   if (nodeType === 'identifier') {
     if (!('name' in node) || typeof node.name !== 'string') {
       throw new Error(`Identifier node missing 'name' property`);
@@ -181,7 +239,14 @@ export function evaluate<T, TData extends ExtractRequiredData<T>>(
     if (!(name in internalCtx.data)) {
       throw new Error(`Undefined variable: ${name}`);
     }
-    return internalCtx.data[name] as ReturnType;
+    const value = internalCtx.data[name];
+
+    // Validate value against arktype schema at runtime
+    if ('outputSchema' in node && typeof node.outputSchema === 'string') {
+      validateValue(value, node.outputSchema, name);
+    }
+
+    return value as ReturnType;
   }
 
   // Handle const nodes (operators, keywords) - these shouldn't be evaluated directly

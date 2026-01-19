@@ -1153,15 +1153,19 @@ describe('evaluate - data-schema connection (Task 6)', () => {
       expect(_typeTest).toBeDefined();
     });
 
-    it('rejects wrong data types (type error)', () => {
+    it('rejects wrong data types (type error and runtime error)', () => {
       const ast = {
         node: 'identifier',
         name: 'x',
         outputSchema: 'number',
       } as const;
 
-      // @ts-expect-error - x should be number, not string
-      evaluate(ast, { data: { x: 'wrong' }, nodes: allNodes });
+      // Type-level: @ts-expect-error - x should be number, not string
+      // Runtime-level: throws validation error
+      expect(() => {
+        // @ts-expect-error - x should be number, not string
+        evaluate(ast, { data: { x: 'wrong' }, nodes: allNodes });
+      }).toThrow(/Variable 'x' failed validation for schema 'number'/);
     });
 
     it('allows extra properties in data', () => {
@@ -1347,15 +1351,19 @@ describe('evaluate - data-schema connection (Task 6)', () => {
       expect(_typeTest).toBeDefined();
     });
 
-    it('rejects wrong data types (type error)', () => {
+    it('rejects wrong data types (type error and runtime error)', () => {
       const ast = {
         node: 'identifier',
         name: 'x',
         outputSchema: 'number',
       } as const;
 
-      // @ts-expect-error - x should be number
-      evaluator(ast, { x: 'wrong' });
+      // Type-level: @ts-expect-error - x should be number, not string
+      // Runtime-level: throws validation error
+      expect(() => {
+        // @ts-expect-error - x should be number
+        evaluator(ast, { x: 'wrong' });
+      }).toThrow(/Variable 'x' failed validation for schema 'number'/);
     });
 
     it('evaluates parsed expression (runtime)', () => {
@@ -1364,6 +1372,385 @@ describe('evaluate - data-schema connection (Task 6)', () => {
 
       const value = evaluator(result[0], { x: 42 });
       expect(value).toBe(42);
+    });
+  });
+
+  // ===========================================================================
+  // Runtime ArkType Constraint Validation Tests (Task 6 completion)
+  // ===========================================================================
+
+  describe('evaluate - runtime arktype constraint validation', () => {
+    describe('number constraints', () => {
+      it('validates number >= 0 constraint - accepts valid value', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'x',
+          outputSchema: 'number >= 0',
+        } as const;
+
+        const value = evaluate(ast, { data: { x: 5 }, nodes: allNodes });
+        expect(value).toBe(5);
+      });
+
+      it('validates number >= 0 constraint - accepts zero', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'x',
+          outputSchema: 'number >= 0',
+        } as const;
+
+        const value = evaluate(ast, { data: { x: 0 }, nodes: allNodes });
+        expect(value).toBe(0);
+      });
+
+      it('validates number >= 0 constraint - rejects negative value', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'x',
+          outputSchema: 'number >= 0',
+        } as const;
+
+        expect(() => {
+          evaluate(ast, { data: { x: -5 }, nodes: allNodes });
+        }).toThrow(/Variable 'x' failed validation for schema 'number >= 0'/);
+      });
+
+      it('validates number > 0 constraint - rejects zero', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'x',
+          outputSchema: 'number > 0',
+        } as const;
+
+        expect(() => {
+          evaluate(ast, { data: { x: 0 }, nodes: allNodes });
+        }).toThrow(/Variable 'x' failed validation for schema 'number > 0'/);
+      });
+
+      it('validates number.integer constraint - rejects float', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'x',
+          outputSchema: 'number.integer',
+        } as const;
+
+        expect(() => {
+          evaluate(ast, { data: { x: 3.14 }, nodes: allNodes });
+        }).toThrow(/Variable 'x' failed validation for schema 'number.integer'/);
+      });
+
+      it('validates number.integer constraint - accepts integer', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'x',
+          outputSchema: 'number.integer',
+        } as const;
+
+        const value = evaluate(ast, { data: { x: 42 }, nodes: allNodes });
+        expect(value).toBe(42);
+      });
+
+      it('validates range constraint 1 <= number <= 100', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'x',
+          outputSchema: '1 <= number <= 100',
+        } as const;
+
+        // Valid values
+        expect(evaluate(ast, { data: { x: 1 }, nodes: allNodes })).toBe(1);
+        expect(evaluate(ast, { data: { x: 50 }, nodes: allNodes })).toBe(50);
+        expect(evaluate(ast, { data: { x: 100 }, nodes: allNodes })).toBe(100);
+
+        // Invalid values
+        expect(() => {
+          evaluate(ast, { data: { x: 0 }, nodes: allNodes });
+        }).toThrow(/Variable 'x' failed validation/);
+
+        expect(() => {
+          evaluate(ast, { data: { x: 101 }, nodes: allNodes });
+        }).toThrow(/Variable 'x' failed validation/);
+      });
+    });
+
+    describe('string constraints', () => {
+      it('validates string.email constraint - accepts valid email', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'email',
+          outputSchema: 'string.email',
+        } as const;
+
+        const value = evaluate(ast, { data: { email: 'test@example.com' }, nodes: allNodes });
+        expect(value).toBe('test@example.com');
+      });
+
+      it('validates string.email constraint - rejects invalid email', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'email',
+          outputSchema: 'string.email',
+        } as const;
+
+        expect(() => {
+          evaluate(ast, { data: { email: 'not-an-email' }, nodes: allNodes });
+        }).toThrow(/Variable 'email' failed validation for schema 'string.email'/);
+      });
+
+      it('validates string.uuid constraint - accepts valid uuid', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'id',
+          outputSchema: 'string.uuid',
+        } as const;
+
+        const value = evaluate(ast, {
+          data: { id: '550e8400-e29b-41d4-a716-446655440000' },
+          nodes: allNodes,
+        });
+        expect(value).toBe('550e8400-e29b-41d4-a716-446655440000');
+      });
+
+      it('validates string.uuid constraint - rejects invalid uuid', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'id',
+          outputSchema: 'string.uuid',
+        } as const;
+
+        expect(() => {
+          evaluate(ast, { data: { id: 'not-a-uuid' }, nodes: allNodes });
+        }).toThrow(/Variable 'id' failed validation for schema 'string.uuid'/);
+      });
+
+      it('validates string length constraint - rejects too short', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'password',
+          outputSchema: 'string >= 8',
+        } as const;
+
+        expect(() => {
+          evaluate(ast, { data: { password: 'short' }, nodes: allNodes });
+        }).toThrow(/Variable 'password' failed validation for schema 'string >= 8'/);
+      });
+
+      it('validates string length constraint - accepts valid length', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'password',
+          outputSchema: 'string >= 8',
+        } as const;
+
+        const value = evaluate(ast, { data: { password: 'longpassword' }, nodes: allNodes });
+        expect(value).toBe('longpassword');
+      });
+    });
+
+    describe('basic type constraints', () => {
+      it('validates number type - rejects string', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'x',
+          outputSchema: 'number',
+        } as const;
+
+        expect(() => {
+          // @ts-expect-error - intentionally passing wrong type to test runtime validation
+          evaluate(ast, { data: { x: 'not a number' }, nodes: allNodes });
+        }).toThrow(/Variable 'x' failed validation for schema 'number'/);
+      });
+
+      it('validates string type - rejects number', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'x',
+          outputSchema: 'string',
+        } as const;
+
+        expect(() => {
+          // @ts-expect-error - intentionally passing wrong type to test runtime validation
+          evaluate(ast, { data: { x: 42 }, nodes: allNodes });
+        }).toThrow(/Variable 'x' failed validation for schema 'string'/);
+      });
+
+      it('validates boolean type - rejects string', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'x',
+          outputSchema: 'boolean',
+        } as const;
+
+        expect(() => {
+          // @ts-expect-error - intentionally passing wrong type to test runtime validation
+          evaluate(ast, { data: { x: 'true' }, nodes: allNodes });
+        }).toThrow(/Variable 'x' failed validation for schema 'boolean'/);
+      });
+
+      it('validates null type - rejects undefined', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'x',
+          outputSchema: 'null',
+        } as const;
+
+        expect(() => {
+          // @ts-expect-error - intentionally passing wrong type to test runtime validation
+          evaluate(ast, { data: { x: undefined }, nodes: allNodes });
+        }).toThrow(/Variable 'x' failed validation for schema 'null'/);
+      });
+
+      it('validates undefined type - rejects null', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'x',
+          outputSchema: 'undefined',
+        } as const;
+
+        expect(() => {
+          // @ts-expect-error - intentionally passing wrong type to test runtime validation
+          evaluate(ast, { data: { x: null }, nodes: allNodes });
+        }).toThrow(/Variable 'x' failed validation for schema 'undefined'/);
+      });
+    });
+
+    describe('union type constraints', () => {
+      it('validates string | number union - accepts string', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'x',
+          outputSchema: 'string | number',
+        } as const;
+
+        const value = evaluate(ast, { data: { x: 'hello' }, nodes: allNodes });
+        expect(value).toBe('hello');
+      });
+
+      it('validates string | number union - accepts number', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'x',
+          outputSchema: 'string | number',
+        } as const;
+
+        const value = evaluate(ast, { data: { x: 42 }, nodes: allNodes });
+        expect(value).toBe(42);
+      });
+
+      it('validates string | number union - rejects boolean', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'x',
+          outputSchema: 'string | number',
+        } as const;
+
+        expect(() => {
+          // @ts-expect-error - intentionally passing wrong type to test runtime validation
+          evaluate(ast, { data: { x: true }, nodes: allNodes });
+        }).toThrow(/Variable 'x' failed validation for schema 'string \| number'/);
+      });
+    });
+
+    describe('parsed expressions with constraints', () => {
+      it('validates parsed identifier with number >= 0 constraint', () => {
+        const result = parser.parse('x', { x: 'number >= 0' });
+        expect(result.length).toBe(2);
+
+        // Valid value
+        const value = evaluate(result[0], { data: { x: 5 }, nodes: allNodes });
+        expect(value).toBe(5);
+
+        // Invalid value
+        expect(() => {
+          evaluate(result[0], { data: { x: -5 }, nodes: allNodes });
+        }).toThrow(/Variable 'x' failed validation/);
+      });
+
+      it('validates parsed identifier with string.email constraint', () => {
+        const result = parser.parse('email', { email: 'string.email' });
+        expect(result.length).toBe(2);
+
+        // Valid value
+        const value = evaluate(result[0], { data: { email: 'test@example.com' }, nodes: allNodes });
+        expect(value).toBe('test@example.com');
+
+        // Invalid value
+        expect(() => {
+          evaluate(result[0], { data: { email: 'invalid' }, nodes: allNodes });
+        }).toThrow(/Variable 'email' failed validation/);
+      });
+
+      it('validates parsed expression with two constrained identifiers', () => {
+        // Parse two separate identifiers with constraints
+        // (The add node pattern requires exact 'number' type match, so we test identifiers individually)
+        const resultX = parser.parse('x', { x: 'number >= 0' });
+        const resultY = parser.parse('y', { y: 'number.integer' });
+        expect(resultX.length).toBe(2);
+        expect(resultY.length).toBe(2);
+
+        // Valid values
+        expect(evaluate(resultX[0], { data: { x: 5 }, nodes: allNodes })).toBe(5);
+        expect(evaluate(resultY[0], { data: { y: 3 }, nodes: allNodes })).toBe(3);
+
+        // x violates constraint (negative)
+        expect(() => {
+          evaluate(resultX[0], { data: { x: -1 }, nodes: allNodes });
+        }).toThrow(/Variable 'x' failed validation/);
+
+        // y violates constraint (not integer)
+        expect(() => {
+          evaluate(resultY[0], { data: { y: 3.5 }, nodes: allNodes });
+        }).toThrow(/Variable 'y' failed validation/);
+      });
+    });
+
+    describe('createEvaluator with constraints', () => {
+      const evaluator = createEvaluator(allNodes);
+
+      it('validates constraint in createEvaluator', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'x',
+          outputSchema: 'number >= 0',
+        } as const;
+
+        // Valid
+        expect(evaluator(ast, { x: 5 })).toBe(5);
+
+        // Invalid
+        expect(() => {
+          evaluator(ast, { x: -5 });
+        }).toThrow(/Variable 'x' failed validation/);
+      });
+    });
+
+    describe('edge cases', () => {
+      it('skips validation for unknown schema', () => {
+        const ast = {
+          node: 'identifier',
+          name: 'x',
+          outputSchema: 'unknown',
+        } as const;
+
+        // Any value should be accepted for 'unknown' schema
+        expect(evaluate(ast, { data: { x: 42 }, nodes: allNodes })).toBe(42);
+        expect(evaluate(ast, { data: { x: 'hello' }, nodes: allNodes })).toBe('hello');
+        expect(evaluate(ast, { data: { x: null }, nodes: allNodes })).toBe(null);
+      });
+
+      it('validates nested identifier in expression', () => {
+        // Test that validation works when identifier is part of a larger expression
+        const result = parser.parse('(x)', { x: 'number >= 0' });
+        expect(result.length).toBe(2);
+
+        // Valid
+        expect(evaluate(result[0], { data: { x: 5 }, nodes: allNodes })).toBe(5);
+
+        // Invalid
+        expect(() => {
+          evaluate(result[0], { data: { x: -5 }, nodes: allNodes });
+        }).toThrow(/Variable 'x' failed validation/);
+      });
     });
   });
 });
