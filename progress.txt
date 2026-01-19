@@ -326,3 +326,53 @@
 - src/index.ts (added inference exports)
 - src/inference.test.ts (new - 89 tests)
 - PRD.md (marked task 1.6 as complete)
+
+### 2026-01-18: Task 2.3 - String Escape Handling
+
+**Completed:**
+- Implemented comprehensive escape sequence processing for string literals
+- Created custom `parseStringLiteral()` function to replace parsebox's Token.String
+  - Properly handles escaped quotes within strings (`\"`, `\'`)
+  - Correctly processes escape sequences during parsing
+- Added `processEscapeSequences()` utility function with support for:
+  - Basic escapes: `\n`, `\t`, `\r`, `\\`, `\"`, `\'`, `\0`, `\b`, `\f`, `\v`
+  - Hex escapes: `\xHH` (two hex digits)
+  - Unicode escapes: `\uHHHH` (four hex digits)
+  - Unknown escapes are preserved as-is
+- Exported `processEscapeSequences` from public API for utility use
+- StringNode now has both `raw` (original) and `value` (processed) properties
+
+**Design Decisions:**
+- Type-level parsing returns raw strings (escape processing is runtime-only)
+  - `outputSchema: "string"` remains correct at type level
+  - Full escape processing at type level would add significant complexity
+  - This matches the library's value prop: types capture structure, runtime handles values
+- Custom string parser replaces parsebox's Token.String
+  - Parsebox doesn't handle escaped quotes within strings
+  - Our parser correctly respects `\\` as an escape, so `\"` doesn't terminate strings
+
+**Tests (`src/string-escapes.test.ts` - 65 tests):**
+- **processEscapeSequences unit tests (48 tests):**
+  - Basic escape sequences (10 tests): `\n`, `\t`, `\r`, `\\`, `\"`, `\'`, `\0`, `\b`, `\f`, `\v`
+  - Hex escapes (10 tests): valid `\xHH`, lowercase/uppercase, invalid escapes
+  - Unicode escapes (10 tests): valid `\uHHHH`, non-ASCII characters, invalid escapes
+  - Multiple escapes (5 tests): sequences, mixed content, consecutive backslashes
+  - Unknown escapes (3 tests): preserved as-is
+  - Edge cases (10 tests): empty string, trailing backslash, very long strings
+- **Parser integration tests (17 tests):**
+  - Basic escapes in parsed strings (5 tests): `\n`, `\t`, `\\`, `\"` inside, `\'` inside
+  - Unicode/hex escapes in parsed strings (3 tests): `\u`, `\x`, Chinese characters
+  - Mixed content (2 tests): preserves raw vs processed values
+  - createParser integration (3 tests): string operations with escapes
+  - Edge cases (4 tests): empty strings, invalid escapes, long strings
+
+**Test Results:**
+- All 581 tests pass (65 new + 516 existing)
+- TypeScript typecheck passes
+- Build passes
+
+**Files Changed:**
+- src/runtime/parser.ts (custom string parser, escape processing)
+- src/index.ts (exported processEscapeSequences)
+- src/string-escapes.test.ts (new - 65 tests)
+- PRD.md (marked task 2.3 as complete)

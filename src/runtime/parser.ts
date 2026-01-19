@@ -18,9 +18,6 @@ import type {
   StringSchema,
   ConstSchema,
   ExprSchema,
-  NullSchema,
-  BooleanSchema,
-  UndefinedSchema,
 } from "../schema/index.js";
 import {
   defineNode,
@@ -153,14 +150,172 @@ function parseNumber(input: string): ParseResult {
   ];
 }
 
+/**
+ * Process escape sequences in a string.
+ * Supports: \n, \t, \r, \\, \", \', \0, \b, \f, \v, \xHH, \uHHHH
+ *
+ * @param str - The raw string with escape sequences
+ * @returns The processed string with escape sequences converted
+ */
+export function processEscapeSequences(str: string): string {
+  let result = "";
+  let i = 0;
+  while (i < str.length) {
+    if (str[i] === "\\") {
+      if (i + 1 >= str.length) {
+        // Trailing backslash - keep as-is
+        result += "\\";
+        i++;
+        continue;
+      }
+      const next = str[i + 1];
+      switch (next) {
+        case "n":
+          result += "\n";
+          i += 2;
+          break;
+        case "t":
+          result += "\t";
+          i += 2;
+          break;
+        case "r":
+          result += "\r";
+          i += 2;
+          break;
+        case "\\":
+          result += "\\";
+          i += 2;
+          break;
+        case '"':
+          result += '"';
+          i += 2;
+          break;
+        case "'":
+          result += "'";
+          i += 2;
+          break;
+        case "0":
+          result += "\0";
+          i += 2;
+          break;
+        case "b":
+          result += "\b";
+          i += 2;
+          break;
+        case "f":
+          result += "\f";
+          i += 2;
+          break;
+        case "v":
+          result += "\v";
+          i += 2;
+          break;
+        case "x": {
+          // \xHH - two hex digits
+          if (i + 3 < str.length) {
+            const hex = str.slice(i + 2, i + 4);
+            if (/^[0-9a-fA-F]{2}$/.test(hex)) {
+              result += String.fromCharCode(parseInt(hex, 16));
+              i += 4;
+              break;
+            }
+          }
+          // Invalid \x escape - keep as-is
+          result += "\\x";
+          i += 2;
+          break;
+        }
+        case "u": {
+          // \uHHHH - four hex digits
+          if (i + 5 < str.length) {
+            const hex = str.slice(i + 2, i + 6);
+            if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+              result += String.fromCharCode(parseInt(hex, 16));
+              i += 6;
+              break;
+            }
+          }
+          // Invalid \u escape - keep as-is
+          result += "\\u";
+          i += 2;
+          break;
+        }
+        default:
+          // Unknown escape - keep backslash and character
+          result += "\\" + next;
+          i += 2;
+          break;
+      }
+    } else {
+      result += str[i];
+      i++;
+    }
+  }
+  return result;
+}
+
+/**
+ * Parse a string literal with proper escape sequence handling.
+ * Unlike Token.String, this parser correctly handles escaped quotes within strings.
+ */
+function parseStringLiteral(
+  quotes: readonly string[],
+  input: string
+): [] | [rawContent: string, remaining: string] {
+  // Trim leading whitespace
+  const trimmed = input.replace(/^[\s]*/, "");
+  if (trimmed.length === 0) return [];
+
+  // Check for opening quote
+  const openQuote = quotes.find((q) => trimmed.startsWith(q));
+  if (!openQuote) return [];
+
+  // Find closing quote, respecting escape sequences
+  let i = openQuote.length;
+  let rawContent = "";
+
+  while (i < trimmed.length) {
+    const char = trimmed[i];
+
+    // Check for escape sequence
+    if (char === "\\") {
+      if (i + 1 < trimmed.length) {
+        // Include both the backslash and the escaped character in raw content
+        rawContent += char + trimmed[i + 1];
+        i += 2;
+        continue;
+      } else {
+        // Trailing backslash - include it
+        rawContent += char;
+        i++;
+        continue;
+      }
+    }
+
+    // Check for closing quote
+    if (char === openQuote) {
+      return [rawContent, trimmed.slice(i + openQuote.length)];
+    }
+
+    // Regular character
+    rawContent += char;
+    i++;
+  }
+
+  // Unterminated string
+  return [];
+}
+
 function parseString(quotes: readonly string[], input: string): ParseResult {
-  const result = Token.String([...quotes], input) as [] | [string, string];
+  const result = parseStringLiteral(quotes, input);
   if (result.length === 0) return [];
+  const rawValue = result[0];
+  const processedValue = processEscapeSequences(rawValue);
   return [
     {
       node: "literal",
-      raw: result[0],
-      value: result[0],
+      raw: rawValue,
+      value: processedValue,
       outputSchema: "string",
     } as StringNode<(typeof result)[0]>,
     result[1],
