@@ -31,12 +31,73 @@ export type ASTNodeWithSchema<TSchema extends string = string> = {
   readonly outputSchema: TSchema;
 };
 
+// =============================================================================
+// Variable Extraction Types (Task 6 - Connect Parse Schema to Eval Data)
+// =============================================================================
+
+/**
+ * Recursively extract all identifier nodes from an AST.
+ * Returns a union of { name: string, outputSchema: string } tuples.
+ *
+ * This is used to determine what variables are used in an expression
+ * and what types they expect.
+ */
+type ExtractIdentifiers<T> = T extends { node: 'identifier'; name: infer N; outputSchema: infer S }
+  ? { name: N; outputSchema: S }
+  : T extends object
+    ? { [K in keyof T]: ExtractIdentifiers<T[K]> }[keyof T]
+    : never;
+
+/**
+ * Convert a union of identifier tuples to a data object type.
+ *
+ * @example
+ * type Ids = { name: 'x'; outputSchema: 'number' } | { name: 'y'; outputSchema: 'string' };
+ * type Data = IdentifiersToData<Ids>;
+ * // { x: number; y: string }
+ */
+type IdentifiersToData<T> = T extends {
+  name: infer N extends string;
+  outputSchema: infer S extends string;
+}
+  ? { [K in N]: SchemaToType<S> }
+  : never;
+
+/**
+ * Merge a union of single-key objects into a single object type.
+ *
+ * @example
+ * type Union = { x: number } | { y: string };
+ * type Merged = UnionToIntersection<Union>;
+ * // { x: number } & { y: string }
+ */
+type UnionToIntersection<U> = (U extends unknown ? (k: U) => void : never) extends (
+  k: infer I
+) => void
+  ? I
+  : never;
+
+/**
+ * Extract required data types from an AST based on its identifier nodes.
+ * Returns Record<string, never> if no identifiers are found (empty object is allowed).
+ *
+ * @example
+ * type AST = { node: 'add'; left: { node: 'identifier'; name: 'x'; outputSchema: 'number' }; ... };
+ * type Data = ExtractRequiredData<AST>;
+ * // { x: number }
+ */
+export type ExtractRequiredData<T> =
+  ExtractIdentifiers<T> extends never
+    ? Record<string, never> // No identifiers - empty object is fine
+    : UnionToIntersection<IdentifiersToData<ExtractIdentifiers<T>>>;
+
 /**
  * Evaluation context that includes both the parse context and node schemas.
+ * When AST type is provided, the data is type-checked against the AST's variables.
  */
-export interface EvalContext<TSchema extends Record<string, unknown> = Record<string, unknown>> {
+export interface EvalContext<TData = Record<string, unknown>> {
   /** The data context (variable name → value mapping) */
-  data: TSchema;
+  data: TData;
   /** The node schemas (for looking up eval functions) */
   nodes: readonly NodeSchema[];
 }
@@ -79,7 +140,10 @@ export interface EvalContext<TSchema extends Record<string, unknown> = Record<st
  * }
  * ```
  */
-export function evaluate<T>(ast: T, ctx: EvalContext): SchemaToType<ExtractOutputSchema<T>> {
+export function evaluate<T, TData extends ExtractRequiredData<T>>(
+  ast: T,
+  ctx: EvalContext<TData>
+): SchemaToType<ExtractOutputSchema<T>> {
   if (typeof ast !== 'object' || ast === null) {
     throw new Error(`Invalid AST node: expected object, got ${typeof ast}`);
   }
@@ -105,16 +169,19 @@ export function evaluate<T>(ast: T, ctx: EvalContext): SchemaToType<ExtractOutpu
     throw new Error(`Literal node missing 'value' property`);
   }
 
+  // Internal eval context for recursive calls (typed at runtime level)
+  const internalCtx = ctx as EvalContext<Record<string, unknown>>;
+
   // Handle identifier nodes - look up value in context
   if (nodeType === 'identifier') {
     if (!('name' in node) || typeof node.name !== 'string') {
       throw new Error(`Identifier node missing 'name' property`);
     }
     const name = node.name as string;
-    if (!(name in ctx.data)) {
+    if (!(name in internalCtx.data)) {
       throw new Error(`Undefined variable: ${name}`);
     }
-    return ctx.data[name] as ReturnType;
+    return internalCtx.data[name] as ReturnType;
   }
 
   // Handle const nodes (operators, keywords) - these shouldn't be evaluated directly
@@ -127,11 +194,13 @@ export function evaluate<T>(ast: T, ctx: EvalContext): SchemaToType<ExtractOutpu
     if (!('inner' in node)) {
       throw new Error(`Parentheses node missing 'inner' property`);
     }
-    return evaluate(node.inner, ctx) as ReturnType;
+    // Use type assertion for recursive call (data constraint already validated at entry)
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+    return (evaluate as Function)(node.inner, internalCtx) as ReturnType;
   }
 
   // Look up the node schema for this node type
-  const nodeSchema = ctx.nodes.find((n) => n.name === nodeType);
+  const nodeSchema = internalCtx.nodes.find((n) => n.name === nodeType);
   if (!nodeSchema) {
     throw new Error(
       `Unknown node type: ${nodeType}. Make sure to pass all node schemas to evaluate().`
@@ -152,13 +221,17 @@ export function evaluate<T>(ast: T, ctx: EvalContext): SchemaToType<ExtractOutpu
       const bindingName = (element as { name: string }).name;
       if (bindingName in node) {
         // Recursively evaluate the child node
-        evaluatedBindings[bindingName] = evaluate(node[bindingName], ctx);
+        // Use type assertion for recursive call (data constraint already validated at entry)
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+        evaluatedBindings[bindingName] = (evaluate as Function)(node[bindingName], internalCtx);
       }
     }
   }
 
   // Call the eval function with evaluated bindings
-  return nodeSchema.eval(evaluatedBindings, ctx.data) as SchemaToType<ExtractOutputSchema<T>>;
+  return nodeSchema.eval(evaluatedBindings, internalCtx.data) as SchemaToType<
+    ExtractOutputSchema<T>
+  >;
 }
 
 /**
@@ -189,7 +262,7 @@ export function evaluate<T>(ast: T, ctx: EvalContext): SchemaToType<ExtractOutpu
  * ```
  */
 export function createEvaluator(nodes: readonly NodeSchema[]) {
-  return function evaluator<T, TData extends Record<string, unknown>>(
+  return function evaluator<T, TData extends ExtractRequiredData<T>>(
     ast: T,
     data: TData
   ): SchemaToType<ExtractOutputSchema<T>> {

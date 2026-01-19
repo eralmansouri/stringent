@@ -252,6 +252,7 @@ describe('evaluate - identifier nodes', () => {
     const result = parser.parse('x', { x: 'number' });
     expect(result.length).toBe(2);
     expect(() => {
+      // @ts-expect-error - intentionally passing wrong data to test runtime error
       evaluate(result[0], { data: {}, nodes: allNodes });
     }).toThrow('Undefined variable: x');
   });
@@ -1104,5 +1105,262 @@ describe('evaluate - type inference edge cases (Task 4)', () => {
 
     // Runtime assertion
     expect(value).toBe(42);
+  });
+});
+
+// =============================================================================
+// Data-Schema Connection Type Tests (Task 6)
+// =============================================================================
+
+describe('evaluate - data-schema connection (Task 6)', () => {
+  describe('type-level tests with manually constructed ASTs', () => {
+    // Note: The parser's type-level output doesn't preserve literal outputSchema
+    // values for identifiers (it uses 'string' instead of 'number'). These tests
+    // use manually constructed ASTs to demonstrate the ideal type-safe behavior.
+
+    it('requires correct data types for identifiers', () => {
+      // Manually constructed AST with exact types
+      const ast = {
+        node: 'add',
+        outputSchema: 'number',
+        left: { node: 'identifier', name: 'x', outputSchema: 'number' },
+        right: { node: 'identifier', name: 'y', outputSchema: 'number' },
+      } as const;
+
+      // This should compile - correct types
+      const value = evaluate(ast, { data: { x: 5, y: 10 }, nodes: allNodes });
+      expectTypeOf(value).toEqualTypeOf<number>();
+      expect(value).toBe(15);
+    });
+
+    it('rejects missing variables in data (type error)', () => {
+      const ast = {
+        node: 'identifier',
+        name: 'x',
+        outputSchema: 'number',
+      } as const;
+
+      // Type-level test only - verify that TypeScript catches the error
+      // This would throw at runtime, but we're testing the type constraint
+      const _typeTest = () => {
+        // @ts-expect-error - x is required but not provided
+        evaluate(ast, { data: {}, nodes: allNodes });
+      };
+      // Don't actually call it - just verify the type error exists
+      expect(_typeTest).toBeDefined();
+    });
+
+    it('rejects wrong data types (type error)', () => {
+      const ast = {
+        node: 'identifier',
+        name: 'x',
+        outputSchema: 'number',
+      } as const;
+
+      // @ts-expect-error - x should be number, not string
+      evaluate(ast, { data: { x: 'wrong' }, nodes: allNodes });
+    });
+
+    it('allows extra properties in data', () => {
+      const ast = {
+        node: 'identifier',
+        name: 'x',
+        outputSchema: 'number',
+      } as const;
+
+      // Extra properties are allowed
+      const value = evaluate(ast, { data: { x: 42, extra: 'ignored' }, nodes: allNodes });
+      expectTypeOf(value).toEqualTypeOf<number>();
+      expect(value).toBe(42);
+    });
+
+    it('accepts empty data for expressions without identifiers', () => {
+      const ast = {
+        node: 'literal',
+        value: 42,
+        outputSchema: 'number',
+      } as const;
+
+      // No identifiers - empty data is fine
+      const value = evaluate(ast, { data: {}, nodes: allNodes });
+      expectTypeOf(value).toEqualTypeOf<number>();
+      expect(value).toBe(42);
+    });
+
+    it('infers correct data types for string identifiers', () => {
+      const ast = {
+        node: 'identifier',
+        name: 'name',
+        outputSchema: 'string',
+      } as const;
+
+      // name should be string
+      const value = evaluate(ast, { data: { name: 'Alice' }, nodes: allNodes });
+      expectTypeOf(value).toEqualTypeOf<string>();
+      expect(value).toBe('Alice');
+    });
+
+    it('infers correct data types for boolean identifiers', () => {
+      const ast = {
+        node: 'identifier',
+        name: 'flag',
+        outputSchema: 'boolean',
+      } as const;
+
+      // flag should be boolean
+      const value = evaluate(ast, { data: { flag: true }, nodes: allNodes });
+      expectTypeOf(value).toEqualTypeOf<boolean>();
+      expect(value).toBe(true);
+    });
+
+    it('handles multiple identifiers with different types', () => {
+      // A comparison: x < 10
+      const ast = {
+        node: 'lt',
+        outputSchema: 'boolean',
+        left: { node: 'identifier', name: 'x', outputSchema: 'number' },
+        right: { node: 'literal', value: 10, outputSchema: 'number' },
+      } as const;
+
+      // x should be number
+      const value = evaluate(ast, { data: { x: 5 }, nodes: allNodes });
+      expectTypeOf(value).toEqualTypeOf<boolean>();
+      expect(value).toBe(true);
+    });
+
+    it('handles nested expressions with identifiers', () => {
+      // (x + 1) * y
+      const ast = {
+        node: 'mul',
+        outputSchema: 'number',
+        left: {
+          node: 'add',
+          outputSchema: 'number',
+          left: { node: 'identifier', name: 'x', outputSchema: 'number' },
+          right: { node: 'literal', value: 1, outputSchema: 'number' },
+        },
+        right: { node: 'identifier', name: 'y', outputSchema: 'number' },
+      } as const;
+
+      const value = evaluate(ast, { data: { x: 2, y: 3 }, nodes: allNodes });
+      expectTypeOf(value).toEqualTypeOf<number>();
+      expect(value).toBe(9); // (2+1)*3 = 9
+    });
+  });
+
+  describe('runtime tests with parsed expressions', () => {
+    // These tests verify runtime behavior. The type-level inference for parsed
+    // ASTs is limited because the parser's type output uses generic 'string'
+    // for identifier outputSchema instead of literal values.
+
+    it('evaluates parsed expression with identifiers', () => {
+      const result = parser.parse('x+y', { x: 'number', y: 'number' });
+      expect(result.length).toBe(2);
+
+      const value = evaluate(result[0], { data: { x: 5, y: 10 }, nodes: allNodes });
+      expect(value).toBe(15);
+    });
+
+    it('evaluates parsed identifier expression', () => {
+      const result = parser.parse('x', { x: 'number' });
+      expect(result.length).toBe(2);
+
+      const value = evaluate(result[0], { data: { x: 42 }, nodes: allNodes });
+      expect(value).toBe(42);
+    });
+
+    it('throws for missing variable at runtime', () => {
+      const result = parser.parse('x', { x: 'number' });
+      expect(result.length).toBe(2);
+
+      expect(() => {
+        // Runtime validation catches missing variable
+        // Type system also catches this - but we test runtime behavior here
+        // @ts-expect-error - x is required, testing runtime throws
+        evaluate(result[0], { data: {}, nodes: allNodes });
+      }).toThrow('Undefined variable: x');
+    });
+
+    it('evaluates parsed string identifier', () => {
+      const result = parser.parse('name', { name: 'string' });
+      expect(result.length).toBe(2);
+
+      const value = evaluate(result[0], { data: { name: 'Alice' }, nodes: allNodes });
+      expect(value).toBe('Alice');
+    });
+
+    it('evaluates parsed boolean identifier', () => {
+      const result = parser.parse('flag', { flag: 'boolean' });
+      expect(result.length).toBe(2);
+
+      const value = evaluate(result[0], { data: { flag: true }, nodes: allNodes });
+      expect(value).toBe(true);
+    });
+
+    it('evaluates parsed comparison with identifier', () => {
+      const result = parser.parse('x<10', { x: 'number' });
+      expect(result.length).toBe(2);
+
+      const value = evaluate(result[0], { data: { x: 5 }, nodes: allNodes });
+      expect(value).toBe(true);
+    });
+
+    it('evaluates parsed nested expression with identifiers', () => {
+      const result = parser.parse('(x+1)*y', { x: 'number', y: 'number' });
+      expect(result.length).toBe(2);
+
+      const value = evaluate(result[0], { data: { x: 2, y: 3 }, nodes: allNodes });
+      expect(value).toBe(9); // (2+1)*3 = 9
+    });
+  });
+
+  describe('createEvaluator type-level tests', () => {
+    const evaluator = createEvaluator(allNodes);
+
+    it('requires correct data types for identifiers (manual AST)', () => {
+      const ast = {
+        node: 'identifier',
+        name: 'x',
+        outputSchema: 'number',
+      } as const;
+
+      const value = evaluator(ast, { x: 42 });
+      expectTypeOf(value).toEqualTypeOf<number>();
+      expect(value).toBe(42);
+    });
+
+    it('rejects missing variables (type error)', () => {
+      const ast = {
+        node: 'identifier',
+        name: 'x',
+        outputSchema: 'number',
+      } as const;
+
+      // Type-level test only - verify that TypeScript catches the error
+      const _typeTest = () => {
+        // @ts-expect-error - x is required
+        evaluator(ast, {});
+      };
+      expect(_typeTest).toBeDefined();
+    });
+
+    it('rejects wrong data types (type error)', () => {
+      const ast = {
+        node: 'identifier',
+        name: 'x',
+        outputSchema: 'number',
+      } as const;
+
+      // @ts-expect-error - x should be number
+      evaluator(ast, { x: 'wrong' });
+    });
+
+    it('evaluates parsed expression (runtime)', () => {
+      const result = parser.parse('x', { x: 'number' });
+      expect(result.length).toBe(2);
+
+      const value = evaluator(result[0], { x: 42 });
+      expect(value).toBe(42);
+    });
   });
 });

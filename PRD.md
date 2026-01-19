@@ -1,221 +1,509 @@
-# Stringent v2 - Type Inference Fix
+# Stringent - Type Safety Overhaul with ArkType Integration
 
 ## READ THIS FIRST
 
-**DO NOT WRITE A SINGLE LINE OF CODE** until you can explain, in your own words:
-1. What makes this library different from a regular expression parser
-2. Why returning `unknown` from `evaluate()` defeats the entire purpose
-3. How TypeScript's type system can infer return types from input types
+This library claims to be a **"compile-time type-safe expression parser"** but has fundamental type safety gaps. The implementation agent completely missed the point.
 
-If you cannot explain these things, you are not ready to work on this codebase. Read the existing code. Read the tests. Understand the patterns. Then come back.
+**DO NOT WRITE CODE** until you can answer these questions:
 
----
+1. What is arktype and why does it matter here?
+2. What is the difference between a TYPE SCHEMA (parse-time) and actual DATA (eval-time)?
+3. How should these two be connected?
+4. Why is `{ x: 'garbage' }` currently accepted as a schema?
 
-## What Is Stringent?
-
-Stringent is a **compile-time type-safe** expression parser for TypeScript.
-
-There are thousands of expression parsers. What makes Stringent special is that **the types flow through everything**. When you parse `"1 + 2"`, TypeScript knows at compile time that the result is a number. When you parse `"true && false"`, TypeScript knows it's a boolean. When you parse `"hello" ++ "world"`, TypeScript knows it's a string.
-
-This is not about runtime. Runtime is easy. Any JavaScript can evaluate `1 + 2`. The hard part - the ENTIRE VALUE OF THIS LIBRARY - is that TypeScript's type system tracks the types through parsing and evaluation.
+If you cannot answer these, read the code until you can.
 
 ---
 
-## The Problem We Need to Fix
+## The Vision
 
-Currently, `evaluate()` returns `unknown`:
+Stringent is a type-safe expression parser where:
+
+1. **Schema types use arktype** - Not hardcoded primitives, but any valid arktype type string
+2. **Parse output is typed** - The AST carries type information from the grammar
+3. **Eval data matches schema** - Data passed to evaluate must match the schema from parsing
+4. **Eval output is typed** - The return type matches the AST's output type
+
+Currently, only #2 and #4 partially work. #1 and #3 are completely broken.
+
+---
+
+## What Is ArkType?
+
+ArkType is a runtime TypeScript validation library with 1:1 type syntax. It lets you write:
 
 ```typescript
-const parser = createParser([addNode, mulNode] as const);
-const result = parser.parse('1 + 2', {});
+import { type } from "arktype";
 
-// result[0] has type: BinaryNode<"add", NumberNode, NumberNode, "number">
-// The AST knows its outputSchema is "number"
+const User = type({
+  name: "string",
+  age: "number >= 0",
+  email: "string.email",
+});
 
-const value = evaluate(result[0], ctx);
-// value has type: unknown
-// THIS IS WRONG. It should be: number
+type User = typeof User.infer; // Extract TS type
 ```
 
-The AST node **already carries its type information** in the `outputSchema` field. The `evaluate` function just throws that information away and returns `unknown`.
+ArkType validates at both compile-time AND runtime. It supports:
+- Primitives: `"string"`, `"number"`, `"boolean"`, `"null"`, `"undefined"`
+- Subtypes: `"string.email"`, `"number.integer"`, `"string.uuid"`
+- Constraints: `"number > 0"`, `"string >= 8"`, `"1 <= number <= 100"`
+- Unions: `"string | number"`
+- Arrays: `"string[]"`, `"number[][]"`
+- Objects: `{ name: "string", "age?": "number" }`
+- And much more
 
-This defeats the entire purpose of the library.
+**The key insight:** ArkType can validate that a string is a valid type definition at compile time using generics.
+
+---
+
+## The Current Gaps
+
+### GAP 1: Schema Type Strings Accept Anything
+
+**Current code (src/createParser.ts:41-44):**
+```typescript
+parse<TInput extends string, TSchema extends Record<string, string>>(
+  input: ValidatedInput<TGrammar, TInput, Context<TSchema>>,
+  schema: TSchema
+): Parse<TGrammar, TInput, Context<TSchema>>;
+```
+
+`TSchema extends Record<string, string>` accepts ANY string value.
+
+```typescript
+// ALL of these compile with NO errors:
+parser.parse('x + 1', { x: 'number' });      // ✓ Valid
+parser.parse('x + 1', { x: 'garbage' });     // ✗ Should error
+parser.parse('x + 1', { x: 'asdfghjkl' });   // ✗ Should error
+```
+
+**The fix:** Use arktype to validate schema type strings.
+
+### GAP 2: Constraint Types Accept Anything
+
+**Current code (src/schema/index.ts:169-174):**
+```typescript
+export const lhs = <const TConstraint extends string>(constraint?: TConstraint) =>
+  withAs<ExprSchema<TConstraint, 'lhs'>>({
+    kind: 'expr',
+    constraint: constraint,
+    role: 'lhs',
+  });
+```
+
+`TConstraint extends string` accepts ANY string.
+
+```typescript
+// ALL of these compile:
+lhs('number');      // ✓ Valid
+lhs('garbage');     // ✗ Should error
+lhs('asdfghjkl');   // ✗ Should error
+```
+
+There's even a comment in the code (line 64) that says:
+> using arktype.type.validate<> (see createBox example: https://arktype.io/docs/generics)
+
+**This was intended to use arktype but never implemented.**
+
+### GAP 3: No Connection Between Parse Schema and Eval Data
+
+This is the **critical gap**.
+
+**Parse time:**
+```typescript
+const result = parser.parse('x + y', { x: 'number', y: 'string' });
+// Schema says: x is number, y is string
+```
+
+**Eval time:**
+```typescript
+evaluate(result[0], {
+  data: { x: "wrong", y: 123, z: true },  // ALL WRONG TYPES!
+  nodes
+});
+// TypeScript: "looks good to me!" ✗
+```
+
+The `EvalContext.data` is typed as `Record<string, unknown>`. There's **zero connection** to the parse schema.
+
+### GAP 4: Evaluate Return Type Doesn't Work with ArkType
+
+**Current code (src/runtime/eval.ts):**
+```typescript
+export function evaluate<T>(ast: T, ctx: EvalContext): SchemaToType<ExtractOutputSchema<T>>
+```
+
+`SchemaToType` only handles 5 hardcoded types. What happens with arktype types?
+
+```typescript
+// Schema says x is 'string.email'
+const result = parser.parse('x', { x: 'string.email' });
+const value = evaluate(result[0], { data: { x: 'test@example.com' }, nodes });
+
+// What is the type of `value`?
+// Currently: unknown (because SchemaToType doesn't know 'string.email')
+// Should be: string
+```
+
+`evaluate()` must use arktype to infer the return type from ANY valid arktype schema string.
+
+### GAP 5: Computed Result Types (Ternary, Unions)
+
+This is a **hard problem**. Some nodes don't have a fixed result type - it depends on the branches.
+
+**Example: Ternary**
+```typescript
+const ternary = defineNode({
+  name: 'ternary',
+  pattern: [
+    lhs('boolean').as('condition'),
+    constVal('?'),
+    expr().as('then'),
+    constVal(':'),
+    rhs().as('else'),
+  ],
+  precedence: 1,
+  resultType: '???',  // What goes here?
+});
+```
+
+What is the result type of `x ? true : 0`?
+- The `then` branch has `outputSchema: 'boolean'`
+- The `else` branch has `outputSchema: 'number'`
+- The result should be `boolean | number`
+
+**Current behavior:**
+```typescript
+resultType: 'unknown'  // Cop-out that defeats type safety
+```
+
+**Expected behavior:**
+The result type should be COMPUTED from the branch types at parse time:
+```typescript
+// x ? true : 0
+// then.outputSchema = 'boolean'
+// else.outputSchema = 'number'
+// result.outputSchema = 'boolean | number'
+
+const value = evaluate(ast, ctx);
+// typeof value should be: boolean | number
+```
+
+This requires:
+1. A way to express "result type depends on branch types" in node definition
+2. Type-level computation of the union at parse time
+3. Runtime propagation of the computed outputSchema
+
+### GAP 6: Type/Runtime Mismatch for Computed outputSchema
+
+The runtime ALREADY computes outputSchema for single-binding nodes (like parentheses):
+
+**Runtime (src/runtime/parser.ts:599-612):**
+```typescript
+if (outputSchema === 'unknown') {
+  const bindingKeys = Object.keys(bindings);
+  if (bindingKeys.length === 1) {
+    outputSchema = singleBinding.outputSchema;  // Propagates!
+  }
+}
+```
+
+**Type-level (src/parse/index.ts:594):**
+```typescript
+readonly outputSchema: TNode['resultType'];  // Always static!
+```
+
+**The mismatch:**
+```typescript
+// Expression: (1 + 2)
+// Runtime:    outputSchema = 'number' (propagated from inner)
+// Type-level: outputSchema = 'unknown' (static from parentheses.resultType)
+```
+
+The type-level `BuildNodeResult` must match the runtime behavior:
+- If `resultType` is `'unknown'` and there's exactly one binding, propagate that binding's outputSchema
+- For ternary (two bindings), compute the union
 
 ---
 
 ## What Success Looks Like
 
-After fixing this, the following should work:
+After fixing all gaps:
 
-### Example 1: Basic Arithmetic
 ```typescript
-const parser = createParser([
-  defineNode({
-    name: 'add',
-    pattern: [lhs('number').as('left'), constVal('+'), rhs('number').as('right')],
-    precedence: 1,
-    resultType: 'number',
-    eval: ({ left, right }) => left + right,
-  }),
-] as const);
+import { createParser, defineNode, lhs, rhs, constVal, evaluate } from 'stringent';
 
-const result = parser.parse('1 + 2', {});
-const value = evaluate(result[0], ctx);
+// 1. Schema types are validated via arktype
+const add = defineNode({
+  name: 'add',
+  pattern: [lhs('number').as('left'), constVal('+'), rhs('number').as('right')],
+  precedence: 1,
+  resultType: 'number',
+  eval: ({ left, right }) => left + right,
+});
 
-// TypeScript should know: typeof value === number
-// NOT unknown
+const parser = createParser([add] as const);
+
+// 2. Parse schema accepts only valid arktype types
+const result = parser.parse('x + 1', { x: 'number' });  // ✓
+// parser.parse('x + 1', { x: 'garbage' });  // ✗ Type error!
+// parser.parse('x + 1', { x: 'string.email' });  // ✓ Valid arktype!
+
+// 3. Eval data must match parse schema types
+const value = evaluate(result[0], {
+  data: { x: 5 },  // ✓ x is number as required
+  nodes: [add]
+});
+// evaluate(result[0], { data: { x: "wrong" }, nodes: [add] });  // ✗ Type error!
+// evaluate(result[0], { data: { }, nodes: [add] });  // ✗ Type error - missing x!
+
+// 4. Return type is inferred
+const n: number = value;  // ✓ TypeScript knows value is number
 ```
-
-### Example 2: Boolean Operations
-```typescript
-const parser = createParser([
-  defineNode({
-    name: 'and',
-    pattern: [lhs('boolean').as('left'), constVal('&&'), rhs('boolean').as('right')],
-    precedence: 1,
-    resultType: 'boolean',
-    eval: ({ left, right }) => left && right,
-  }),
-] as const);
-
-const result = parser.parse('true && false', {});
-const value = evaluate(result[0], ctx);
-
-// TypeScript should know: typeof value === boolean
-```
-
-### Example 3: String Concatenation
-```typescript
-const parser = createParser([
-  defineNode({
-    name: 'concat',
-    pattern: [lhs('string').as('left'), constVal('++'), rhs('string').as('right')],
-    precedence: 1,
-    resultType: 'string',
-    eval: ({ left, right }) => left + right,
-  }),
-] as const);
-
-const result = parser.parse('"hello" ++ "world"', {});
-const value = evaluate(result[0], ctx);
-
-// TypeScript should know: typeof value === string
-```
-
-### Example 4: Mixed Types (Comparison)
-```typescript
-const parser = createParser([
-  defineNode({
-    name: 'eq',
-    pattern: [lhs('number').as('left'), constVal('=='), rhs('number').as('right')],
-    precedence: 1,
-    resultType: 'boolean',  // Numbers in, BOOLEAN out
-    eval: ({ left, right }) => left === right,
-  }),
-] as const);
-
-const result = parser.parse('1 == 2', {});
-const value = evaluate(result[0], ctx);
-
-// TypeScript should know: typeof value === boolean
-// Even though the operands are numbers, the RESULT is boolean
-```
-
-### Example 5: The Type Comes From the AST
-```typescript
-// This is the key insight: the AST node carries its type
-type MyAST = BinaryNode<"add", NumberNode, NumberNode, "number">;
-//                                                      ^^^^^^^^
-//                                          This "number" is the outputSchema
-
-// When you call evaluate() on this AST, the return type should be `number`
-// because the AST's outputSchema is "number"
-
-// The evaluate function should be generic over the AST type
-// and use the outputSchema to determine the return type
-```
-
----
-
-## What NOT to Do
-
-1. **Do not just add type assertions.** `return result as number` is not a fix. The types must flow naturally.
-
-2. **Do not break the runtime behavior.** The evaluate function works correctly at runtime. We're fixing the types, not the logic.
-
-3. **Do not ignore edge cases.** What happens when `outputSchema` is not a known type? What about nested expressions?
-
-4. **Do not copy-paste solutions.** Understand WHY the fix works. If you can't explain it, you don't understand it.
 
 ---
 
 ## Tasks
 
-### Task 1: Understand the Codebase
+### Task 1: Study ArkType Integration
 
-**DO NOT SKIP THIS TASK.**
+Before writing any code, understand:
 
-Before writing any code, you must be able to answer:
+- [ ] How does arktype's generic validation work? (See SKILL.md, ADVANCED.md)
+- [ ] How can we validate that a string is a valid arktype type at compile time?
+- [ ] How does `type.infer` work to extract TypeScript types from arktype definitions?
+- [ ] What arktype types should Stringent support initially?
 
-- [ ] What is the `outputSchema` field on AST nodes? Where does it come from?
-- [ ] How does `parser.parse()` preserve type information from input to output?
-- [ ] What existing type utilities does the codebase have for mapping schema strings to TypeScript types?
-- [ ] Why does the current `evaluate()` function lose type information?
+Read these resources:
+- `/Users/mansouri/Repositories/arktype-marketplace/skills/arktype/SKILL.md`
+- `/Users/mansouri/Repositories/arktype-marketplace/skills/arktype/ADVANCED.md`
+- `/Users/mansouri/Repositories/arktype-marketplace/skills/arktype/KEYWORDS.md`
+- The comment at `src/schema/index.ts:64` that references arktype
 
-Write your answers in `progress.txt`. If you cannot answer these questions, keep reading the code until you can.
+### Task 2: Create Type Validation Using ArkType
 
-**Files to study:**
-- `src/createParser.ts` - How the parser preserves types
-- `src/parse/index.ts` - How parsing infers output types
-- `src/schema/index.ts` - The `SchemaToType` utility and related types
-- `src/static/infer.ts` - The `Infer` type
-- `src/runtime/eval.ts` - The current (broken) evaluate function
-- `src/primitive/index.ts` - AST node types with `outputSchema`
+Replace the hardcoded `SchemaToType` with arktype-based validation.
 
-### Task 2: Fix `evaluate()` Return Type
+**Current (broken):**
+```typescript
+export type SchemaToType<T extends string> = T extends 'number'
+  ? number
+  : T extends 'string'
+    ? string
+    : // ... only 5 types
+      : unknown;
+```
 
-- [x] `evaluate()` returns `number` when AST has `outputSchema: "number"`
-- [x] `evaluate()` returns `string` when AST has `outputSchema: "string"`
-- [x] `evaluate()` returns `boolean` when AST has `outputSchema: "boolean"`
-- [x] `evaluate()` returns `null` when AST has `outputSchema: "null"`
-- [x] `evaluate()` returns `undefined` when AST has `outputSchema: "undefined"`
-- [x] `evaluate()` returns `unknown` for unknown outputSchema
-- [x] Runtime behavior unchanged (all existing tests pass)
+**Goal:** Use arktype so that:
+- `"number"` → `number`
+- `"string"` → `string`
+- `"string.email"` → `string` (subtype)
+- `"number >= 0"` → `number` (constrained)
+- `"string | number"` → `string | number` (union)
+- `"garbage"` → compile error
 
-**Do not change the runtime behavior.** The function already works correctly. You are only fixing the TypeScript types.
+- [ ] Integrate arktype's type inference
+- [ ] Validate constraint strings at compile time
+- [ ] Support arktype subtypes (string.email, number.integer, etc.)
+- [ ] Support arktype constraints (number > 0, string >= 8, etc.)
 
-### Task 3: Fix `createEvaluator()` Return Type
+### Task 3: Fix Schema Validation in ExprSchema Factories
 
-- [x] `createEvaluator()` returns a function with proper return type inference
-- [x] The returned evaluator infers types the same way `evaluate()` does
+Update `lhs()`, `rhs()`, `expr()` to validate constraints via arktype.
 
-### Task 4: Add Type-Level Tests
+- [ ] Change constraint validation to use arktype
+- [ ] Verify that `lhs('garbage')` causes a type error
+- [ ] Verify that `lhs('string.email')` works
+- [ ] Update tests
 
-Create tests that verify the TYPE inference works, not just the runtime behavior.
+### Task 4: Fix Schema Validation in defineNode
 
-**Example of a type-level test:**
+Update `defineNode()` to validate `resultType` via arktype.
+
+- [ ] Change resultType validation to use arktype
+- [ ] Verify that `resultType: 'garbage'` causes a type error
+- [ ] Verify that `resultType: 'string | number'` works
+- [ ] Update tests
+
+### Task 5: Fix Schema Validation in parser.parse()
+
+Update the parse method to validate schema types via arktype.
+
+- [ ] Change schema validation to use arktype
+- [ ] Verify that `parser.parse('x', { x: 'garbage' })` causes a type error
+- [ ] Verify that `parser.parse('x', { x: 'string.email' })` works
+- [ ] Update tests
+
+### Task 6: Connect Parse Schema to Eval Data
+
+This is the critical fix. The evaluate function must ensure data matches the schema.
+
+**The problem:**
+```typescript
+// Parse says x is 'number'
+const result = parser.parse('x + 1', { x: 'number' });
+
+// But eval accepts ANY data
+evaluate(result[0], { data: { x: "string value" }, nodes });  // No error!
+```
+
+**The solution:** The evaluator needs to know the schema and validate data against it.
+
+Options to consider:
+1. Carry schema in the parse result, require it in evaluate
+2. Use arktype to validate data at runtime
+3. Type-level connection between schema and data types
+
+- [x] Design the connection approach
+- [x] Implement schema-data type checking
+- [x] Verify wrong data types cause type errors
+- [x] Verify missing variables cause type errors
+- [ ] Add runtime validation using arktype (deferred - requires arktype integration from Tasks 1-5)
+- [x] Update tests
+
+### Task 7: Add Type-Level and Runtime Tests
+
+Create comprehensive tests for the type safety.
+
 ```typescript
 import { expectTypeOf } from 'vitest';
 
-it('evaluate returns number for number outputSchema', () => {
-  const ast = { node: 'literal', value: 42, outputSchema: 'number' } as const;
-  const result = evaluate(ast, ctx);
+describe('schema validation', () => {
+  it('rejects invalid schema types', () => {
+    // @ts-expect-error - 'garbage' is not a valid arktype
+    parser.parse('x', { x: 'garbage' });
+  });
 
-  // This is a TYPE assertion, not a runtime assertion
-  expectTypeOf(result).toEqualTypeOf<number>();
+  it('accepts valid arktype types', () => {
+    // All of these should compile
+    parser.parse('x', { x: 'number' });
+    parser.parse('x', { x: 'string.email' });
+    parser.parse('x', { x: 'number >= 0' });
+  });
+});
+
+describe('data validation', () => {
+  it('requires correct data types', () => {
+    const result = parser.parse('x', { x: 'number' });
+
+    // @ts-expect-error - x should be number, not string
+    evaluate(result[0], { data: { x: "wrong" }, nodes });
+  });
+
+  it('validates at runtime', () => {
+    const result = parser.parse('x', { x: 'number >= 0' });
+
+    // Should throw at runtime
+    expect(() => {
+      evaluate(result[0], { data: { x: -5 }, nodes });
+    }).toThrow();
+  });
 });
 ```
 
-- [x] Type tests for `evaluate()` with all primitive types (number, string, boolean, null, undefined)
-- [x] Type tests for `evaluate()` with parsed expressions from `parser.parse()`
-- [x] Type tests for `evaluate()` with nested expressions
-- [x] Type tests for `createEvaluator()` helper
+- [ ] Type tests for schema validation
+- [ ] Type tests for data validation
+- [ ] Runtime tests for arktype constraint validation
+- [ ] Tests for arktype subtypes (string.email, etc.)
 
-### Task 5: Update Documentation
+### Task 8: Fix Evaluate Return Type with ArkType
 
-- [x] Update README to show type-safe evaluation examples
-- [x] Update API reference (`docs/api-reference.md`) with correct return types
-- [x] Add examples showing compile-time type inference in action
+The `evaluate()` return type must work with ANY valid arktype schema, not just 5 hardcoded types.
+
+**Current (broken):**
+```typescript
+SchemaToType<'string.email'>  // Returns unknown
+SchemaToType<'number >= 0'>   // Returns unknown
+SchemaToType<'string | number'>  // Returns unknown
+```
+
+**Goal:**
+```typescript
+// Use arktype to infer the TypeScript type from the schema string
+type SchemaToType<T extends string> = type.infer<type<T>>;  // or similar
+
+SchemaToType<'string.email'>     // Returns string
+SchemaToType<'number >= 0'>      // Returns number
+SchemaToType<'string | number'>  // Returns string | number
+```
+
+- [ ] Replace `SchemaToType` with arktype-based inference
+- [ ] Verify `evaluate()` returns `string` for `outputSchema: 'string.email'`
+- [ ] Verify `evaluate()` returns `string | number` for `outputSchema: 'string | number'`
+- [ ] Update tests
+
+### Task 9: Fix Type/Runtime Mismatch and Computed Result Types
+
+There are TWO related problems:
+
+**Problem A: Type-level doesn't match runtime for single-binding propagation**
+
+The runtime already propagates outputSchema for single-binding nodes (parentheses), but the type-level code doesn't.
+
+```typescript
+// (1 + 2)
+// Runtime: outputSchema = 'number' ✓
+// Type-level: outputSchema = 'unknown' ✗
+```
+
+Fix: Update `BuildNodeResult` in `src/parse/index.ts` to propagate when:
+- `TNode['resultType']` is `'unknown'`
+- There's exactly one binding
+- That binding has an outputSchema
+
+**Problem B: Multi-binding nodes need union computation**
+
+For ternary and similar nodes, the result is a union of branch types.
+
+```typescript
+// x ? true : 0
+// Should be: outputSchema = 'boolean | number'
+```
+
+**Approach:**
+
+1. Allow `resultType` to be a function or special marker:
+```typescript
+const ternary = defineNode({
+  name: 'ternary',
+  pattern: [...],
+  precedence: 1,
+  resultType: { union: ['then', 'else'] },  // Compute union of these bindings' types
+});
+```
+
+2. At parse time, compute the actual outputSchema from the parsed branches
+3. At eval time, return the computed union type
+
+**Tasks:**
+- [ ] Fix `BuildNodeResult` to propagate single-binding outputSchema (match runtime)
+- [ ] Design the computed result type API for multi-binding nodes
+- [ ] Implement type-level union computation
+- [ ] Update runtime `buildNodeResult` for union computation
+- [ ] Update parentheses to verify single-binding propagation works
+- [ ] Update ternary to use computed union result type
+- [ ] Add tests for both cases
+
+### Task 10: Update Documentation
+
+- [ ] Update README with arktype integration examples
+- [ ] Document supported arktype types
+- [ ] Show compile-time and runtime validation examples
+- [ ] Document computed result types
+- [ ] Update API reference
+
+---
+
+## What NOT to Do
+
+1. **Don't hardcode types.** The whole point is to use arktype's extensible type system, not `'number' | 'string' | 'boolean' | 'null' | 'undefined'`.
+
+2. **Don't use `as any` or `as unknown`** to make types work.
+
+3. **Don't break runtime behavior.** The runtime works. We're adding type safety.
+
+4. **Don't ignore runtime validation.** Arktype provides BOTH compile-time AND runtime validation. Use both.
 
 ---
 
@@ -223,19 +511,38 @@ it('evaluate returns number for number outputSchema', () => {
 
 The fix is complete when:
 
-1. `evaluate(ast, ctx)` returns the correct TypeScript type based on `ast.outputSchema`
-2. `createEvaluator(nodes)(ast, data)` returns the correct TypeScript type
-3. All existing tests still pass (runtime behavior unchanged)
-4. New type-level tests verify the type inference
-5. No use of `any` or unsafe type assertions in the fix
-6. The fix is documented with examples
+**Schema Validation:**
+1. `lhs('garbage')` is a type error
+2. `rhs('asdfghjkl')` is a type error
+3. `parser.parse('x', { x: 'invalid' })` is a type error
+4. `lhs('string.email')` compiles successfully
+5. `lhs('number >= 0')` compiles successfully
+
+**Data-Schema Connection:**
+6. `evaluate(ast, { data: { x: "wrong" } })` is a type error when schema says `x: 'number'`
+7. `evaluate(ast, { data: { x: -5 } })` throws at runtime when schema says `x: 'number >= 0'`
+8. `evaluate(ast, { data: {} })` is a type error when schema has required variables
+
+**Evaluate Return Types:**
+9. `evaluate()` returns `string` when `outputSchema` is `'string.email'`
+10. `evaluate()` returns `number` when `outputSchema` is `'number >= 0'`
+11. `evaluate()` returns `string | number` when `outputSchema` is `'string | number'`
+
+**Computed Result Types:**
+12. Parentheses `(1 + 2)` has `outputSchema: 'number'` at BOTH runtime and type-level
+13. Ternary `x ? true : 0` has `outputSchema: 'boolean | number'`
+14. `evaluate()` returns `number` for `(1 + 2)`
+15. `evaluate()` returns `boolean | number` for ternary `x ? true : 0`
+
+**General:**
+16. All existing tests pass
+17. New type-level and runtime tests verify all constraints
+18. No `any` or unsafe casts in the implementation
 
 ---
 
 ## Remember
 
-The runtime already works. We're not fixing bugs in the evaluation logic. We're fixing the TypeScript types so that the compile-time type safety - THE ENTIRE POINT OF THIS LIBRARY - actually works.
+This library's value is **compile-time AND runtime type safety**. ArkType provides both. Use it.
 
-If your fix involves `as any` or `as unknown` or ignoring type errors, you have not fixed the problem. You have hidden it.
-
-Understand first. Then code.
+The comment at `src/schema/index.ts:64` literally says to use arktype. That was the plan all along. Execute it.
