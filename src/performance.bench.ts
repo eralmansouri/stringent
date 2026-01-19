@@ -138,27 +138,27 @@ function nestedParensWithOps(depth: number): string {
 
 describe('Simple Literals', () => {
   bench('number literal', () => {
-    arithmeticParser.parse('42');
+    arithmeticParser.parse('42', {});
   });
 
   bench('decimal number', () => {
-    arithmeticParser.parse('3.14159');
+    arithmeticParser.parse('3.14159', {});
   });
 
   bench('large number', () => {
-    arithmeticParser.parse('9007199254740991');
+    arithmeticParser.parse('9007199254740991', {});
   });
 
   bench('string literal (double quotes)', () => {
-    fullParser.parse('"hello world"');
+    fullParser.parse('"hello world"', {});
   });
 
   bench('string literal (single quotes)', () => {
-    fullParser.parse("'hello world'");
+    fullParser.parse("'hello world'", {});
   });
 
   bench('identifier', () => {
-    arithmeticParser.parse('variableName', { data: { variableName: 'number' } });
+    arithmeticParser.parse('variableName', { variableName: 'number' });
   });
 });
 
@@ -168,27 +168,27 @@ describe('Simple Literals', () => {
 
 describe('Binary Operations', () => {
   bench('simple addition: 1 + 2', () => {
-    arithmeticParser.parse('1 + 2');
+    arithmeticParser.parse('1 + 2', {});
   });
 
   bench('simple multiplication: 3 * 4', () => {
-    arithmeticParser.parse('3 * 4');
+    arithmeticParser.parse('3 * 4', {});
   });
 
   bench('simple exponentiation: 2 ** 8', () => {
-    arithmeticParser.parse('2 ** 8');
+    arithmeticParser.parse('2 ** 8', {});
   });
 
   bench('mixed precedence: 1 + 2 * 3', () => {
-    arithmeticParser.parse('1 + 2 * 3');
+    arithmeticParser.parse('1 + 2 * 3', {});
   });
 
   bench('mixed precedence: 2 * 3 + 4 * 5', () => {
-    arithmeticParser.parse('2 * 3 + 4 * 5');
+    arithmeticParser.parse('2 * 3 + 4 * 5', {});
   });
 
   bench('three precedence levels: 1 + 2 * 3 ** 4', () => {
-    arithmeticParser.parse('1 + 2 * 3 ** 4');
+    arithmeticParser.parse('1 + 2 * 3 ** 4', {});
   });
 });
 
@@ -203,41 +203,41 @@ describe('Chained Operations', () => {
   const chain50 = chainedAddition(50);
 
   bench('5-element addition chain', () => {
-    arithmeticParser.parse(chain5);
+    arithmeticParser.parse(chain5 as '1', {});
   });
 
   bench('10-element addition chain', () => {
-    arithmeticParser.parse(chain10);
+    arithmeticParser.parse(chain10 as '1', {});
   });
 
   bench('20-element addition chain', () => {
-    arithmeticParser.parse(chain20);
+    arithmeticParser.parse(chain20 as '1', {});
   });
 
   bench('50-element addition chain', () => {
-    arithmeticParser.parse(chain50);
+    arithmeticParser.parse(chain50 as '1', {});
   });
 
   const mulChain10 = chainedMultiplication(10);
   const mulChain20 = chainedMultiplication(20);
 
   bench('10-element multiplication chain', () => {
-    arithmeticParser.parse(mulChain10);
+    arithmeticParser.parse(mulChain10 as '1', {});
   });
 
   bench('20-element multiplication chain', () => {
-    arithmeticParser.parse(mulChain20);
+    arithmeticParser.parse(mulChain20 as '1', {});
   });
 
   const mixed10 = mixedPrecedence(10);
   const mixed20 = mixedPrecedence(20);
 
   bench('10-element mixed precedence', () => {
-    arithmeticParser.parse(mixed10);
+    arithmeticParser.parse(mixed10 as '1', {});
   });
 
   bench('20-element mixed precedence', () => {
-    arithmeticParser.parse(mixed20);
+    arithmeticParser.parse(mixed20 as '1', {});
   });
 });
 
@@ -251,15 +251,15 @@ describe('Nested Parentheses', () => {
   const parens20 = nestedParens(20);
 
   bench('5 levels of nesting', () => {
-    arithmeticParser.parse(parens5);
+    arithmeticParser.parse(parens5 as '1', {});
   });
 
   bench('10 levels of nesting', () => {
-    arithmeticParser.parse(parens10);
+    arithmeticParser.parse(parens10 as '1', {});
   });
 
   bench('20 levels of nesting', () => {
-    arithmeticParser.parse(parens20);
+    arithmeticParser.parse(parens20 as '1', {});
   });
 
   const parensOps5 = nestedParensWithOps(5);
@@ -267,15 +267,15 @@ describe('Nested Parentheses', () => {
   const parensOps20 = nestedParensWithOps(20);
 
   bench('5 levels with operations', () => {
-    arithmeticParser.parse(parensOps5);
+    arithmeticParser.parse(parensOps5 as '1', {});
   });
 
   bench('10 levels with operations', () => {
-    arithmeticParser.parse(parensOps10);
+    arithmeticParser.parse(parensOps10 as '1', {});
   });
 
   bench('20 levels with operations', () => {
-    arithmeticParser.parse(parensOps20);
+    arithmeticParser.parse(parensOps20 as '1', {});
   });
 });
 
@@ -285,19 +285,19 @@ describe('Nested Parentheses', () => {
 
 describe('Complex Expressions', () => {
   bench('precedence override: (1 + 2) * 3', () => {
-    arithmeticParser.parse('(1 + 2) * 3');
+    arithmeticParser.parse('(1 + 2) * 3', {});
   });
 
   bench('nested groups: ((1 + 2) * 3) + 4', () => {
-    arithmeticParser.parse('((1 + 2) * 3) + 4');
+    arithmeticParser.parse('((1 + 2) * 3) + 4', {});
   });
 
   bench('complex: (1 + 2) * (3 + 4)', () => {
-    arithmeticParser.parse('(1 + 2) * (3 + 4)');
+    arithmeticParser.parse('(1 + 2) * (3 + 4)', {});
   });
 
   bench('very complex: ((1 + 2) * 3 + 4) ** 2 / (5 - 6)', () => {
-    arithmeticParser.parse('((1 + 2) * 3 + 4) ** 2 / (5 - 6)');
+    arithmeticParser.parse('((1 + 2) * 3 + 4) ** 2 / (5 - 6)', {});
   });
 });
 
@@ -374,23 +374,23 @@ describe('Grammar Complexity', () => {
   ]);
 
   bench('2 ops at same precedence - first op', () => {
-    samePrec2.parse('1 |1| 2');
+    samePrec2.parse('1 |1| 2', {});
   });
 
   bench('2 ops at same precedence - second op', () => {
-    samePrec2.parse('1 |2| 2');
+    samePrec2.parse('1 |2| 2', {});
   });
 
   bench('5 ops at same precedence - first op', () => {
-    samePrec5.parse('1 |1| 2');
+    samePrec5.parse('1 |1| 2', {});
   });
 
   bench('5 ops at same precedence - fifth op', () => {
-    samePrec5.parse('1 |5| 2');
+    samePrec5.parse('1 |5| 2', {});
   });
 
   bench('5 ops at same precedence - number literal only', () => {
-    samePrec5.parse('42');
+    samePrec5.parse('42', {});
   });
 });
 
@@ -406,24 +406,24 @@ describe('String Parsing', () => {
   const longStr = '"' + 'a'.repeat(1000) + '"';
 
   bench('short string (5 chars)', () => {
-    stringParser.parse(shortStr);
+    stringParser.parse(shortStr as '"hello"', {});
   });
 
   bench('medium string (100 chars)', () => {
-    stringParser.parse(mediumStr);
+    stringParser.parse(mediumStr as '"hello"', {});
   });
 
   bench('long string (1000 chars)', () => {
-    stringParser.parse(longStr);
+    stringParser.parse(longStr as '"hello"', {});
   });
 
   const escapedStr = '"hello\\nworld\\t\\u0041"';
   bench('string with escapes', () => {
-    stringParser.parse(escapedStr);
+    stringParser.parse(escapedStr as '"hello"', {});
   });
 
   bench('string concatenation', () => {
-    stringParser.parse('"hello" ++ "world"');
+    stringParser.parse('"hello" ++ "world"', {});
   });
 });
 
@@ -432,21 +432,19 @@ describe('String Parsing', () => {
 // =============================================================================
 
 describe('Context Resolution', () => {
-  const smallContext = { data: { x: 'number' } };
+  const smallContext = { x: 'number' } as const;
   const mediumContext = {
-    data: {
-      a: 'number',
-      b: 'number',
-      c: 'number',
-      d: 'number',
-      e: 'number',
-      x: 'number',
-    },
-  };
-  const largeContext = {
-    data: Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`var${i}`, 'number'])),
-  };
-  (largeContext.data as Record<string, string>)['x'] = 'number';
+    a: 'number',
+    b: 'number',
+    c: 'number',
+    d: 'number',
+    e: 'number',
+    x: 'number',
+  } as const;
+  const largeContext = Object.fromEntries(
+    Array.from({ length: 100 }, (_, i) => [`var${i}`, 'number'])
+  ) as Record<string, string>;
+  largeContext['x'] = 'number';
 
   bench('small context - identifier lookup', () => {
     arithmeticParser.parse('x', smallContext);

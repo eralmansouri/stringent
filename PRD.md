@@ -12,6 +12,7 @@
 ## Executive Summary
 
 ### What Works Well
+
 - Sophisticated type-level parsing system
 - Precedence-based grammar handling
 - Type-runtime mirror pattern (same algorithm at compile and runtime)
@@ -19,6 +20,7 @@
 - Solid type-level tests (~90% coverage)
 
 ### What Needs Work
+
 - Runtime tests are incomplete (~30% coverage)
 - No error/edge case tests
 - Missing primitive literals (null, boolean, undefined)
@@ -45,6 +47,7 @@ src/
 ```
 
 ### Key Files to Understand
+
 - `src/createParser.ts` - Main public API, creates type-safe parsers
 - `src/schema/index.ts` - defineNode() and pattern element factories
 - `src/runtime/parser.ts` - Core runtime parsing algorithm
@@ -74,6 +77,7 @@ Since this is a new project, consider these potential improvements:
 ## Phase 1: Test Infrastructure & Core Testing
 
 ### 1.1 Set Up Proper Test Infrastructure
+
 - [x] Install vitest or similar test framework
 - [x] Configure test scripts in package.json
 - [x] Set up test configuration (vitest.config.ts)
@@ -83,6 +87,7 @@ Since this is a new project, consider these potential improvements:
 **Files:** `package.json`, `vitest.config.ts` (new)
 
 ### 1.2 Runtime Parser Tests
+
 - [x] Create `src/runtime/parser.test.ts` with comprehensive tests
 - [x] Test tokenization: numberLiteral, stringLiteral, identifierAtom
 - [x] Test parentheses handling and nesting
@@ -94,6 +99,7 @@ Since this is a new project, consider these potential improvements:
 **Files:** `src/runtime/parser.ts`, `src/runtime/parser.test.ts` (new)
 
 ### 1.3 Error Handling Tests
+
 - [x] Test invalid syntax errors (malformed expressions)
 - [x] Test type mismatch errors (constraint violations)
 - [x] Test no-match errors (unknown operators)
@@ -103,6 +109,7 @@ Since this is a new project, consider these potential improvements:
 **Files:** `src/parse/index.ts`, `src/error-handling.test.ts` (new)
 
 ### 1.4 Edge Case Tests
+
 - [x] Test deeply nested parentheses (10+ levels)
 - [x] Test long chained operations (a + b + c + d + e + ...)
 - [x] Test mixed precedence chains
@@ -113,17 +120,20 @@ Since this is a new project, consider these potential improvements:
 - [x] Test number edge cases (negative, decimals, scientific notation)
 
 ### 1.5 Combinator Review
+
 - [x] Evaluate if Union, Tuple, Optional, Many combinators are needed
 - [x] If useful: add tests and document
 - [x] If not useful: **remove them entirely** (no backward compat concerns)
 - [x] Clean up any dead code paths
 
 **Completed:** Removed unused combinators (Union, Tuple, Optional, Many) and related files:
+
 - Deleted `src/combinators/index.ts`
 - Deleted `src/static/parser.ts` (only re-exported combinators)
 - Removed combinator exports from `src/index.ts`
 
 ### 1.6 Inference Tests
+
 - [x] Test runtime infer() function
 - [x] Test static Infer<> type
 - [x] Test inference with complex AST structures
@@ -138,6 +148,7 @@ Since this is a new project, consider these potential improvements:
 ## Phase 2: Missing Features
 
 ### 2.1 Add Missing Primitive Literals
+
 **TODO found in code:** `// todo: add null/boolean/undefined`
 
 - [x] Add `nullLiteral` atom (matches `null`)
@@ -150,6 +161,7 @@ Since this is a new project, consider these potential improvements:
 **Files:** `src/runtime/parser.ts:91`, `src/parse/index.ts`, `src/index.ts`
 
 ### 2.2 Implement eval() Function
+
 **README states:** "Coming Soon"
 
 - [x] Design eval function signature
@@ -164,6 +176,7 @@ Since this is a new project, consider these potential improvements:
 **Files:** `src/runtime/eval.ts` (new), `README.md`
 
 ### 2.3 String Escape Handling
+
 - [x] Review current string parsing for escape sequences
 - [x] Add support for `\n`, `\t`, `\\`, `\"`, `\'`
 - [x] Add tests for escaped strings
@@ -178,12 +191,14 @@ Since this is a new project, consider these potential improvements:
 ## Phase 3: API Polish
 
 ### 3.1 Error Messages
+
 - [x] Improve ParseError messages with position info
 - [x] Add source position tracking during parsing
 - [x] Include snippet of problematic input in errors
 - [x] Make TypeMismatchError more descriptive
 
 **Completed:** Implemented comprehensive error system with:
+
 - `RichParseError` type with position (offset, line, column), message, and snippet
 - `SourcePosition` interface for position tracking
 - `parseWithErrors()` function that returns detailed error info on failure
@@ -194,6 +209,7 @@ Since this is a new project, consider these potential improvements:
 **Files:** `src/errors.ts` (new), `src/runtime/parser.ts`, `src/error-messages.test.ts` (new)
 
 ### 3.2 API Consistency
+
 - [x] Review all exports for naming consistency
 - [x] Ensure factory functions follow consistent patterns
 - [x] **Remove legacy exports** (Number, String, Ident, Const) - no backward compat needed
@@ -201,6 +217,7 @@ Since this is a new project, consider these potential improvements:
 - [x] Simplify exports - only expose what's truly needed
 
 **Completed:** Cleaned up the public API surface:
+
 - Removed legacy capitalized factories: `Number`, `String`, `Ident`, `Const`
 - Removed legacy type exports: `IParser`, `ParseResult`, `Primitive`
 - Renamed internal factories to `createNumber`, `createString`, `createIdent`, `createConst` with `@internal` JSDoc
@@ -208,12 +225,14 @@ Since this is a new project, consider these potential improvements:
 - All 643 tests pass with the cleaned-up API
 
 ### 3.3 Type Safety Review
+
 - [x] Audit for `any` types that could be stricter
 - [x] Ensure all public APIs have proper type inference
 - [x] Test that type errors are comprehensible
 - [x] Add type tests for common mistake scenarios
 
 **Completed:** Comprehensive type safety improvements:
+
 - Replaced 4 `any` type usages with stricter types (`unknown`, `ASTNode<string, unknown>`)
 - Created `src/type-safety.test.ts` with 48 tests covering:
   - Public API type inference (createParser, defineNode, evaluate, infer, parseWithErrors)
@@ -231,6 +250,7 @@ Since this is a new project, consider these potential improvements:
 ## Phase 4: Documentation
 
 ### 4.1 README Enhancement
+
 - [x] Add more usage examples beyond arithmetic
 - [x] Document all pattern elements with examples
 - [x] Add comparison operators example
@@ -243,6 +263,7 @@ Since this is a new project, consider these potential improvements:
 **Files:** `README.md`
 
 ### 4.2 API Reference
+
 - [x] Create `/docs` directory
 - [x] Document createParser() API in detail
 - [x] Document defineNode() and all options
@@ -253,6 +274,7 @@ Since this is a new project, consider these potential improvements:
 - [x] Generate API docs from JSDoc (typedoc)
 
 **Completed:** Created comprehensive `/docs/api-reference.md` with:
+
 - Full createParser() documentation with type safety examples
 - Complete defineNode() reference including precedence, configure, and eval
 - All pattern element factories (atoms: number, string, ident, nullLiteral, booleanLiteral, undefinedLiteral, constVal; expressions: lhs, rhs, expr)
@@ -268,6 +290,7 @@ Since this is a new project, consider these potential improvements:
 **Files:** `/docs/api-reference.md` (new), `typedoc.json` (new)
 
 ### 4.3 Architecture Documentation
+
 - [x] Document precedence-based parsing algorithm
 - [x] Document type-runtime mirror pattern
 - [x] Document lhs/rhs/expr role system
@@ -275,6 +298,7 @@ Since this is a new project, consider these potential improvements:
 - [x] Document grammar computation
 
 **Completed:** Created comprehensive `/docs/architecture.md` with:
+
 - Overview of core components and file structure
 - Precedence-based parsing algorithm with level-based recursive descent
 - Type-runtime mirror pattern showing parallel implementations
@@ -287,6 +311,7 @@ Since this is a new project, consider these potential improvements:
 **Files:** `/docs/architecture.md` (new)
 
 ### 4.4 Examples
+
 - [x] Create `/examples` directory
 - [x] Add basic arithmetic example
 - [x] Add comparison operators example
@@ -295,6 +320,7 @@ Since this is a new project, consider these potential improvements:
 - [x] Add custom operators example
 
 **Completed:** Created `/examples` directory with 5 comprehensive examples:
+
 - `basic-arithmetic.ts` - Addition, subtraction, multiplication, division, exponentiation with precedence
 - `comparison-operators.ts` - Equality, inequality, less/greater than, filter system example
 - `form-validation.ts` - Password confirmation, age validation, email validation, custom operators
@@ -304,6 +330,7 @@ Since this is a new project, consider these potential improvements:
 **Files:** `/examples/` (new directory)
 
 ### 4.5 Contributing Guide
+
 - [x] Create CONTRIBUTING.md
 - [x] Document development setup
 - [x] Document test running
@@ -311,6 +338,7 @@ Since this is a new project, consider these potential improvements:
 - [x] Add pull request template
 
 **Completed:** Created comprehensive CONTRIBUTING.md with:
+
 - Development setup instructions (prerequisites, getting started, available scripts)
 - Test running guide (all test commands, file locations, writing tests)
 - Code patterns and conventions (type-runtime mirror pattern, file organization, naming conventions, TypeScript guidelines)
@@ -326,12 +354,14 @@ Since this is a new project, consider these potential improvements:
 ## Phase 5: Build & CI
 
 ### 5.1 Build Configuration
+
 - [x] Review tsconfig.json settings
 - [x] Ensure source maps are generated
 - [x] Review dist output structure
 - [x] Add minification if appropriate
 
 **Completed:** Enhanced build configuration for production readiness:
+
 - Added `sourceMap: true` to tsconfig.json for JavaScript source maps
 - Added `declarationMap: true` to tsconfig.json for TypeScript declaration source maps
 - Updated tsconfig.build.json to exclude test-helpers.ts and examples from build
@@ -341,6 +371,7 @@ Since this is a new project, consider these potential improvements:
 **Files:** `tsconfig.json`, `tsconfig.build.json`
 
 ### 5.2 CI Pipeline
+
 - [x] Add GitHub Actions workflow
 - [x] Run tests on PR
 - [x] Run type checking on PR
@@ -348,6 +379,7 @@ Since this is a new project, consider these potential improvements:
 - [x] Add test coverage reporting
 
 **Completed:** Created `.github/workflows/ci.yml` with comprehensive CI pipeline:
+
 - **Test job:** Runs on Node.js 18, 20, and 22 matrix
   - Type checking (`pnpm typecheck`)
   - Tests (`pnpm test`)
@@ -361,6 +393,7 @@ Since this is a new project, consider these potential improvements:
 **Files:** `.github/workflows/ci.yml` (new)
 
 ### 5.3 Package.json Cleanup
+
 - [x] Fix broken test script
 - [x] Add proper scripts (test, test:watch, build, lint)
 - [x] Review dependencies
@@ -368,6 +401,7 @@ Since this is a new project, consider these potential improvements:
 - [x] Add keywords for npm discovery
 
 **Completed:** Package.json is now production-ready:
+
 - Scripts: `build`, `typecheck`, `lint`, `test`, `test:watch`, `test:coverage`, `prepublishOnly`
 - Added `engines` field requiring Node.js >=18.0.0
 - Expanded keywords for npm discoverability: type-safe, compile-time, type-level, expression-parser, dsl, ast, grammar, validation, inference
@@ -378,12 +412,14 @@ Since this is a new project, consider these potential improvements:
 ## Phase 6: Final Polish
 
 ### 6.1 Code Quality
+
 - [x] Add ESLint configuration
 - [x] Add Prettier configuration
 - [x] Fix any linting issues
 - [x] Ensure consistent code style
 
 **Completed:** Set up comprehensive code quality tooling:
+
 - **ESLint (v9):** Flat config with typescript-eslint, eslint-config-prettier
   - TypeScript-aware linting with project service
   - `@typescript-eslint/no-explicit-any` as warning for gradual adoption
@@ -402,11 +438,13 @@ Since this is a new project, consider these potential improvements:
 **Files:** `eslint.config.js` (new), `.prettierrc` (new), `.prettierignore` (new), `package.json`
 
 ### 6.2 Performance Review
+
 - [x] Profile parsing performance
 - [x] Identify any obvious optimizations
 - [x] Document performance characteristics
 
 **Completed:** Created comprehensive performance analysis and documentation:
+
 - **Benchmarks (`src/performance.bench.ts`):** 50+ benchmarks covering:
   - Simple literals (number, string, identifier)
   - Binary operations (single, mixed precedence, three levels)
@@ -434,6 +472,7 @@ Since this is a new project, consider these potential improvements:
 **Files:** `src/performance.bench.ts` (new), `docs/performance.md` (new), `package.json`
 
 ### 6.3 Pre-1.0 Checklist
+
 - [x] All tests pass
 - [x] Test coverage > 80%
 - [x] All TODO comments resolved
@@ -442,6 +481,7 @@ Since this is a new project, consider these potential improvements:
 - [x] Version bump to 1.0.0-beta
 
 **Completed:** Verified all pre-1.0 requirements met:
+
 - **All tests pass:** 691 tests passing across 12 test files
 - **Test coverage > 80%:** 95.03% statement, 89.95% branch, 96.61% function, 94.72% line coverage
 - **All TODO comments resolved:** No TODO, FIXME, or HACK comments remain in source code
@@ -456,43 +496,33 @@ Since this is a new project, consider these potential improvements:
 ## Priority Order
 
 **Critical (Must Have for Production):**
+
 1. Test infrastructure setup (1.1)
 2. Runtime parser tests (1.2)
 3. Error handling tests (1.3)
 4. Missing primitives (2.1)
 
-**High (Important for Quality):**
-5. Edge case tests (1.4)
-6. eval() implementation (2.2)
-7. README enhancement (4.1)
-8. Package.json cleanup (5.3)
+**High (Important for Quality):** 5. Edge case tests (1.4) 6. eval() implementation (2.2) 7. README enhancement (4.1) 8. Package.json cleanup (5.3)
 
-**Medium (Nice to Have):**
-9. API reference docs (4.2)
-10. Examples (4.4)
-11. CI pipeline (5.2)
-12. Contributing guide (4.5)
+**Medium (Nice to Have):** 9. API reference docs (4.2) 10. Examples (4.4) 11. CI pipeline (5.2) 12. Contributing guide (4.5)
 
-**Low (Future Enhancement):**
-13. Architecture docs (4.3)
-14. Code quality tools (6.1)
-15. Performance review (6.2)
+**Low (Future Enhancement):** 13. Architecture docs (4.3) 14. Code quality tools (6.1) 15. Performance review (6.2)
 
 ---
 
 ## Files Quick Reference
 
-| File | Purpose | Key Changes Needed |
-|------|---------|-------------------|
-| `src/runtime/parser.ts` | Runtime parsing | Add null/bool/undefined, improve errors |
-| `src/parse/index.ts` | Type-level parsing | Match runtime changes |
-| `src/index.ts` | Public exports | Export new primitives |
-| `package.json` | Project config | Fix scripts, add dev deps |
-| `README.md` | Documentation | Expand examples |
-| `vitest.config.ts` | Test config | Create new |
-| `src/runtime/eval.ts` | Expression eval | Create new |
-| `/docs/` | API docs | Create new |
-| `/examples/` | Usage examples | Create new |
+| File                    | Purpose            | Key Changes Needed                      |
+| ----------------------- | ------------------ | --------------------------------------- |
+| `src/runtime/parser.ts` | Runtime parsing    | Add null/bool/undefined, improve errors |
+| `src/parse/index.ts`    | Type-level parsing | Match runtime changes                   |
+| `src/index.ts`          | Public exports     | Export new primitives                   |
+| `package.json`          | Project config     | Fix scripts, add dev deps               |
+| `README.md`             | Documentation      | Expand examples                         |
+| `vitest.config.ts`      | Test config        | Create new                              |
+| `src/runtime/eval.ts`   | Expression eval    | Create new                              |
+| `/docs/`                | API docs           | Create new                              |
+| `/examples/`            | Usage examples     | Create new                              |
 
 ---
 
@@ -513,3 +543,13 @@ Since this is a new project, consider these potential improvements:
 5. **Expression Roles:** The lhs/rhs/expr system is critical for correct precedence. Understand this before modifying grammar handling.
 
 6. **Design Freedom:** Prioritize clean, intuitive APIs. If something feels awkward, redesign it rather than documenting around it.
+
+- [x] - FIX ALL THESE ERRORS WHAT?????
+
+**Completed:** Fixed all TypeScript errors in `src/performance.bench.ts`:
+
+- Added required second argument (schema) to all `parser.parse()` calls - the parser's `parse` method signature requires `(input, schema)` where schema is a `Record<string, string>`
+- Fixed context objects - changed from `{ data: { x: 'number' } }` to flat `{ x: 'number' }` format (the wrapping in `{ data: ... }` happens internally)
+- Added type assertions (`as '1'` or `as '"hello"'`) for dynamically generated benchmark inputs to satisfy TypeScript's literal type validation
+
+**Files Changed:** `src/performance.bench.ts`
