@@ -518,13 +518,22 @@ const ternary = defineNode({
 3. At eval time, return the computed union type
 
 **Tasks:**
-- [ ] Fix `BuildNodeResult` to propagate single-binding outputSchema (match runtime)
+- [x] Fix `BuildNodeResult` to propagate single-binding outputSchema (match runtime)
 - [ ] Design the computed result type API for multi-binding nodes
 - [ ] Implement type-level union computation
 - [ ] Update runtime `buildNodeResult` for union computation
-- [ ] Update parentheses to verify single-binding propagation works
+- [x] Update parentheses to verify single-binding propagation works
 - [ ] Update ternary to use computed union result type
-- [ ] Add tests for both cases
+- [x] Add tests for single-binding propagation
+
+**Implementation Notes (Task 9 - Part A: Single-Binding Propagation):**
+- Added helper types in `src/parse/index.ts`: `HasExactlyOneKey<T>`, `SingleKey<T>`, `SingleBindingOutputSchema<Bindings>`, `ComputeOutputSchema<TResultType, Bindings>`
+- Updated `BuildNodeResult` to use `ComputeOutputSchema` for determining `outputSchema`
+- When `resultType` is `'unknown'` and there's exactly one binding with an `outputSchema`, the binding's schema is propagated
+- This matches the runtime behavior at `src/runtime/parser.ts:598-612`
+- Added 12 tests in `src/runtime/eval.test.ts` under "single-binding outputSchema propagation (Task 9)"
+- Tests verify: parentheses, nested parentheses, various primitive types, createEvaluator integration
+- Test confirms multi-binding nodes (ternary) still return `unknown` (to be fixed in Part B)
 
 ### Task 10: Update Documentation
 

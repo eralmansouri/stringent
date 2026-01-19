@@ -577,11 +577,68 @@ type ExtractBindings<
   : TAcc;
 
 /**
+ * Helper: Check if type has exactly one key.
+ */
+type HasExactlyOneKey<T> = keyof T extends infer K
+  ? K extends unknown
+    ? [K] extends [keyof T]
+      ? keyof T extends K
+        ? true
+        : false
+      : false
+    : false
+  : false;
+
+/**
+ * Helper: Get the single key from a type with exactly one key.
+ */
+type SingleKey<T> = keyof T extends infer K
+  ? K extends keyof T
+    ? keyof T extends K
+      ? K
+      : never
+    : never
+  : never;
+
+/**
+ * Helper: Extract outputSchema from the single binding.
+ * If there's exactly one binding and it has an outputSchema, return it.
+ * Otherwise return 'unknown'.
+ */
+type SingleBindingOutputSchema<Bindings> =
+  HasExactlyOneKey<Bindings> extends true
+    ? SingleKey<Bindings> extends infer K
+      ? K extends keyof Bindings
+        ? Bindings[K] extends { outputSchema: infer S extends string }
+          ? S
+          : 'unknown'
+        : 'unknown'
+      : 'unknown'
+    : 'unknown';
+
+/**
+ * Helper: Compute the effective outputSchema.
+ * - If resultType is 'unknown' and there's exactly one binding with an outputSchema,
+ *   propagate that binding's outputSchema (matches runtime behavior).
+ * - Otherwise use the static resultType.
+ */
+type ComputeOutputSchema<TResultType extends string, Bindings> = TResultType extends 'unknown'
+  ? SingleBindingOutputSchema<Bindings> extends infer S extends string
+    ? S extends 'unknown'
+      ? 'unknown'
+      : S
+    : 'unknown'
+  : TResultType;
+
+/**
  * Build the result node from parsed children.
  *
  * Uses named bindings from .as() to determine node fields.
  * - Single unnamed child: passthrough (atom behavior)
  * - Otherwise: bindings become node fields
+ *
+ * For nodes with resultType 'unknown' and exactly one binding,
+ * the outputSchema is propagated from the binding (matches runtime).
  */
 type BuildNodeResult<TNode extends NodeSchema, TChildren extends unknown[]> =
   ExtractBindings<TNode['pattern'], TChildren> extends infer Bindings
@@ -591,7 +648,7 @@ type BuildNodeResult<TNode extends NodeSchema, TChildren extends unknown[]> =
         : never // Multiple unnamed children - error
       : {
           readonly node: TNode['name'];
-          readonly outputSchema: TNode['resultType'];
+          readonly outputSchema: ComputeOutputSchema<TNode['resultType'], Bindings>;
         } & Bindings
     : never;
 

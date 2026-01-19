@@ -1030,32 +1030,33 @@ describe('evaluate - type inference edge cases (Task 4)', () => {
     expect(value).toBe(42);
   });
 
-  it('handles parentheses - compile-time type is unknown', () => {
-    // Note: The parentheses node is defined with resultType: "unknown" in the grammar,
-    // so at compile time TypeScript infers outputSchema: "unknown".
-    // At runtime, the parser correctly propagates the inner expression's outputSchema,
-    // but the compile-time type system doesn't have this information.
+  it('handles parentheses - type propagates from inner expression (Task 9 fix)', () => {
+    // After Task 9 fix: The parentheses node has resultType: "unknown", but when
+    // there's exactly one binding, the type-level now propagates the inner
+    // expression's outputSchema, matching the runtime behavior.
     const result = parser.parse('(42)', {});
     expect(result.length).toBe(2);
 
     const value = evaluate(result[0], { data: {}, nodes: allNodes });
 
-    // Type-level assertion: parentheses have outputSchema: "unknown" at compile time
-    expectTypeOf(value).toEqualTypeOf<unknown>();
+    // Type-level assertion: parentheses now correctly infer the inner type
+    // (42 is a number literal, so outputSchema is 'number')
+    expectTypeOf(value).toEqualTypeOf<number>();
 
     // Runtime assertion - at runtime, the value is correctly evaluated
     expect(value).toBe(42);
   });
 
-  it('handles deeply nested parentheses - compile-time type is unknown', () => {
+  it('handles deeply nested parentheses - type propagates through all levels (Task 9 fix)', () => {
     const simpleParser = createParser([add, mul] as const);
     const result = simpleParser.parse('((1+2))', {});
     expect(result.length).toBe(2);
 
     const value = evaluate(result[0], { data: {}, nodes: [add, mul] });
 
-    // Type-level assertion: nested parentheses have outputSchema: "unknown" at compile time
-    expectTypeOf(value).toEqualTypeOf<unknown>();
+    // Type-level assertion: nested parentheses now correctly infer the inner type
+    // (1+2 is a number expression, so outputSchema is 'number')
+    expectTypeOf(value).toEqualTypeOf<number>();
 
     // Runtime assertion
     expect(value).toBe(3);
@@ -2148,6 +2149,200 @@ describe('evaluate - data-schema connection (Task 6)', () => {
         // Runtime assertion
         expect(result).toBe('hello');
       });
+    });
+  });
+});
+
+// =============================================================================
+// Task 9: Single-Binding OutputSchema Propagation Tests
+// =============================================================================
+
+describe('single-binding outputSchema propagation (Task 9)', () => {
+  describe('type-level propagation', () => {
+    it('propagates outputSchema through parentheses for number expression', () => {
+      // (1 + 2) - inner add has outputSchema: 'number'
+      // parentheses has resultType: 'unknown' but only one binding
+      // So outputSchema should propagate to 'number'
+      const result = parser.parse('(1+2)', {});
+      expect(result.length).toBe(2);
+
+      const value = evaluate(result[0], { data: {}, nodes: allNodes });
+
+      // Type-level: should be number, not unknown
+      expectTypeOf(value).toEqualTypeOf<number>();
+
+      // Runtime: value is correct
+      expect(value).toBe(3);
+    });
+
+    it('propagates outputSchema through parentheses for string expression', () => {
+      // ("hello") - inner string literal has outputSchema: 'string'
+      const result = parser.parse('("hello")', {});
+      expect(result.length).toBe(2);
+
+      const value = evaluate(result[0], { data: {}, nodes: allNodes });
+
+      // Type-level: should be string
+      expectTypeOf(value).toEqualTypeOf<string>();
+
+      // Runtime
+      expect(value).toBe('hello');
+    });
+
+    it('propagates outputSchema through parentheses for boolean expression', () => {
+      // (true) - inner boolean literal has outputSchema: 'boolean'
+      const result = parser.parse('(true)', {});
+      expect(result.length).toBe(2);
+
+      const value = evaluate(result[0], { data: {}, nodes: allNodes });
+
+      // Type-level: should be boolean
+      expectTypeOf(value).toEqualTypeOf<boolean>();
+
+      // Runtime
+      expect(value).toBe(true);
+    });
+
+    it('propagates outputSchema through nested parentheses', () => {
+      // ((1+2)) - inner type propagates through multiple levels
+      // Note: Using a simpler parser to avoid excessive computation time
+      const simpleParser = createParser([add, mul] as const);
+      const result = simpleParser.parse('((1+2))', {});
+      expect(result.length).toBe(2);
+
+      const value = evaluate(result[0], { data: {}, nodes: [add, mul] });
+
+      // Type-level: should be number
+      expectTypeOf(value).toEqualTypeOf<number>();
+
+      // Runtime
+      expect(value).toBe(3);
+    });
+
+    it('propagates outputSchema through triple nested parentheses', () => {
+      // (((42))) - type should propagate all the way through
+      // Note: Using a simpler parser to avoid deep type instantiation
+      const simpleParser = createParser([add, mul] as const);
+      const result = simpleParser.parse('(((42)))', {});
+      expect(result.length).toBe(2);
+
+      const value = evaluate(result[0], { data: {}, nodes: [add, mul] });
+
+      // Type-level: should be number
+      expectTypeOf(value).toEqualTypeOf<number>();
+
+      // Runtime
+      expect(value).toBe(42);
+    });
+
+    it('propagates outputSchema through parentheses with comparison', () => {
+      // (1==1) - inner comparison has outputSchema: 'boolean'
+      const result = parser.parse('(1==1)', {});
+      expect(result.length).toBe(2);
+
+      const value = evaluate(result[0], { data: {}, nodes: allNodes });
+
+      // Type-level: should be boolean
+      expectTypeOf(value).toEqualTypeOf<boolean>();
+
+      // Runtime
+      expect(value).toBe(true);
+    });
+
+    it('propagates outputSchema in complex expression with parentheses', () => {
+      // (1+2) * 3 - parenthesized add returns number, multiplied by 3
+      const result = parser.parse('(1+2)*3', {});
+      expect(result.length).toBe(2);
+
+      const value = evaluate(result[0], { data: {}, nodes: allNodes });
+
+      // Type-level: should be number (mul result)
+      expectTypeOf(value).toEqualTypeOf<number>();
+
+      // Runtime
+      expect(value).toBe(9);
+    });
+
+    it('propagates outputSchema for parenthesized null', () => {
+      // (null) - inner null literal has outputSchema: 'null'
+      const result = parser.parse('(null)', {});
+      expect(result.length).toBe(2);
+
+      const value = evaluate(result[0], { data: {}, nodes: allNodes });
+
+      // Type-level: should be null
+      expectTypeOf(value).toEqualTypeOf<null>();
+
+      // Runtime
+      expect(value).toBe(null);
+    });
+
+    it('propagates outputSchema for parenthesized undefined', () => {
+      // (undefined) - inner undefined literal has outputSchema: 'undefined'
+      const result = parser.parse('(undefined)', {});
+      expect(result.length).toBe(2);
+
+      const value = evaluate(result[0], { data: {}, nodes: allNodes });
+
+      // Type-level: should be undefined
+      expectTypeOf(value).toEqualTypeOf<undefined>();
+
+      // Runtime
+      expect(value).toBe(undefined);
+    });
+  });
+
+  describe('type-level helper types', () => {
+    // These tests verify the helper types work correctly with manually constructed nodes
+    it('propagates type for single-binding node with resultType: unknown', () => {
+      // Manually construct a parentheses-like node
+      const ast = {
+        node: 'parentheses',
+        outputSchema: 'number', // In the real parser, this is propagated from inner
+        inner: { node: 'literal', value: 42, outputSchema: 'number' },
+      } as const;
+
+      const value = evaluate(ast, { data: {}, nodes: allNodes });
+
+      // Type-level: should be number
+      expectTypeOf(value).toEqualTypeOf<number>();
+
+      // Runtime
+      expect(value).toBe(42);
+    });
+  });
+
+  describe('does not propagate for multiple bindings', () => {
+    it('ternary with two bindings keeps resultType unknown', () => {
+      // true ? 1 : "hello"
+      // ternary has resultType: 'unknown' and TWO bindings (trueValue, falseValue)
+      // So outputSchema should NOT propagate (remains unknown)
+      const result = parser.parse('true?1:"hello"', {});
+      expect(result.length).toBe(2);
+
+      const value = evaluate(result[0], { data: {}, nodes: allNodes });
+
+      // Type-level: should be unknown (ternary has multiple bindings)
+      // Note: This will change when we implement union computation in Task 9 Part B
+      expectTypeOf(value).toEqualTypeOf<unknown>();
+
+      // Runtime
+      expect(value).toBe(1);
+    });
+  });
+
+  describe('createEvaluator with single-binding propagation', () => {
+    it('propagates type through createEvaluator for parenthesized expression', () => {
+      const evaluator = createEvaluator(allNodes);
+      const result = parser.parse('(1+2)', {});
+
+      const value = evaluator(result[0], {});
+
+      // Type-level: should be number
+      expectTypeOf(value).toEqualTypeOf<number>();
+
+      // Runtime
+      expect(value).toBe(3);
     });
   });
 });

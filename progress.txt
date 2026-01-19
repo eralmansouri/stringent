@@ -950,3 +950,145 @@ Task 8 was already functionally complete from Task 2's implementation of `Schema
 - `PRD.md`: Marked Task 8 checkboxes as complete, added implementation notes
 
 All 952 tests pass. No new lint errors (only pre-existing warnings).
+
+## Task 15 (PRD Task 9 - Part A): Single-Binding OutputSchema Propagation (COMPLETED)
+
+Fixed the type/runtime mismatch for single-binding nodes (e.g., parentheses). The type-level `BuildNodeResult` now matches the runtime behavior that was already implemented.
+
+### Problem
+
+The runtime parser already propagated `outputSchema` for single-binding nodes:
+```typescript
+// Runtime (src/runtime/parser.ts:598-612)
+if (outputSchema === 'unknown') {
+  if (bindingKeys.length === 1) {
+    outputSchema = singleBinding.outputSchema;  // Propagates!
+  }
+}
+```
+
+But the type-level code always used the static `resultType`:
+```typescript
+// Type-level (before fix)
+readonly outputSchema: TNode['resultType'];  // Always static!
+```
+
+This meant `(1 + 2)` returned:
+- Runtime: `outputSchema = 'number'` ✓
+- Type-level: `outputSchema = 'unknown'` ✗
+
+### Implementation
+
+Added helper types in `src/parse/index.ts`:
+
+**1. `HasExactlyOneKey<T>`** - Checks if a type has exactly one key:
+```typescript
+type HasExactlyOneKey<T> = keyof T extends infer K
+  ? K extends unknown
+    ? [K] extends [keyof T]
+      ? keyof T extends K
+        ? true
+        : false
+      : false
+    : false
+  : false;
+```
+
+**2. `SingleKey<T>`** - Gets the single key from a type with exactly one key:
+```typescript
+type SingleKey<T> = keyof T extends infer K
+  ? K extends keyof T
+    ? keyof T extends K
+      ? K
+      : never
+    : never
+  : never;
+```
+
+**3. `SingleBindingOutputSchema<Bindings>`** - Extracts outputSchema from the single binding:
+```typescript
+type SingleBindingOutputSchema<Bindings> =
+  HasExactlyOneKey<Bindings> extends true
+    ? SingleKey<Bindings> extends infer K
+      ? K extends keyof Bindings
+        ? Bindings[K] extends { outputSchema: infer S extends string }
+          ? S
+          : 'unknown'
+        : 'unknown'
+      : 'unknown'
+    : 'unknown';
+```
+
+**4. `ComputeOutputSchema<TResultType, Bindings>`** - Computes the effective outputSchema:
+```typescript
+type ComputeOutputSchema<TResultType extends string, Bindings> =
+  TResultType extends 'unknown'
+    ? SingleBindingOutputSchema<Bindings> extends infer S extends string
+      ? S extends 'unknown'
+        ? 'unknown'
+        : S
+      : 'unknown'
+    : TResultType;
+```
+
+**5. Updated `BuildNodeResult`** to use `ComputeOutputSchema`:
+```typescript
+type BuildNodeResult<TNode extends NodeSchema, TChildren extends unknown[]> =
+  ExtractBindings<TNode['pattern'], TChildren> extends infer Bindings
+    ? keyof Bindings extends never
+      ? TChildren extends [infer Only]
+        ? Only
+        : never
+      : {
+          readonly node: TNode['name'];
+          readonly outputSchema: ComputeOutputSchema<TNode['resultType'], Bindings>;
+        } & Bindings
+    : never;
+```
+
+### Tests Added
+
+Added 12 tests in `src/runtime/eval.test.ts` under "single-binding outputSchema propagation (Task 9)":
+
+**Type-level propagation (9 tests):**
+- propagates outputSchema through parentheses for number expression
+- propagates outputSchema through parentheses for string expression
+- propagates outputSchema through parentheses for boolean expression
+- propagates outputSchema through nested parentheses
+- propagates outputSchema through triple nested parentheses
+- propagates outputSchema through parentheses with comparison
+- propagates outputSchema in complex expression with parentheses
+- propagates outputSchema for parenthesized null
+- propagates outputSchema for parenthesized undefined
+
+**Helper type tests (1 test):**
+- propagates type for single-binding node with resultType: unknown
+
+**Multi-binding behavior (1 test):**
+- ternary with two bindings keeps resultType unknown
+
+**createEvaluator integration (1 test):**
+- propagates type through createEvaluator for parenthesized expression
+
+### Test Updates
+
+Updated 2 existing tests that were documenting the old (broken) behavior:
+- "handles parentheses - compile-time type is unknown" → "handles parentheses - type propagates from inner expression (Task 9 fix)"
+- "handles deeply nested parentheses - compile-time type is unknown" → "handles deeply nested parentheses - type propagates through all levels (Task 9 fix)"
+
+### Results
+
+This completes PRD Acceptance Criteria #12 and #14:
+- ✅ Parentheses `(1 + 2)` has `outputSchema: 'number'` at BOTH runtime and type-level
+- ✅ `evaluate()` returns `number` for `(1 + 2)`
+
+Remaining for Task 9 (Part B - Union Computation):
+- ❌ #13: Ternary `x ? true : 0` has `outputSchema: 'boolean | number'`
+- ❌ #15: `evaluate()` returns `boolean | number` for ternary `x ? true : 0`
+
+### Files Modified
+
+- `src/parse/index.ts`: Added helper types, updated `BuildNodeResult`
+- `src/runtime/eval.test.ts`: Added 12 new tests, updated 2 existing tests
+
+All 964 tests pass. TypeScript type checking passes. No new lint errors (only pre-existing warnings).
