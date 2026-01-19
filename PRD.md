@@ -84,13 +84,13 @@ Since this is a new project, consider these potential improvements:
 **Files:** `package.json`, `vitest.config.ts` (new)
 
 ### 1.2 Runtime Parser Tests
-- [ ] Create `src/runtime/parser.test.ts` with comprehensive tests
-- [ ] Test tokenization: numberLiteral, stringLiteral, identifierAtom
-- [ ] Test parentheses handling and nesting
-- [ ] Test operator precedence at runtime level
-- [ ] Test grammar building from node schemas
-- [ ] Test buildNodeResult field extraction
-- [ ] Test whitespace handling between tokens
+- [x] Create `src/runtime/parser.test.ts` with comprehensive tests
+- [x] Test tokenization: numberLiteral, stringLiteral, identifierAtom
+- [x] Test parentheses handling and nesting
+- [x] Test operator precedence at runtime level
+- [x] Test grammar building from node schemas
+- [x] Test buildNodeResult field extraction
+- [x] Test whitespace handling between tokens
 
 **Files:** `src/runtime/parser.ts`, `src/runtime/parser.test.ts` (new)
 

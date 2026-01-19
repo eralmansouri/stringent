@@ -28,3 +28,27 @@
 - src/createParser.test.ts (converted to vitest)
 - src/parse/index.test.ts (converted to vitest)
 - src/types.test.ts (converted to vitest)
+
+### 2026-01-18: Task 1.2 - Runtime Parser Tests
+
+**Completed:**
+- Created comprehensive `src/runtime/parser.test.ts` with 69 tests covering:
+  - **Tokenization - Number literals (7 tests):** integers, zero, decimals, leading/trailing decimals, large numbers, remaining input
+  - **Tokenization - String literals (6 tests):** double-quoted, single-quoted, empty strings, strings with spaces/numbers, remaining input
+  - **Tokenization - Identifiers (7 tests):** simple identifiers, with numbers/underscores, context-based outputSchema, remaining input
+  - **Parentheses handling (10 tests):** simple, nested (2/5 levels), outputSchema propagation, error cases (unclosed, empty, mismatched)
+  - **Operator precedence (9 tests):** add/mul operations, precedence binding, right-associativity, parentheses overriding precedence
+  - **Grammar building (4 tests):** built-in atoms, precedence sorting, operator grouping, multiple levels
+  - **Field extraction (5 tests):** named bindings, node name/outputSchema, passthrough, custom configure function
+  - **Whitespace handling (7 tests):** spaces, tabs, newlines around operators/parentheses
+  - **Type constraints (5 tests):** lhs/rhs constraint enforcement, unconstrained expressions, context-based type checking
+  - **No match cases (5 tests):** invalid input, empty input, whitespace-only, unknown operators, unterminated strings
+  - **Complex expressions (4 tests):** long chains, mixed operators with variables, nested parentheses with operators
+
+**Test Results:**
+- All 126 tests pass (69 new + 57 existing)
+- TypeScript typecheck passes
+
+**Files Changed:**
+- src/runtime/parser.test.ts (new - 69 tests)
+- PRD.md (marked task 1.2 as complete)
