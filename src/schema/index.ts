@@ -264,6 +264,45 @@ export const expr = <const TConstraint extends string>(constraint?: type.validat
 /** Precedence type: number for operators (lower = binds looser) */
 export type Precedence = number;
 
+// =============================================================================
+// Computed Result Type Specifications
+// =============================================================================
+
+/**
+ * Marker for computed union result types.
+ * When used as resultType, the outputSchema is computed at parse time
+ * as the union of the outputSchemas from the specified bindings.
+ *
+ * @example
+ * ```ts
+ * const ternary = defineNode({
+ *   name: 'ternary',
+ *   pattern: [
+ *     lhs('boolean').as('condition'),
+ *     constVal('?'),
+ *     expr().as('then'),
+ *     constVal(':'),
+ *     rhs().as('else'),
+ *   ],
+ *   precedence: 1,
+ *   resultType: { union: ['then', 'else'] }, // Computed union of then/else types
+ * });
+ *
+ * // Parsing 'x ? true : 0' would result in outputSchema: 'boolean | number'
+ * ```
+ */
+export interface UnionResultType<TBindings extends readonly string[] = readonly string[]> {
+  readonly union: TBindings;
+}
+
+/**
+ * Result type specification for nodes.
+ * Can be either:
+ * - A string literal type (static result type validated by arktype)
+ * - A UnionResultType object for computed union types
+ */
+export type ResultTypeSpec<T extends string | UnionResultType = string | UnionResultType> = T;
+
 /**
  * A node definition schema.
  *
@@ -272,13 +311,13 @@ export type Precedence = number;
  * - TName: The unique node name (e.g., "add", "mul")
  * - TPattern: The pattern elements as a tuple type
  * - TPrecedence: The precedence (lower = binds looser, tried first)
- * - TResultType: The result type (e.g., "number", "string")
+ * - TResultType: The result type (e.g., "number", "string", or UnionResultType)
  */
 export interface NodeSchema<
   TName extends string = string,
   TPattern extends readonly PatternSchema[] = readonly PatternSchema[],
   TPrecedence extends Precedence = Precedence,
-  TResultType extends string = string,
+  TResultType extends string | UnionResultType = string | UnionResultType,
 > {
   readonly name: TName;
   readonly pattern: TPattern;
@@ -339,32 +378,53 @@ export type EvalFn = <$>(values: Record<string, unknown>, ctx: $) => unknown;
  * - name: "add" (not string)
  * - pattern: readonly [ExprSchema<"number">, ConstSchema<"+">, ExprSchema<"number">]
  * - precedence: 1 or "atom" (not number | "atom")
- * - resultType: "number" (not string)
+ * - resultType: "number" (not string), or { union: ['then', 'else'] } for computed unions
  *
- * The resultType parameter is validated at compile time using arktype.
+ * The resultType parameter is validated at compile time using arktype (for string types).
  * Invalid type strings like 'garbage' will cause TypeScript errors.
  * Valid arktype types include: primitives, subtypes (string.email), constraints (number >= 0), unions.
  *
+ * For computed union types, use { union: ['bindingA', 'bindingB'] } to compute the
+ * outputSchema as the union of the outputSchemas of the named bindings.
+ *
  * @example
  * ```ts
+ * // Static result type
  * const add = defineNode({
  *   name: "add",
  *   pattern: [lhs("number").as("left"), constVal("+"), rhs("number").as("right")],
  *   precedence: 1,
  *   resultType: "number",
- *   eval: ({ left, right }) => left + right,  // left and right are already numbers
+ *   eval: ({ left, right }) => left + right,
+ * });
+ *
+ * // Computed union result type
+ * const ternary = defineNode({
+ *   name: "ternary",
+ *   pattern: [
+ *     lhs("boolean").as("condition"),
+ *     constVal("?"),
+ *     expr().as("then"),
+ *     constVal(":"),
+ *     rhs().as("else"),
+ *   ],
+ *   precedence: 0,
+ *   resultType: { union: ["then", "else"] }, // outputSchema = then | else
+ *   eval: ({ condition, then, else: elseVal }) => (condition ? then : elseVal),
  * });
  *
  * // Valid resultType examples:
- * // resultType: 'string'         // primitive
- * // resultType: 'string.email'   // subtype
- * // resultType: 'number >= 0'    // constraint
- * // resultType: 'string | number' // union
+ * // resultType: 'string'              // primitive
+ * // resultType: 'string.email'        // subtype
+ * // resultType: 'number >= 0'         // constraint
+ * // resultType: 'string | number'     // static union
+ * // resultType: { union: ['a', 'b'] } // computed union from bindings
  *
  * // Invalid - causes compile error:
  * // resultType: 'garbage'
  * ```
  */
+// Overload for static string result types (validated by arktype)
 export function defineNode<
   const TName extends string,
   const TPattern extends readonly PatternSchema[],
@@ -380,6 +440,36 @@ export function defineNode<
     values: InferEvaluatedBindings<TPattern>,
     ctx: $
   ) => SchemaToType<TResultType>;
+}): NodeSchema<TName, TPattern, TPrecedence, TResultType>;
+
+// Overload for computed union result types
+export function defineNode<
+  const TName extends string,
+  const TPattern extends readonly PatternSchema[],
+  const TPrecedence extends Precedence,
+  const TBindings extends readonly string[],
+>(config: {
+  readonly name: TName;
+  readonly pattern: TPattern;
+  readonly precedence: TPrecedence;
+  readonly resultType: UnionResultType<TBindings>;
+  readonly configure?: <$>(bindings: InferBindings<TPattern>, ctx: $) => Record<string, unknown>;
+  readonly eval?: <$>(values: InferEvaluatedBindings<TPattern>, ctx: $) => unknown;
+}): NodeSchema<TName, TPattern, TPrecedence, UnionResultType<TBindings>>;
+
+// Implementation
+export function defineNode<
+  const TName extends string,
+  const TPattern extends readonly PatternSchema[],
+  const TPrecedence extends Precedence,
+  const TResultType extends string | UnionResultType,
+>(config: {
+  readonly name: TName;
+  readonly pattern: TPattern;
+  readonly precedence: TPrecedence;
+  readonly resultType: TResultType;
+  readonly configure?: <$>(bindings: InferBindings<TPattern>, ctx: $) => Record<string, unknown>;
+  readonly eval?: <$>(values: InferEvaluatedBindings<TPattern>, ctx: $) => unknown;
 }): NodeSchema<TName, TPattern, TPrecedence, TResultType> {
   return config as NodeSchema<TName, TPattern, TPrecedence, TResultType>;
 }

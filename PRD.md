@@ -519,11 +519,11 @@ const ternary = defineNode({
 
 **Tasks:**
 - [x] Fix `BuildNodeResult` to propagate single-binding outputSchema (match runtime)
-- [ ] Design the computed result type API for multi-binding nodes
-- [ ] Implement type-level union computation
-- [ ] Update runtime `buildNodeResult` for union computation
+- [x] Design the computed result type API for multi-binding nodes
+- [x] Implement type-level union computation
+- [x] Update runtime `buildNodeResult` for union computation
 - [x] Update parentheses to verify single-binding propagation works
-- [ ] Update ternary to use computed union result type
+- [x] Update ternary to use computed union result type
 - [x] Add tests for single-binding propagation
 
 **Implementation Notes (Task 9 - Part A: Single-Binding Propagation):**
@@ -534,6 +534,18 @@ const ternary = defineNode({
 - Added 12 tests in `src/runtime/eval.test.ts` under "single-binding outputSchema propagation (Task 9)"
 - Tests verify: parentheses, nested parentheses, various primitive types, createEvaluator integration
 - Test confirms multi-binding nodes (ternary) still return `unknown` (to be fixed in Part B)
+
+**Implementation Notes (Task 9 - Part B: Union Type Computation):**
+- Added `UnionResultType<TBindings>` interface in `src/schema/index.ts` for computed union result types
+- Added `ResultTypeSpec` type alias for `string | UnionResultType`
+- Updated `NodeSchema` to accept `TResultType extends string | UnionResultType`
+- Added function overloads to `defineNode()` for both static string and `UnionResultType` result types
+- Added type-level helpers in `src/parse/index.ts`: `BindingOutputSchema`, `ComputeUnionOutputSchema`
+- Updated `ComputeOutputSchema` to detect `UnionResultType` and compute the union from specified bindings
+- Updated runtime `buildNodeResult` in `src/runtime/parser.ts`: added `isUnionResultType()` and `computeUnionOutputSchema()` helpers
+- Runtime computes union string with sorted types joined by ' | ' (e.g., 'boolean | number')
+- Added 15 tests in `src/runtime/eval.test.ts` under "union type computation (Task 9 Part B)"
+- Tests verify: runtime union computation, type-level inference, createEvaluator integration, edge cases
 
 ### Task 10: Update Documentation
 

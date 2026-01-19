@@ -28,6 +28,7 @@ import type {
   NullSchema,
   BooleanSchema,
   UndefinedSchema,
+  UnionResultType,
 } from '../schema/index.js';
 import type {
   NumberNode,
@@ -617,18 +618,54 @@ type SingleBindingOutputSchema<Bindings> =
     : 'unknown';
 
 /**
+ * Helper: Extract outputSchema from a binding by name.
+ * Returns the outputSchema if the binding exists and has one, otherwise 'unknown'.
+ */
+type BindingOutputSchema<Bindings, TName extends string> = TName extends keyof Bindings
+  ? Bindings[TName] extends { outputSchema: infer S extends string }
+    ? S
+    : 'unknown'
+  : 'unknown';
+
+/**
+ * Helper: Compute the union outputSchema string from multiple bindings.
+ * Given a tuple of binding names, extracts each binding's outputSchema and
+ * constructs a union string like "type1 | type2".
+ *
+ * @example
+ * // Bindings = { then: { outputSchema: 'boolean' }, else: { outputSchema: 'number' } }
+ * // Names = ['then', 'else']
+ * // Result = 'boolean | number'
+ */
+type ComputeUnionOutputSchema<
+  Bindings,
+  TNames extends readonly string[],
+  TAcc extends string = never,
+> = TNames extends readonly [infer First extends string, ...infer Rest extends readonly string[]]
+  ? BindingOutputSchema<Bindings, First> extends infer S extends string
+    ? ComputeUnionOutputSchema<Bindings, Rest, TAcc | S>
+    : ComputeUnionOutputSchema<Bindings, Rest, TAcc>
+  : [TAcc] extends [never]
+    ? 'unknown'
+    : TAcc;
+
+/**
  * Helper: Compute the effective outputSchema.
+ * - If resultType is a UnionResultType, compute the union from the specified bindings
  * - If resultType is 'unknown' and there's exactly one binding with an outputSchema,
  *   propagate that binding's outputSchema (matches runtime behavior).
  * - Otherwise use the static resultType.
  */
-type ComputeOutputSchema<TResultType extends string, Bindings> = TResultType extends 'unknown'
-  ? SingleBindingOutputSchema<Bindings> extends infer S extends string
-    ? S extends 'unknown'
-      ? 'unknown'
-      : S
-    : 'unknown'
-  : TResultType;
+type ComputeOutputSchema<TResultType extends string | UnionResultType, Bindings> =
+  TResultType extends UnionResultType<infer TNames extends readonly string[]>
+    ? ComputeUnionOutputSchema<Bindings, TNames>
+    : TResultType extends 'unknown'
+      ? SingleBindingOutputSchema<Bindings> extends infer S extends string
+        ? S extends 'unknown'
+          ? 'unknown'
+          : S
+        : 'unknown'
+      : TResultType;
 
 /**
  * Build the result node from parsed children.

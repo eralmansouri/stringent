@@ -42,6 +42,8 @@ export type {
   SchemaToType,
   InferBindings,
   InferEvaluatedBindings,
+  UnionResultType,
+  ResultTypeSpec,
 } from './schema/index.js';
 
 export { createParser } from './createParser.js';

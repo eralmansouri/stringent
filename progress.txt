@@ -1092,3 +1092,131 @@ Remaining for Task 9 (Part B - Union Computation):
 - `src/runtime/eval.test.ts`: Added 12 new tests, updated 2 existing tests
 
 All 964 tests pass. TypeScript type checking passes. No new lint errors (only pre-existing warnings).
+
+## Task 16 (PRD Task 9 - Part B): Union Type Computation for Multi-Binding Nodes (COMPLETED)
+
+Implemented computed union result types for multi-binding nodes like ternary. Nodes can now use `resultType: { union: ['bindingA', 'bindingB'] }` to have their `outputSchema` computed as the union of the specified bindings' outputSchemas.
+
+### Design
+
+**New Types in `src/schema/index.ts`:**
+
+```typescript
+// Marker for computed union result types
+interface UnionResultType<TBindings extends readonly string[] = readonly string[]> {
+  readonly union: TBindings;
+}
+
+// Result type specification (static string or computed union)
+type ResultTypeSpec<T extends string | UnionResultType = string | UnionResultType> = T;
+```
+
+**Updated `NodeSchema` interface:**
+- Changed `TResultType extends string` to `TResultType extends string | UnionResultType`
+
+**Updated `defineNode()` function:**
+- Added function overload for `UnionResultType` result types
+- Static string result types are validated by arktype at compile time
+- `UnionResultType` result types skip arktype validation (computed at parse time)
+
+### Type-Level Implementation (`src/parse/index.ts`)
+
+Added new helper types:
+
+```typescript
+// Extract outputSchema from a binding by name
+type BindingOutputSchema<Bindings, TName extends string> = ...
+
+// Compute union of outputSchemas from multiple bindings
+type ComputeUnionOutputSchema<Bindings, TNames extends readonly string[], TAcc> = ...
+```
+
+Updated `ComputeOutputSchema` to:
+1. Check if `resultType` is a `UnionResultType`
+2. If so, use `ComputeUnionOutputSchema` to collect all binding outputSchemas into a TypeScript union
+3. Otherwise, use existing behavior (single-binding propagation or static resultType)
+
+### Runtime Implementation (`src/runtime/parser.ts`)
+
+Added helper functions:
+
+```typescript
+// Check if resultType is a UnionResultType
+function isUnionResultType(resultType: string | UnionResultType): resultType is UnionResultType
+
+// Compute union string from bindings (e.g., 'boolean | number')
+function computeUnionOutputSchema(bindings: Record<string, ASTNode>, names: readonly string[]): string
+```
+
+Updated `buildNodeResult`:
+- Detects `UnionResultType` via `isUnionResultType()`
+- Computes union string by extracting schemas from named bindings
+- Deduplicates and sorts schemas alphabetically before joining with ' | '
+
+### Usage Example
+
+```typescript
+// Define a ternary node with computed union result type
+const ternary = defineNode({
+  name: 'ternary',
+  pattern: [
+    lhs('boolean').as('condition'),
+    constVal('?'),
+    expr().as('then'),
+    constVal(':'),
+    rhs().as('else'),
+  ],
+  precedence: 0,
+  resultType: { union: ['then', 'else'] } as const, // Computed union
+  eval: ({ condition, then: thenVal, else: elseVal }) => (condition ? thenVal : elseVal),
+});
+
+// Parsing 'true ? 1 : "hello"' results in:
+// outputSchema = 'number | string' (computed from branches)
+
+// Type-level inference works:
+const value = evaluate(ast, ctx);
+// TypeScript infers: value is string | number
+```
+
+### Tests Added
+
+Added 15 tests in `src/runtime/eval.test.ts` under "union type computation (Task 9 Part B)":
+
+**Runtime union type computation (6 tests):**
+- computes union for ternary with number and string branches
+- computes union for ternary with boolean and number branches
+- computes single type when both branches have same type
+- computes union for ternary with string and boolean branches
+- computes union with expressions in branches
+- computes union for nested ternary
+
+**Type-level union type computation (5 tests):**
+- infers union type for ternary with number and string branches
+- infers union type for ternary with boolean and number branches
+- infers single type when both branches have same type
+- infers union type with expressions in branches
+- infers union type with manually constructed AST
+
+**createEvaluator with union types (2 tests):**
+- infers union type through createEvaluator
+- infers union type for nested ternary through createEvaluator
+
+**Edge cases (2 tests):**
+- handles union when one branch has unknown schema
+- defineNode accepts union result type marker
+
+### Acceptance Criteria Completed
+
+This completes PRD Acceptance Criteria #13 and #15:
+- ✅ #13: Ternary `x ? true : 0` has `outputSchema: 'boolean | number'`
+- ✅ #15: `evaluate()` returns `boolean | number` for ternary `x ? true : 0`
+
+### Files Modified
+
+- `src/schema/index.ts`: Added `UnionResultType`, `ResultTypeSpec`, updated `NodeSchema`, added `defineNode` overloads
+- `src/parse/index.ts`: Added import, `BindingOutputSchema`, `ComputeUnionOutputSchema`, updated `ComputeOutputSchema`
+- `src/runtime/parser.ts`: Added import, `isUnionResultType()`, `computeUnionOutputSchema()`, updated `buildNodeResult()`
+- `src/runtime/eval.test.ts`: Added 15 new tests, updated 1 existing test comment
+
+All 979 tests pass. TypeScript type checking passes. No new lint errors (only pre-existing warnings).

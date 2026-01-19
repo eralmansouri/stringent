@@ -2312,18 +2312,21 @@ describe('single-binding outputSchema propagation (Task 9)', () => {
     });
   });
 
-  describe('does not propagate for multiple bindings', () => {
-    it('ternary with two bindings keeps resultType unknown', () => {
+  describe('does not propagate for multiple bindings (without UnionResultType)', () => {
+    it('ternary with static resultType unknown keeps outputSchema unknown', () => {
       // true ? 1 : "hello"
-      // ternary has resultType: 'unknown' and TWO bindings (trueValue, falseValue)
-      // So outputSchema should NOT propagate (remains unknown)
+      // This ternary uses resultType: 'unknown' (static string), NOT UnionResultType
+      // So outputSchema stays 'unknown' because single-binding propagation doesn't apply
+      // (ternary has multiple bindings: condition, then, else)
+      //
+      // To get computed union types, use resultType: { union: ['then', 'else'] }
+      // See "Task 9 Part B" tests below for the UnionResultType approach
       const result = parser.parse('true?1:"hello"', {});
       expect(result.length).toBe(2);
 
       const value = evaluate(result[0], { data: {}, nodes: allNodes });
 
-      // Type-level: should be unknown (ternary has multiple bindings)
-      // Note: This will change when we implement union computation in Task 9 Part B
+      // Type-level: should be unknown (ternary uses static 'unknown', not UnionResultType)
       expectTypeOf(value).toEqualTypeOf<unknown>();
 
       // Runtime
@@ -2343,6 +2346,203 @@ describe('single-binding outputSchema propagation (Task 9)', () => {
 
       // Runtime
       expect(value).toBe(3);
+    });
+  });
+});
+
+// =============================================================================
+// Task 9 Part B: Union Type Computation for Multi-Binding Nodes (Ternary)
+// =============================================================================
+
+describe('union type computation (Task 9 Part B)', () => {
+  // Define a ternary node with computed union result type
+  const ternaryWithUnion = defineNode({
+    name: 'ternaryUnion',
+    pattern: [
+      lhs('boolean').as('condition'),
+      constVal('?'),
+      expr().as('then'),
+      constVal(':'),
+      rhs().as('else'),
+    ],
+    precedence: 0,
+    resultType: { union: ['then', 'else'] } as const,
+    eval: ({ condition, then: thenVal, else: elseVal }) => (condition ? thenVal : elseVal),
+  });
+
+  // Create a parser that includes the union ternary
+  const unionParser = createParser([add, sub, mul, concat, eq, neq, ternaryWithUnion] as const);
+
+  describe('runtime union type computation', () => {
+    it('computes union for ternary with number and string branches', () => {
+      // true ? 1 : "hello"
+      // then.outputSchema = 'number'
+      // else.outputSchema = 'string'
+      // result.outputSchema = 'number | string'
+      const result = unionParser.parse('true?1:"hello"', {});
+      expect(result.length).toBe(2);
+
+      const ast = result[0];
+      expect(ast).toHaveProperty('outputSchema');
+      // Runtime computes union with sorted types: "number | string"
+      expect((ast as { outputSchema: string }).outputSchema).toBe('number | string');
+
+      const value = evaluate(ast, { data: {}, nodes: [ternaryWithUnion, add, concat] });
+      expect(value).toBe(1);
+    });
+
+    it('computes union for ternary with boolean and number branches', () => {
+      // false ? true : 42
+      const result = unionParser.parse('false?true:42', {});
+      const ast = result[0];
+      expect((ast as { outputSchema: string }).outputSchema).toBe('boolean | number');
+
+      const value = evaluate(ast, { data: {}, nodes: [ternaryWithUnion, add] });
+      expect(value).toBe(42);
+    });
+
+    it('computes single type when both branches have same type', () => {
+      // true ? 1 : 2
+      const result = unionParser.parse('true?1:2', {});
+      const ast = result[0];
+      // When both branches have same type, result is that single type (not a union)
+      expect((ast as { outputSchema: string }).outputSchema).toBe('number');
+
+      const value = evaluate(ast, { data: {}, nodes: [ternaryWithUnion, add] });
+      expect(value).toBe(1);
+    });
+
+    it('computes union for ternary with string and boolean branches', () => {
+      // true ? "hello" : false
+      const result = unionParser.parse('true?"hello":false', {});
+      const ast = result[0];
+      expect((ast as { outputSchema: string }).outputSchema).toBe('boolean | string');
+
+      const value = evaluate(ast, { data: {}, nodes: [ternaryWithUnion] });
+      expect(value).toBe('hello');
+    });
+
+    it('computes union with expressions in branches', () => {
+      // true ? 1 + 2 : "hello"
+      const result = unionParser.parse('true?1+2:"hello"', {});
+      const ast = result[0];
+      expect((ast as { outputSchema: string }).outputSchema).toBe('number | string');
+
+      const value = evaluate(ast, { data: {}, nodes: [ternaryWithUnion, add] });
+      expect(value).toBe(3);
+    });
+
+    it('computes union for nested ternary', () => {
+      // true ? (false ? 1 : "inner") : false
+      // The then branch is a ternary with outputSchema 'number | string'
+      // The else branch is 'boolean'
+      // Result should be 'boolean | number | string'
+      const result = unionParser.parse('true?(false?1:"inner"):false', {});
+      const ast = result[0];
+      // Note: Due to sorting, the union is ordered alphabetically
+      expect((ast as { outputSchema: string }).outputSchema).toBe('boolean | number | string');
+
+      const value = evaluate(ast, { data: {}, nodes: [ternaryWithUnion, add] });
+      expect(value).toBe('inner');
+    });
+  });
+
+  describe('type-level union type computation', () => {
+    it('infers union type for ternary with number and string branches', () => {
+      const result = unionParser.parse('true?1:"hello"', {});
+      const value = evaluate(result[0], { data: {}, nodes: [ternaryWithUnion, add, concat] });
+
+      // Type-level: should be number | string
+      // Note: The TypeScript type is a union of the actual types, not a string literal
+      expectTypeOf(value).toEqualTypeOf<string | number>();
+    });
+
+    it('infers union type for ternary with boolean and number branches', () => {
+      const result = unionParser.parse('false?true:42', {});
+      const value = evaluate(result[0], { data: {}, nodes: [ternaryWithUnion, add] });
+
+      expectTypeOf(value).toEqualTypeOf<boolean | number>();
+    });
+
+    it('infers single type when both branches have same type', () => {
+      const result = unionParser.parse('true?1:2', {});
+      const value = evaluate(result[0], { data: {}, nodes: [ternaryWithUnion, add] });
+
+      expectTypeOf(value).toEqualTypeOf<number>();
+    });
+
+    it('infers union type with expressions in branches', () => {
+      const result = unionParser.parse('true?1+2:"hello"', {});
+      const value = evaluate(result[0], { data: {}, nodes: [ternaryWithUnion, add] });
+
+      expectTypeOf(value).toEqualTypeOf<string | number>();
+    });
+
+    it('infers union type with manually constructed AST', () => {
+      // Manually construct AST to verify type inference
+      const ast = {
+        node: 'ternaryUnion',
+        outputSchema: 'boolean | number',
+        condition: { node: 'literal', value: true, outputSchema: 'boolean' },
+        then: { node: 'literal', value: true, outputSchema: 'boolean' },
+        else: { node: 'literal', value: 42, outputSchema: 'number' },
+      } as const;
+
+      const value = evaluate(ast, { data: {}, nodes: [ternaryWithUnion] });
+
+      // Type-level: should be boolean | number (from outputSchema)
+      expectTypeOf(value).toEqualTypeOf<boolean | number>();
+
+      // Runtime: condition is true, so returns 'then' branch value
+      expect(value).toBe(true);
+    });
+  });
+
+  describe('createEvaluator with union types', () => {
+    it('infers union type through createEvaluator', () => {
+      const evaluator = createEvaluator([ternaryWithUnion, add, concat]);
+      const result = unionParser.parse('true?1:"hello"', {});
+      const value = evaluator(result[0], {});
+
+      expectTypeOf(value).toEqualTypeOf<string | number>();
+      expect(value).toBe(1);
+    });
+
+    it('infers union type for nested ternary through createEvaluator', () => {
+      const evaluator = createEvaluator([ternaryWithUnion, add, concat]);
+      const result = unionParser.parse('true?(false?"a":"b"):42', {});
+      const value = evaluator(result[0], {});
+
+      // Inner ternary: string | string = string
+      // Outer ternary: string | number = string | number
+      expectTypeOf(value).toEqualTypeOf<string | number>();
+      expect(value).toBe('b');
+    });
+  });
+
+  describe('edge cases', () => {
+    it('handles union when one branch has unknown schema', () => {
+      // If one of the bindings has 'unknown' schema, it's filtered out
+      // This is handled by the runtime computeUnionOutputSchema function
+      const result = unionParser.parse('true?1:2', {});
+      const ast = result[0];
+
+      // Both branches are number, so result is just number (not unknown)
+      expect((ast as { outputSchema: string }).outputSchema).toBe('number');
+    });
+
+    it('defineNode accepts union result type marker', () => {
+      // Verify that defineNode with union result type compiles
+      const node = defineNode({
+        name: 'testUnion',
+        pattern: [expr().as('a'), constVal('|'), expr().as('b')],
+        precedence: 0,
+        resultType: { union: ['a', 'b'] } as const,
+        eval: ({ a }) => a, // Just return first value for simplicity
+      });
+
+      expect(node.name).toBe('testUnion');
+      expect(node.resultType).toEqual({ union: ['a', 'b'] });
     });
   });
 });

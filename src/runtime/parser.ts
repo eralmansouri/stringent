@@ -18,6 +18,7 @@ import type {
   StringSchema,
   ConstSchema,
   ExprSchema,
+  UnionResultType,
 } from '../schema/index.js';
 import {
   defineNode,
@@ -584,6 +585,47 @@ function extractBindings(
  * Special case: If resultType is "unknown" and there's a single expr binding,
  * we propagate that binding's outputSchema (for generic parentheses, etc.).
  */
+/**
+ * Helper: Check if resultType is a UnionResultType (computed union).
+ */
+function isUnionResultType(resultType: string | UnionResultType): resultType is UnionResultType {
+  return typeof resultType === 'object' && resultType !== null && 'union' in resultType;
+}
+
+/**
+ * Helper: Compute the union outputSchema string from multiple bindings.
+ * Given a list of binding names, extracts each binding's outputSchema and
+ * constructs a union string like "boolean | number".
+ *
+ * @example
+ * // bindings = { then: { outputSchema: 'boolean' }, else: { outputSchema: 'number' } }
+ * // names = ['then', 'else']
+ * // result = 'boolean | number'
+ */
+function computeUnionOutputSchema(
+  bindings: Record<string, ASTNode>,
+  names: readonly string[]
+): string {
+  const schemas: string[] = [];
+  for (const name of names) {
+    const binding = bindings[name] as { outputSchema?: string } | undefined;
+    if (binding?.outputSchema && binding.outputSchema !== 'unknown') {
+      // Only add unique schemas
+      if (!schemas.includes(binding.outputSchema)) {
+        schemas.push(binding.outputSchema);
+      }
+    }
+  }
+  if (schemas.length === 0) {
+    return 'unknown';
+  }
+  if (schemas.length === 1) {
+    return schemas[0];
+  }
+  // Sort for consistency and join with ' | '
+  return schemas.sort().join(' | ');
+}
+
 function buildNodeResult(nodeSchema: NodeSchema, children: ASTNode[], context: Context): ASTNode {
   const bindings = extractBindings(nodeSchema.pattern, children);
 
@@ -596,17 +638,25 @@ function buildNodeResult(nodeSchema: NodeSchema, children: ASTNode[], context: C
   const fields = nodeSchema.configure ? nodeSchema.configure(bindings, context) : bindings;
 
   // Determine output schema:
+  // - If resultType is a UnionResultType, compute the union from the specified bindings
   // - If resultType is "unknown" and there's a single expr binding, use its outputSchema
   // - Otherwise use the node's static resultType
-  let outputSchema = nodeSchema.resultType;
-  if (outputSchema === 'unknown') {
-    const bindingKeys = Object.keys(bindings);
-    if (bindingKeys.length === 1) {
-      const singleBinding = bindings[bindingKeys[0]] as {
-        outputSchema?: string;
-      };
-      if (singleBinding.outputSchema) {
-        outputSchema = singleBinding.outputSchema;
+  let outputSchema: string;
+
+  if (isUnionResultType(nodeSchema.resultType)) {
+    // Computed union: extract schemas from named bindings and join with ' | '
+    outputSchema = computeUnionOutputSchema(bindings, nodeSchema.resultType.union);
+  } else {
+    outputSchema = nodeSchema.resultType;
+    if (outputSchema === 'unknown') {
+      const bindingKeys = Object.keys(bindings);
+      if (bindingKeys.length === 1) {
+        const singleBinding = bindings[bindingKeys[0]] as {
+          outputSchema?: string;
+        };
+        if (singleBinding.outputSchema) {
+          outputSchema = singleBinding.outputSchema;
+        }
       }
     }
   }
