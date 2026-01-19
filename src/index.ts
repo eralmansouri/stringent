@@ -61,19 +61,6 @@ export type {
 } from "./primitive/index.js";
 
 // =============================================================================
-// Legacy Primitives (for backwards compatibility)
-// =============================================================================
-
-export {
-  Number,
-  String,
-  Ident,
-  Const,
-  type IParser,
-  type ParseResult,
-} from "./primitive/index.js";
-
-// =============================================================================
 // Runtime Utilities
 // =============================================================================
 

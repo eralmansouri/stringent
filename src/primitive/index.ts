@@ -244,22 +244,23 @@ class _Const<TValue extends string> {
 }
 
 // =============================================================================
-// Exported Factories
+// Internal Factories (used by runtime parser)
 // =============================================================================
 
-export const Number = (): _Number => new _Number();
+/** @internal */
+export const createNumber = (): _Number => new _Number();
 
-export const String = <TQuotes extends string[]>(
+/** @internal */
+export const createString = <TQuotes extends string[]>(
   quotes: [...TQuotes]
 ): _String<TQuotes> => new _String(quotes);
 
-export const Ident = (): _Ident => new _Ident();
+/** @internal */
+export const createIdent = (): _Ident => new _Ident();
 
-export const Const = <TValue extends string>(value: TValue): _Const<TValue> =>
+/** @internal */
+export const createConst = <TValue extends string>(value: TValue): _Const<TValue> =>
   new _Const(value);
 
-// Export class types for type-level matching
+// Export class types for type-level matching (internal use)
 export type { _Number, _String, _Ident, _Const };
-
-// Legacy export for backwards compatibility
-export { type IParser as Primitive };
