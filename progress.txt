@@ -376,3 +376,38 @@
 - src/index.ts (exported processEscapeSequences)
 - src/string-escapes.test.ts (new - 65 tests)
 - PRD.md (marked task 2.3 as complete)
+
+### 2026-01-18: Task 4.1 - README Enhancement
+
+**Completed:**
+- Comprehensive README rewrite with all required enhancements:
+  - **Added badges:** npm version, TypeScript version, MIT license
+  - **Added Requirements section:** TypeScript 5.0+, Node.js 18.0+
+  - **Reorganized Quick Start:** Clear 3-step guide (Define Grammar → Create Parser → Evaluate)
+  - **Documented all pattern elements with examples:**
+    - Atoms: `number()`, `string()`, `ident()`, `nullLiteral()`, `booleanLiteral()`, `undefinedLiteral()`
+    - Expression roles: `lhs()`, `rhs()`, `expr()` with use cases
+    - Constants: `constVal()` for operators
+    - Capturing with `.as(name)`
+  - **Added comprehensive examples:**
+    - Comparison operators (==, !=, <, >)
+    - Conditional (ternary) expressions (? :)
+    - Field validation with context (form validation use case)
+    - Boolean logic (&& and ||)
+    - String concatenation (++)
+    - Nullish coalescing (??)
+  - **Documented error handling patterns:**
+    - Parse failures (empty array result)
+    - Type-level validation (compile-time errors)
+    - Type constraint violations
+    - Runtime errors in evaluation (invalid AST, undefined variables)
+  - **Added Key Features section:** Updated to include evaluation and string escapes
+  - **Added API Reference section:** `createParser`, `defineNode`, `evaluate`, `infer`
+
+**Test Results:**
+- All 581 tests pass
+- TypeScript typecheck passes
+
+**Files Changed:**
+- README.md (comprehensive rewrite)
+- PRD.md (marked task 4.1 as complete)
