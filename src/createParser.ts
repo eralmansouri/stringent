@@ -12,6 +12,34 @@ import type { ComputeGrammar, Grammar } from './grammar/index.js';
 import type { Parse } from './parse/index.js';
 import type { Context } from './context.js';
 import { parse as runtimeParse } from './runtime/parser.js';
+import { type } from 'arktype';
+
+// =============================================================================
+// Schema Validation Types
+// =============================================================================
+
+/**
+ * Validate that all values in a schema record are valid arktype type strings.
+ * Each value is validated using arktype's type.validate.
+ *
+ * Only performs validation when the schema has literal string values.
+ * When TSchema values are generic 'string', validation is skipped to avoid
+ * deep type instantiation issues.
+ *
+ * @example
+ * ```ts
+ * // Valid schema - all values are valid arktype types
+ * const schema = { x: 'number', y: 'string.email' } satisfies ValidatedSchema<{ x: 'number', y: 'string.email' }>;
+ *
+ * // Invalid schema - 'garbage' is not a valid arktype type
+ * // Type error: Type '"garbage"' is not assignable to type '"'garbage' is unresolvable"'
+ * ```
+ */
+type ValidatedSchema<TSchema extends Record<string, string>> = {
+  [K in keyof TSchema]: string extends TSchema[K]
+    ? string // Skip validation for generic string values
+    : type.validate<TSchema[K]>; // Validate literal string values
+};
 
 // =============================================================================
 // Parser Interface
@@ -27,8 +55,11 @@ export interface Parser<TGrammar extends Grammar, TNodes extends readonly NodeSc
   /**
    * Parse an input string.
    *
+   * Schema values are validated at compile time using arktype.
+   * Invalid type strings like 'garbage' will cause TypeScript errors.
+   *
    * @param input - The input string to parse
-   * @param schema - Schema mapping field names to their types
+   * @param schema - Schema mapping field names to valid arktype type strings
    * @returns Parse result with computed type
    *
    * @example
@@ -36,11 +67,20 @@ export interface Parser<TGrammar extends Grammar, TNodes extends readonly NodeSc
    * const result = parser.parse("1+2", {});
    * // Type: Parse<Grammar, "1+2", Context<{}>>
    * // Value: [{ type: "binary", name: "add", left: {...}, right: {...} }, ""]
+   *
+   * // Valid schema types:
+   * parser.parse("x + 1", { x: 'number' });        // primitive
+   * parser.parse("x + 1", { x: 'string.email' });  // subtype
+   * parser.parse("x + 1", { x: 'number >= 0' });   // constraint
+   * parser.parse("x + 1", { x: 'string | number' }); // union
+   *
+   * // Invalid - causes compile error:
+   * // parser.parse("x + 1", { x: 'garbage' });
    * ```
    */
   parse<TInput extends string, TSchema extends Record<string, string>>(
     input: ValidatedInput<TGrammar, TInput, Context<TSchema>>,
-    schema: TSchema
+    schema: ValidatedSchema<TSchema>
   ): Parse<TGrammar, TInput, Context<TSchema>>;
 
   /** The node schemas used to create this parser */
@@ -95,9 +135,9 @@ export function createParser<const TNodes extends readonly NodeSchema[]>(
   return {
     parse<TInput extends string, TSchema extends Record<string, string>>(
       input: TInput,
-      schema: TSchema
+      schema: ValidatedSchema<TSchema>
     ): Parse<ComputeGrammar<TNodes>, TInput, Context<TSchema>> {
-      const context: Context<TSchema> = { data: schema };
+      const context: Context<TSchema> = { data: schema as TSchema };
       return runtimeParse(nodes, input, context) as Parse<
         ComputeGrammar<TNodes>,
         TInput,

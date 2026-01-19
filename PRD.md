@@ -353,14 +353,21 @@ Update `defineNode()` to validate `resultType` via arktype.
 - Valid arktype types work: primitives, subtypes (string.email), constraints (number >= 0), unions
 - Added 10 tests in `src/schema/constraint-validation.test.ts` under "defineNode() resultType validation (Task 4)"
 
-### Task 5: Fix Schema Validation in parser.parse()
+### Task 5: Fix Schema Validation in parser.parse() (COMPLETED)
 
 Update the parse method to validate schema types via arktype.
 
-- [ ] Change schema validation to use arktype
-- [ ] Verify that `parser.parse('x', { x: 'garbage' })` causes a type error
-- [ ] Verify that `parser.parse('x', { x: 'string.email' })` works
-- [ ] Update tests
+- [x] Change schema validation to use arktype
+- [x] Verify that `parser.parse('x', { x: 'garbage' })` causes a type error
+- [x] Verify that `parser.parse('x', { x: 'string.email' })` works
+- [x] Update tests
+
+**Implementation Notes:**
+- Added `ValidatedSchema<TSchema>` type that validates each schema value using `type.validate`
+- Updated `Parser.parse()` interface and `createParser()` implementation to use `ValidatedSchema<TSchema>`
+- For literal string types, validation uses `type.validate<T>` (causes compile error for invalid types)
+- For generic `string` types, validation is skipped to avoid deep type instantiation issues
+- Added 34 tests in `src/createParser.schema-validation.test.ts`
 
 ### Task 6: Connect Parse Schema to Eval Data
 

@@ -556,3 +556,100 @@ Added 10 tests in `src/schema/constraint-validation.test.ts` under "defineNode()
 - `src/schema/constraint-validation.test.ts`: Added 10 tests for resultType validation
 
 All 826 tests pass. TypeScript type checking passes. No lint errors (only pre-existing warnings).
+
+## Task 11 (PRD Task 5): Fix Schema Validation in parser.parse() (COMPLETED)
+
+Updated `parser.parse()` to validate schema types at compile time using arktype.
+
+### Implementation
+
+Updated `src/createParser.ts`:
+
+**1. Added `ValidatedSchema` type:**
+```typescript
+type ValidatedSchema<TSchema extends Record<string, string>> = {
+  [K in keyof TSchema]: string extends TSchema[K]
+    ? string // Skip validation for generic string values
+    : type.validate<TSchema[K]>; // Validate literal string values
+};
+```
+
+**2. Updated Parser interface:**
+```typescript
+parse<TInput extends string, TSchema extends Record<string, string>>(
+  input: ValidatedInput<TGrammar, TInput, Context<TSchema>>,
+  schema: ValidatedSchema<TSchema>
+): Parse<TGrammar, TInput, Context<TSchema>>;
+```
+
+**3. Updated createParser implementation:**
+```typescript
+parse<TInput extends string, TSchema extends Record<string, string>>(
+  input: TInput,
+  schema: ValidatedSchema<TSchema>
+): Parse<ComputeGrammar<TNodes>, TInput, Context<TSchema>> { ... }
+```
+
+### Validation Behavior
+
+**Valid schema types (no type error):**
+- Primitives: `'number'`, `'string'`, `'boolean'`, `'null'`, `'undefined'`
+- Subtypes: `'string.email'`, `'number.integer'`, `'string.uuid'`, `'string.url'`
+- Constraints: `'number >= 0'`, `'number > 0'`, `'1 <= number <= 100'`, `'string >= 8'`
+- Unions: `'string | number'`, `'string | number | boolean'`, `'null | string'`
+- Arrays: `'string[]'`, `'number[]'`
+- Other types: `'Date'`, `'bigint'`, `'symbol'`, `'unknown'`
+
+**Invalid schema types (TypeScript compile error):**
+- `parser.parse('x', { x: 'garbage' })` - Error: `Type '"garbage"' is not assignable to type '"'garbage' is unresolvable"'`
+- `parser.parse('x', { x: 'asdfghjkl' })` - Same type of error
+- `parser.parse('x', { x: 'nubmer' })` - Same type of error (misspelled)
+- `parser.parse('x', { x: 'string.invalid' })` - Same type of error (invalid subtype)
+
+### Key Design Decisions
+
+1. **Generic string handling:** When schema values are generic `string` type (not literal strings), validation is skipped to avoid deep type instantiation issues with arktype's `type.validate`.
+
+2. **Mapped type validation:** Uses a mapped type that transforms each schema value through `type.validate<T>` for literal types.
+
+3. **Runtime cast:** The implementation casts `schema as TSchema` to maintain the original type for downstream usage while the parameter type enforces validation.
+
+### Tests Added
+
+Created `src/createParser.schema-validation.test.ts` with 34 tests:
+
+**Valid types (24 tests):**
+- accepts primitive type strings (5 tests)
+- accepts arktype subtypes (4 tests)
+- accepts arktype constraints (4 tests)
+- accepts union types (3 tests)
+- accepts array types (2 tests)
+- accepts other valid types (4 tests)
+- accepts empty schema (1 test)
+- accepts multiple schema entries (1 test)
+
+**Invalid types - type errors (8 tests):**
+- rejects garbage type string
+- rejects asdfghjkl type string
+- rejects misspelled number
+- rejects misspelled string
+- rejects invalid subtype
+- rejects invalid constraint syntax
+- rejects random text
+- rejects partially invalid schema
+
+**Type preservation tests (2 tests):**
+- preserves literal schema types
+- works with as const assertions
+
+### Bug Fix
+
+Fixed pre-existing bug in `src/schema/constraint-validation.test.ts:462` where `precedence: 'atom'` was used instead of a number (Precedence type is `number`).
+
+### Files Modified
+
+- `src/createParser.ts`: Added arktype import, `ValidatedSchema` type, updated `Parser.parse()` and `createParser()` implementation
+- `src/createParser.schema-validation.test.ts`: New test file with 34 tests
+- `src/schema/constraint-validation.test.ts`: Fixed bug (changed `precedence: 'atom'` to `precedence: 0`)
+
+All 860 tests pass. TypeScript type checking passes. No lint errors (only pre-existing warnings).

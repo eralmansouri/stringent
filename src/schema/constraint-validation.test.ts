@@ -459,7 +459,7 @@ describe('Constraint Validation - Task 3', () => {
       const unknownNode = defineNode({
         name: 'unknownResult',
         pattern: [lhs().as('inner')],
-        precedence: 'atom',
+        precedence: 0,
         resultType: 'unknown',
       });
 
