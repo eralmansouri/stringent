@@ -398,3 +398,89 @@ Created `src/schema/arktype-integration.test.ts` with 32 comprehensive tests:
 - `src/runtime/eval.test.ts`: Updated 1 test to reflect actual type inference behavior
 
 All 783 tests pass. TypeScript type checking passes. No lint errors (only pre-existing warnings).
+
+## Task 9 (PRD Task 3): Fix Schema Validation in ExprSchema Factories (COMPLETED)
+
+Updated `lhs()`, `rhs()`, `expr()` to validate constraints at compile time using arktype.
+
+### Implementation
+
+Updated `src/schema/index.ts`:
+
+**1. Changed arktype import from type-only to value import:**
+```typescript
+// Before
+import type { type } from 'arktype';
+
+// After
+import { type } from 'arktype';
+```
+
+**2. Updated function signatures to use `type.validate`:**
+```typescript
+// Before
+export const lhs = <const TConstraint extends string>(constraint?: TConstraint) => ...
+export const rhs = <const TConstraint extends string>(constraint?: TConstraint) => ...
+export const expr = <const TConstraint extends string>(constraint?: TConstraint) => ...
+
+// After
+export const lhs = <const TConstraint extends string>(constraint?: type.validate<TConstraint>) => ...
+export const rhs = <const TConstraint extends string>(constraint?: type.validate<TConstraint>) => ...
+export const expr = <const TConstraint extends string>(constraint?: type.validate<TConstraint>) => ...
+```
+
+### Validation Behavior
+
+**Valid constraints (no type error):**
+- Primitives: `'number'`, `'string'`, `'boolean'`, `'null'`, `'undefined'`
+- Subtypes: `'string.email'`, `'number.integer'`, `'string.uuid'`
+- Constraints: `'number >= 0'`, `'number > 0'`, `'1 <= number <= 100'`
+- Unions: `'string | number'`, `'string | number | boolean'`
+- Arrays: `'string[]'`, `'number[][]'`
+- Other types: `'Date'`, `'bigint'`, `'symbol'`
+
+**Invalid constraints (TypeScript compile error):**
+- `lhs('garbage')` - Error: `Argument of type '"garbage"' is not assignable to parameter of type '"'garbage' is unresolvable"'`
+- `rhs('asdfghjkl')` - Same type of error
+- `expr('notAType')` - Same type of error
+
+### Tests Added
+
+Created `src/schema/constraint-validation.test.ts` with 34 tests:
+
+**lhs() constraint validation (10 tests):**
+- accepts valid primitive constraints
+- accepts valid arktype subtypes
+- accepts valid arktype constraints
+- accepts valid union types
+- accepts no constraint (unconstrained expression)
+- rejects invalid constraint strings (type error)
+- preserves constraint type in schema
+- works with .as() for named bindings
+
+**rhs() constraint validation (9 tests):**
+- Same categories as lhs()
+
+**expr() constraint validation (9 tests):**
+- Same categories as lhs()
+
+**defineNode() integration (4 tests):**
+- works with validated lhs/rhs constraints in patterns
+- works with arktype subtypes in patterns
+- works with arktype constraints in patterns
+- works with union types in patterns
+- rejects invalid constraints in defineNode (type error)
+
+**Edge cases (5 tests):**
+- handles array types
+- handles complex union types
+- handles Date type
+- handles bigint type
+- handles symbol type
+
+### Files Modified
+
+- `src/schema/index.ts`: Changed arktype import and updated `lhs()`, `rhs()`, `expr()` signatures
+- `src/schema/constraint-validation.test.ts`: New test file with 34 tests
+
+All 816 tests pass. TypeScript type checking passes. No lint errors (only pre-existing warnings).

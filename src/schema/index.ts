@@ -17,7 +17,7 @@ import type {
   BooleanNode,
   UndefinedNode,
 } from '../primitive/index.js';
-import type { type } from 'arktype';
+import { type } from 'arktype';
 
 // =============================================================================
 // Pattern Element Schemas
@@ -159,18 +159,30 @@ export const undefinedLiteral = () => withAs<UndefinedSchema>({ kind: 'undefined
  * Uses TNextLevel grammar to avoid left-recursion.
  * Must be at position 0 in a pattern.
  *
+ * The constraint parameter is validated at compile time using arktype.
+ * Invalid type strings like 'garbage' will cause TypeScript errors.
+ *
  * @example
  * ```ts
  * const add = defineNode({
  *   pattern: [lhs("number").as("left"), constVal("+"), rhs("number").as("right")],
  *   // lhs parses at higher precedence to avoid infinite recursion
  * });
+ *
+ * // Valid arktype constraints:
+ * lhs('number')           // primitive
+ * lhs('string.email')     // subtype
+ * lhs('number >= 0')      // constraint
+ * lhs('string | number')  // union
+ *
+ * // Invalid - causes compile error:
+ * // lhs('garbage')
  * ```
  */
-export const lhs = <const TConstraint extends string>(constraint?: TConstraint) =>
+export const lhs = <const TConstraint extends string>(constraint?: type.validate<TConstraint>) =>
   withAs<ExprSchema<TConstraint, 'lhs'>>({
     kind: 'expr',
-    constraint: constraint,
+    constraint: constraint as TConstraint,
     role: 'lhs',
   });
 
@@ -180,15 +192,27 @@ export const lhs = <const TConstraint extends string>(constraint?: TConstraint) 
  * Uses TCurrentLevel grammar to maintain precedence and enable right-associativity.
  * Used for right operands of binary operators.
  *
+ * The constraint parameter is validated at compile time using arktype.
+ * Invalid type strings like 'garbage' will cause TypeScript errors.
+ *
  * @example
  * ```ts
  * const add = defineNode({
  *   pattern: [lhs("number").as("left"), constVal("+"), rhs("number").as("right")],
  *   // rhs parses at same level for right-associativity: 1+2+3 = 1+(2+3)
  * });
+ *
+ * // Valid arktype constraints:
+ * rhs('number')           // primitive
+ * rhs('string.email')     // subtype
+ * rhs('number >= 0')      // constraint
+ * rhs('string | number')  // union
+ *
+ * // Invalid - causes compile error:
+ * // rhs('garbage')
  * ```
  */
-export const rhs = <const TConstraint extends string>(constraint?: TConstraint) =>
+export const rhs = <const TConstraint extends string>(constraint?: type.validate<TConstraint>) =>
   withAs<ExprSchema<TConstraint, 'rhs'>>({
     kind: 'expr',
     constraint: constraint as TConstraint,
@@ -201,6 +225,9 @@ export const rhs = <const TConstraint extends string>(constraint?: TConstraint) 
  * Uses TFullGrammar - resets to full grammar (precedence 0).
  * Used for delimited contexts like parentheses, ternary branches, function arguments.
  *
+ * The constraint parameter is validated at compile time using arktype.
+ * Invalid type strings like 'garbage' will cause TypeScript errors.
+ *
  * @example
  * ```ts
  * const parens = defineNode({
@@ -212,9 +239,18 @@ export const rhs = <const TConstraint extends string>(constraint?: TConstraint) 
  *   pattern: [lhs("boolean").as("cond"), constVal("?"), expr().as("then"), constVal(":"), expr().as("else")],
  *   // The branches can contain any expression
  * });
+ *
+ * // Valid arktype constraints:
+ * expr('number')           // primitive
+ * expr('string.email')     // subtype
+ * expr('number >= 0')      // constraint
+ * expr('string | number')  // union
+ *
+ * // Invalid - causes compile error:
+ * // expr('garbage')
  * ```
  */
-export const expr = <const TConstraint extends string>(constraint?: TConstraint) =>
+export const expr = <const TConstraint extends string>(constraint?: type.validate<TConstraint>) =>
   withAs<ExprSchema<TConstraint, 'expr'>>({
     kind: 'expr',
     constraint: constraint as TConstraint,

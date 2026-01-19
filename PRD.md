@@ -322,14 +322,21 @@ export type SchemaToType<T extends string> = T extends 'number'
 - Fallback to `unknown` for invalid types to maintain backwards compatibility
 - Tests added in `src/schema/arktype-integration.test.ts` (32 tests)
 
-### Task 3: Fix Schema Validation in ExprSchema Factories
+### Task 3: Fix Schema Validation in ExprSchema Factories (COMPLETED)
 
 Update `lhs()`, `rhs()`, `expr()` to validate constraints via arktype.
 
-- [ ] Change constraint validation to use arktype
-- [ ] Verify that `lhs('garbage')` causes a type error
-- [ ] Verify that `lhs('string.email')` works
-- [ ] Update tests
+- [x] Change constraint validation to use arktype
+- [x] Verify that `lhs('garbage')` causes a type error
+- [x] Verify that `lhs('string.email')` works
+- [x] Update tests
+
+**Implementation Notes:**
+- Updated `lhs()`, `rhs()`, and `expr()` to use `type.validate<TConstraint>` for compile-time validation
+- Invalid type strings like 'garbage', 'asdfghjkl' now cause TypeScript errors
+- Valid arktype types work: primitives, subtypes (string.email), constraints (number >= 0), unions
+- Added 34 tests in `src/schema/constraint-validation.test.ts`
+- Changed import from `import type { type }` to `import { type }` to access `type.validate`
 
 ### Task 4: Fix Schema Validation in defineNode
 
