@@ -820,3 +820,54 @@
 **Files Changed:**
 - docs/architecture.md (new - comprehensive architecture documentation)
 - PRD.md (marked task 4.3 as complete)
+
+### 2026-01-18: Task 4.5 - Contributing Guide
+
+**Completed:**
+- Created comprehensive `CONTRIBUTING.md` with all required documentation
+- Created `.github/PULL_REQUEST_TEMPLATE.md` for standardized PR submissions
+
+**CONTRIBUTING.md Contents:**
+- **Development Setup:**
+  - Prerequisites (Node.js 18+, pnpm 9+, TypeScript 5.0+)
+  - Getting started (fork, clone, install, build, test)
+  - Available scripts table (build, typecheck, lint, test, test:watch, test:coverage, docs)
+- **Running Tests:**
+  - Test commands for one-time, watch mode, and coverage
+  - Test file locations organized by feature area
+  - Writing tests example showing runtime and type-level test patterns
+- **Code Patterns and Conventions:**
+  - Type-runtime mirror pattern explanation with example
+  - File organization overview
+  - Naming conventions (schemas, nodes, factories, pattern elements)
+  - TypeScript guidelines (preserve literals, avoid any, JSDoc, no unused exports)
+  - Code style guidelines
+- **Architecture Overview:**
+  - Reference to docs/architecture.md
+  - Key concepts summary (precedence, roles, schemas, grammar computation)
+- **Making Changes:**
+  - Before starting checklist
+  - Development workflow (branch, changes, tests, docs, commit)
+  - Commit message guidelines with examples
+- **Pull Request Process:**
+  - CI requirements
+  - PR checklist
+  - Review expectations
+
+**Pull Request Template Contents:**
+- Summary section (bullet points)
+- Type of change checkboxes (bug fix, feature, breaking change, docs, refactoring, tests)
+- Changes made description
+- Test plan with checkboxes
+- Checklist for code quality and documentation
+- Related issues section
+- Additional notes section
+
+**Test Results:**
+- All 691 tests pass
+- TypeScript typecheck passes
+
+**Files Changed:**
+- CONTRIBUTING.md (new - comprehensive contributing guide)
+- .github/PULL_REQUEST_TEMPLATE.md (new - PR template)
+- PRD.md (marked task 4.5 as complete)
