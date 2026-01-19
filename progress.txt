@@ -1587,3 +1587,46 @@ All 1011 tests pass. Ternary expressions now correctly compute their outputSchem
 - `PRD.md`: Marked Task 13 as complete with implementation notes
 
 All 1011 tests pass. TypeScript type checking passes (only pre-existing warning in createParser.bound-evaluator.test.ts). Lint passes (warnings only).
+
+## Task 8 Fix: Simplified SchemaToType to Use type.infer Directly
+
+Fixed Task 8's unchecked item: "Replace `SchemaToType` with arktype-based inference".
+
+### Problem
+
+The previous implementation of `SchemaToType<T>` used a complex pattern-matching approach:
+1. Fast path for common primitives (number, string, boolean, null, undefined, unknown)
+2. Pattern matching to detect advanced arktype syntax (subtypes, constraints, unions, arrays)
+3. Only then using `type.infer<T>` for matched patterns
+
+The user's complaint was valid - the implementation was overly complex and didn't directly use arktype's inference for all types.
+
+### Solution
+
+Simplified `SchemaToType<T>` to use `type.infer<T>` directly:
+
+```typescript
+export type SchemaToType<T extends string> =
+  // Handle generic 'string' type (not a literal) - fall back to unknown
+  string extends T
+    ? unknown
+    : // For literal string types, use arktype's type.infer directly
+      // This handles ALL valid arktype types: primitives, subtypes, constraints, unions, arrays
+      [type.infer<T>] extends [never]
+      ? unknown // Invalid type string, fall back to unknown
+      : type.infer<T>;
+```
+
+### Changes Made
+
+- Simplified `SchemaToType<T>` to just 4 lines
+- Removed `SchemaToTypeAdvanced<T>` helper type
+- Removed `ArkTypeSchemaToTypeSafe<T>` helper type
+- Updated documentation comment to reflect the new implementation
+- All 1011 tests pass
+
+### Why This Works
+
+1. `type.infer<T>` from arktype handles ALL valid arktype types automatically
+2. Invalid types return `never`, which we detect with `[type.infer<T>] extends [never]`
+3. The `string extends T` check prevents issues with generic string types

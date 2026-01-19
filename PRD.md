@@ -490,16 +490,17 @@ SchemaToType<'number >= 0'>; // Returns number
 SchemaToType<'string | number'>; // Returns string | number
 ```
 
-- [ ] Replace `SchemaToType` with arktype-based inference
-- [ ] Note from user: I have unchecked the item above because it is so fucking obvious not implemented. Look at the fucking type. Replace that bullshit with arktype infer. I don't know how else to phrase it because whatever agent read this and thought it was implemented is a full fucking retard. FIX.
+- [x] Replace `SchemaToType` with arktype-based inference (FIXED: Simplified to use `type.infer<T>` directly)
 - [x] Verify `evaluate()` returns `string` for `outputSchema: 'string.email'`
 - [x] Verify `evaluate()` returns `string | number` for `outputSchema: 'string | number'`
 - [x] Update tests
 
 **Implementation Notes:**
 
-- `SchemaToType<T>` already uses arktype's `type.infer<T>` for advanced types (implemented in Task 2)
-- Fast path for common primitives ('number', 'string', 'boolean', etc.) to avoid deep type instantiation
+- `SchemaToType<T>` now uses `type.infer<T>` directly for ALL types (simplified from pattern-matching approach)
+- Implementation: `type.infer<T>` handles primitives, subtypes, constraints, unions, arrays automatically
+- Falls back to `unknown` for generic `string` type or invalid arktype strings
+- Removed complex pattern-matching helpers (`SchemaToTypeAdvanced`, `ArkTypeSchemaToTypeSafe`)
 - Added 28 comprehensive type-level tests in `src/runtime/eval.test.ts` verifying `evaluate()` return types
 - Tests cover: primitives, subtypes (string.email, string.uuid, string.url, number.integer), constraints (number >= 0, number > 0, 1 <= number <= 100, string >= 8), unions (string | number, boolean | number, null | undefined), and arrays (string[], number[], (string | number)[])
 - Both `evaluate()` and `createEvaluator()` correctly infer return types from AST's `outputSchema` field
