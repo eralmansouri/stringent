@@ -10,36 +10,14 @@
 import type { NodeSchema } from './schema/index.js';
 import type { ComputeGrammar, Grammar } from './grammar/index.js';
 import type { Parse } from './parse/index.js';
-import type { Context } from './context.js';
+import type { Context, SchemaRecord } from './context.js';
 import { parse as runtimeParse } from './runtime/parser.js';
 import { type } from 'arktype';
 
-// =============================================================================
-// Schema Validation Types
-// =============================================================================
+// Re-export schema types for convenience
+export type { SchemaValue, SchemaRecord } from './context.js';
 
-/**
- * Validate that all values in a schema record are valid arktype type strings.
- * Each value is validated using arktype's type.validate.
- *
- * Only performs validation when the schema has literal string values.
- * When TSchema values are generic 'string', validation is skipped to avoid
- * deep type instantiation issues.
- *
- * @example
- * ```ts
- * // Valid schema - all values are valid arktype types
- * const schema = { x: 'number', y: 'string.email' } satisfies ValidatedSchema<{ x: 'number', y: 'string.email' }>;
- *
- * // Invalid schema - 'garbage' is not a valid arktype type
- * // Type error: Type '"garbage"' is not assignable to type '"'garbage' is unresolvable"'
- * ```
- */
-type ValidatedSchema<TSchema extends Record<string, string>> = {
-  [K in keyof TSchema]: string extends TSchema[K]
-    ? string // Skip validation for generic string values
-    : type.validate<TSchema[K]>; // Validate literal string values
-};
+// No separate ValidatedSchema type needed - we use type.validate<TSchema> directly in the signature
 
 // =============================================================================
 // Parser Interface
@@ -59,7 +37,7 @@ export interface Parser<TGrammar extends Grammar, TNodes extends readonly NodeSc
    * Invalid type strings like 'garbage' will cause TypeScript errors.
    *
    * @param input - The input string to parse
-   * @param schema - Schema mapping field names to valid arktype type strings
+   * @param schema - Schema mapping field names to valid arktype type strings or nested object schemas
    * @returns Parse result with computed type
    *
    * @example
@@ -74,13 +52,16 @@ export interface Parser<TGrammar extends Grammar, TNodes extends readonly NodeSc
    * parser.parse("x + 1", { x: 'number >= 0' });   // constraint
    * parser.parse("x + 1", { x: 'string | number' }); // union
    *
+   * // Nested object schemas:
+   * parser.parse("user", { user: { name: 'string', age: 'number' } });
+   *
    * // Invalid - causes compile error:
    * // parser.parse("x + 1", { x: 'garbage' });
    * ```
    */
-  parse<TInput extends string, TSchema extends Record<string, string>>(
+  parse<TInput extends string, const TSchema extends SchemaRecord>(
     input: ValidatedInput<TGrammar, TInput, Context<TSchema>>,
-    schema: ValidatedSchema<TSchema>
+    schema: type.validate<TSchema>
   ): Parse<TGrammar, TInput, Context<TSchema>>;
 
   /** The node schemas used to create this parser */
@@ -132,18 +113,17 @@ type ValidatedInput<TGrammar extends Grammar, TInput extends string, $ extends C
 export function createParser<const TNodes extends readonly NodeSchema[]>(
   nodes: TNodes
 ): Parser<ComputeGrammar<TNodes>, TNodes> {
-  return {
-    parse<TInput extends string, TSchema extends Record<string, string>>(
-      input: TInput,
-      schema: ValidatedSchema<TSchema>
-    ): Parse<ComputeGrammar<TNodes>, TInput, Context<TSchema>> {
-      const context: Context<TSchema> = { data: schema as TSchema };
-      return runtimeParse(nodes, input, context) as Parse<
-        ComputeGrammar<TNodes>,
-        TInput,
-        Context<TSchema>
-      >;
-    },
-    nodes,
+  // Implementation function with explicit typing to avoid deep instantiation
+  const parse = <TInput extends string, const TSchema extends SchemaRecord>(
+    input: TInput,
+    schema: type.validate<TSchema>
+  ): Parse<ComputeGrammar<TNodes>, TInput, Context<TSchema>> => {
+    // type.validate ensures all string values are valid arktype types
+    const context: Context<TSchema> = { data: schema as TSchema };
+    const result = runtimeParse(nodes, input, context);
+    return result as Parse<ComputeGrammar<TNodes>, TInput, Context<TSchema>>;
   };
+
+  // Return the parser object - cast to avoid deep type checking
+  return { parse, nodes } as Parser<ComputeGrammar<TNodes>, TNodes>;
 }
