@@ -4,7 +4,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A type-safe expression parser for TypeScript with compile-time validation and inference.
+A type-safe expression parser for TypeScript with compile-time validation and inference, powered by [ArkType](https://arktype.io/).
 
 > **Warning**
 > This library is under active development and not yet ready for production use. APIs may change.
@@ -12,6 +12,12 @@ A type-safe expression parser for TypeScript with compile-time validation and in
 ## Overview
 
 Stringent parses and validates expressions like `values.password == values.confirmPassword` against a schema at both compile-time and runtime, with full TypeScript type inference for expression results.
+
+**Key Features:**
+- **ArkType Integration** - Schema types are validated at compile-time AND runtime using ArkType
+- **Full Type Inference** - Return types flow from `resultType` → `outputSchema` → `evaluate()` return
+- **Constraint Validation** - Use ArkType constraints like `'number >= 0'`, `'string.email'`, etc.
+- **Computed Result Types** - Ternary expressions infer union types like `'boolean | number'`
 
 ## Installation
 
@@ -136,6 +142,156 @@ if (concatResult.length === 2) {
 ```
 
 This is the core value proposition of Stringent: **compile-time type safety flows through parsing and evaluation**.
+
+## ArkType Integration
+
+Stringent uses [ArkType](https://arktype.io/) for compile-time AND runtime type validation. This means schema types, constraints, and data are all validated using the same type system.
+
+### Supported ArkType Types
+
+Stringent supports the full range of ArkType type definitions:
+
+| Category | Examples | TypeScript Type |
+|----------|----------|-----------------|
+| **Primitives** | `'number'`, `'string'`, `'boolean'`, `'null'`, `'undefined'` | `number`, `string`, etc. |
+| **Subtypes** | `'string.email'`, `'string.uuid'`, `'string.url'`, `'number.integer'` | `string`, `number` |
+| **Constraints** | `'number >= 0'`, `'number > 0'`, `'1 <= number <= 100'`, `'string >= 8'` | `number`, `string` |
+| **Unions** | `'string \| number'`, `'boolean \| null'` | `string \| number`, etc. |
+| **Arrays** | `'string[]'`, `'number[]'`, `'(string \| number)[]'` | `string[]`, etc. |
+
+### Compile-Time Schema Validation
+
+Schema types are validated at compile-time. Invalid type strings cause TypeScript errors:
+
+```typescript
+import { createParser, defineNode, lhs, rhs, constVal } from 'stringent';
+
+const add = defineNode({
+  name: 'add',
+  pattern: [lhs('number').as('left'), constVal('+'), rhs('number').as('right')],
+  precedence: 1,
+  resultType: 'number',
+  eval: ({ left, right }) => left + right,
+});
+
+const parser = createParser([add] as const);
+
+// Valid arktype types work
+parser.parse('x + 1', { x: 'number' });          // OK
+parser.parse('x + 1', { x: 'number >= 0' });     // OK - constrained number
+parser.parse('x + 1', { x: 'number.integer' }); // OK - integer subtype
+
+// Invalid types cause TypeScript errors
+// @ts-expect-error - 'garbage' is not a valid arktype
+parser.parse('x + 1', { x: 'garbage' });
+
+// @ts-expect-error - 'nubmer' is misspelled
+parser.parse('x + 1', { x: 'nubmer' });
+```
+
+### Compile-Time Constraint Validation
+
+The `lhs()`, `rhs()`, and `expr()` functions validate their constraints at compile-time:
+
+```typescript
+// Valid constraints
+lhs('number');           // OK
+lhs('string.email');     // OK - email subtype
+lhs('number >= 0');      // OK - constrained number
+lhs('string | number');  // OK - union type
+
+// Invalid constraints cause TypeScript errors
+// @ts-expect-error - 'garbage' is not a valid arktype
+lhs('garbage');
+```
+
+### Runtime Data Validation
+
+Data passed to `evaluate()` is validated at runtime against ArkType schemas:
+
+```typescript
+const parser = createParser([add] as const);
+const result = parser.parse('x + y', { x: 'number >= 0', y: 'number' });
+
+if (result.length === 2) {
+  // This works - x is a non-negative number
+  evaluate(result[0], { data: { x: 5, y: 3 }, nodes: [add] });
+  // Returns: 8
+
+  // This throws at runtime - x must be >= 0
+  evaluate(result[0], { data: { x: -5, y: 3 }, nodes: [add] });
+  // Throws: "Variable 'x' failed validation for schema 'number >= 0'"
+}
+```
+
+### ArkType Subtype Validation
+
+Subtypes like `string.email` validate format at runtime:
+
+```typescript
+const emailSchema = { email: 'string.email' };
+const result = parser.parse('email', emailSchema);
+
+if (result.length === 2) {
+  // Valid email - works
+  evaluate(result[0], { data: { email: 'test@example.com' }, nodes: [] });
+
+  // Invalid email - throws
+  evaluate(result[0], { data: { email: 'not-an-email' }, nodes: [] });
+  // Throws: "Variable 'email' failed validation for schema 'string.email'"
+}
+```
+
+### Computed Union Result Types
+
+For nodes like ternary expressions where the result type depends on the branches, you can use computed union result types:
+
+```typescript
+const ternary = defineNode({
+  name: 'ternary',
+  pattern: [
+    lhs('boolean').as('condition'),
+    constVal('?'),
+    expr().as('then'),
+    constVal(':'),
+    rhs().as('else'),
+  ],
+  precedence: 0,
+  resultType: { union: ['then', 'else'] } as const,  // Compute union from branches
+  eval: ({ condition, then: thenVal, else: elseVal }) => (condition ? thenVal : elseVal),
+});
+
+const parser = createParser([ternary] as const);
+
+// x ? true : 0
+// then branch: boolean, else branch: number
+// Result type: boolean | number
+const result = parser.parse('true ? 1 : "hello"', {});
+
+if (result.length === 2) {
+  const value = evaluate(result[0], { data: {}, nodes: [ternary] });
+  // TypeScript infers: value is string | number
+}
+```
+
+### Type-Safe Data Requirements
+
+The `evaluate()` function enforces that data matches the schema at the type level:
+
+```typescript
+const result = parser.parse('x + y', { x: 'number', y: 'number' });
+
+if (result.length === 2) {
+  // OK - all required variables provided with correct types
+  evaluate(result[0], { data: { x: 5, y: 3 }, nodes: [add] });
+
+  // @ts-expect-error - x should be number, not string
+  evaluate(result[0], { data: { x: 'wrong', y: 3 }, nodes: [add] });
+
+  // @ts-expect-error - y is required but missing
+  evaluate(result[0], { data: { x: 5 }, nodes: [add] });
+}
+```
 
 ## Pattern Elements
 
@@ -450,8 +606,11 @@ try {
 
 ## Key Features
 
-- **Compile-time validation**: Invalid expressions fail TypeScript compilation
+- **ArkType Integration**: Schema types validated at compile-time AND runtime using [ArkType](https://arktype.io/)
+- **Compile-time validation**: Invalid expressions AND invalid type strings fail TypeScript compilation
 - **Type-safe evaluation**: `evaluate()` returns the correct TypeScript type based on `outputSchema`
+- **Runtime constraint validation**: ArkType constraints (`'number >= 0'`, `'string.email'`) validated at runtime
+- **Computed result types**: Ternary and similar nodes compute union result types from branches
 - **Type inference**: Expression result types are inferred automatically through parsing and evaluation
 - **Operator precedence**: Correct parsing of complex expressions with configurable precedence levels
 - **Schema-aware**: Validates field references against your schema

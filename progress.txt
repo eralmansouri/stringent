@@ -1220,3 +1220,66 @@ This completes PRD Acceptance Criteria #13 and #15:
 - `src/runtime/eval.test.ts`: Added 15 new tests, updated 1 existing test comment
 
 All 979 tests pass. TypeScript type checking passes. No new lint errors (only pre-existing warnings).
+
+## Task 17 (PRD Task 10): Update Documentation (COMPLETED)
+
+Updated README.md and docs/api-reference.md to document the ArkType integration that was implemented in Tasks 1-9.
+
+### README.md Updates
+
+**1. Overview section:**
+- Added key features highlighting ArkType integration, full type inference, constraint validation, and computed result types
+- Added link to ArkType homepage
+
+**2. New "ArkType Integration" section with:**
+- **Supported ArkType Types table:** Primitives, subtypes, constraints, unions, arrays with TypeScript mappings
+- **Compile-Time Schema Validation:** Examples showing `parser.parse()` validation with valid/invalid types
+- **Compile-Time Constraint Validation:** Examples for `lhs()`, `rhs()`, `expr()` with `@ts-expect-error` patterns
+- **Runtime Data Validation:** Examples showing ArkType constraint validation at runtime
+- **ArkType Subtype Validation:** Examples with `string.email` format validation
+- **Computed Union Result Types:** Examples showing `{ union: [...] }` syntax for ternary-like nodes
+- **Type-Safe Data Requirements:** Examples showing `evaluate()` data-schema connection
+
+**3. Key Features section:**
+- Added ArkType Integration bullet point
+- Added runtime constraint validation bullet point
+- Added computed result types bullet point
+- Updated compile-time validation to mention type strings
+
+### docs/api-reference.md Updates
+
+**1. Table of Contents:**
+- Added ArkType Integration section with Supported Types, Compile-Time Validation, Runtime Validation, Computed Result Types
+
+**2. defineNode() section:**
+- Updated `resultType` parameter type to `string | UnionResultType`
+- Added "resultType Validation" subsection showing ArkType validation
+- Added "Computed Union Result Types" subsection with ternary example
+
+**3. Expression Factories section (lhs, rhs, expr):**
+- Updated constraint parameter type to `type.validate<T>?`
+- Added "Constraint Validation" notes showing ArkType validation examples
+
+**4. evaluate() section:**
+- Expanded return type table to include subtypes, constraints, unions, arrays
+- Updated signature to show `ExtractRequiredData<T>` constraint
+- Updated Type Utilities to show ArkType-based `SchemaToType` implementation
+
+**5. New "ArkType Integration" section with:**
+- **Supported Types:** Full table of supported ArkType types
+- **Compile-Time Validation:** Examples for schema, constraint, and resultType validation
+- **Runtime Validation:** Examples for constraint, subtype, and type validation
+- **Computed Result Types:** Documentation of `UnionResultType` with ternary example
+- **Single-Binding Propagation:** Documentation of automatic outputSchema propagation
+
+**6. Type-Level Utilities section:**
+- Updated `SchemaToType<T>` to show ArkType-based implementation with examples
+- Added `ValidArkType<T>` documentation
+- Added `UnionResultType<TBindings>` documentation
+
+### Files Modified
+
+- `README.md`: Added ArkType Integration section, updated Key Features, updated overview
+- `docs/api-reference.md`: Added ArkType Integration section, updated defineNode, expression factories, evaluate, and type utilities
+
+All 979 tests pass. No new lint errors (only pre-existing warnings).

@@ -16,6 +16,11 @@ This document provides detailed API documentation for all public exports from th
   - [createEvaluator()](#createevaluator)
   - [infer()](#infer)
   - [parseWithErrors()](#parsewitherrors)
+- [ArkType Integration](#arktype-integration)
+  - [Supported Types](#supported-types)
+  - [Compile-Time Validation](#compile-time-validation)
+  - [Runtime Validation](#runtime-validation)
+  - [Computed Result Types](#computed-result-types)
 - [Types](#types)
   - [Parser](#parser)
   - [NodeSchema](#nodeschema)
@@ -121,9 +126,55 @@ function defineNode<
 | `name` | `string` | Unique identifier for this node type |
 | `pattern` | `readonly PatternSchema[]` | Pattern elements defining the syntax |
 | `precedence` | `number` | Operator precedence (lower = binds looser) |
-| `resultType` | `string` | The output type (e.g., `"number"`, `"string"`, `"boolean"`) |
+| `resultType` | `string \| UnionResultType` | The output type - a valid ArkType string or `{ union: [...] }` for computed types |
 | `configure` | `(bindings, ctx) => object` | Optional. Transform parsed bindings into node fields |
 | `eval` | `(values, ctx) => value` | Optional. Evaluate the node to produce a runtime value |
+
+#### resultType Validation
+
+The `resultType` parameter is validated at compile-time using ArkType. Only valid type strings are accepted:
+
+```typescript
+// Valid result types
+defineNode({ ..., resultType: 'number' });           // Primitive
+defineNode({ ..., resultType: 'string.email' });    // Subtype
+defineNode({ ..., resultType: 'number >= 0' });     // Constraint
+defineNode({ ..., resultType: 'string | number' }); // Union
+
+// Invalid result types cause TypeScript errors
+// @ts-expect-error - 'garbage' is not a valid arktype
+defineNode({ ..., resultType: 'garbage' });
+
+// @ts-expect-error - 'nubmer' is misspelled
+defineNode({ ..., resultType: 'nubmer' });
+```
+
+#### Computed Union Result Types
+
+For nodes where the result type depends on sub-expression types (like ternary), use a `UnionResultType`:
+
+```typescript
+import { defineNode, lhs, rhs, expr, constVal } from 'stringent';
+
+const ternary = defineNode({
+  name: 'ternary',
+  pattern: [
+    lhs('boolean').as('condition'),
+    constVal('?'),
+    expr().as('then'),
+    constVal(':'),
+    rhs().as('else'),
+  ],
+  precedence: 0,
+  resultType: { union: ['then', 'else'] } as const,  // Union of then/else types
+  eval: ({ condition, then: t, else: e }) => (condition ? t : e),
+});
+
+// When parsing "true ? 1 : 'hello'":
+// - 'then' branch has outputSchema: 'number'
+// - 'else' branch has outputSchema: 'string'
+// - Result has outputSchema: 'number | string'
+```
 
 #### Precedence
 
@@ -316,7 +367,21 @@ const add = defineNode({
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `constraint` | `string?` | Optional type constraint (e.g., `"number"`, `"string"`) |
+| `constraint` | `type.validate<T>?` | Optional type constraint validated by ArkType at compile-time |
+
+**Constraint Validation:** The constraint is validated at compile-time using ArkType:
+
+```typescript
+// Valid constraints
+lhs('number');           // Primitive
+lhs('string.email');     // Subtype
+lhs('number >= 0');      // Constrained
+lhs('string | number');  // Union
+
+// Invalid constraints cause TypeScript errors
+// @ts-expect-error - 'garbage' is not a valid arktype
+lhs('garbage');
+```
 
 #### rhs(constraint?)
 
@@ -333,7 +398,9 @@ const add = defineNode({
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `constraint` | `string?` | Optional type constraint |
+| `constraint` | `type.validate<T>?` | Optional type constraint validated by ArkType at compile-time |
+
+**Constraint Validation:** Same as `lhs()` - constraints are validated at compile-time.
 
 #### expr(constraint?)
 
@@ -362,7 +429,9 @@ const ternary = defineNode({
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `constraint` | `string?` | Optional type constraint |
+| `constraint` | `type.validate<T>?` | Optional type constraint validated by ArkType at compile-time |
+
+**Constraint Validation:** Same as `lhs()` - constraints are validated at compile-time.
 
 ---
 
@@ -389,18 +458,30 @@ Named bindings are:
 
 ### evaluate()
 
-Evaluates a parsed AST node to produce a runtime value with **compile-time type inference**.
+Evaluates a parsed AST node to produce a runtime value with **compile-time type inference** and **runtime ArkType validation**.
 
-The return type is automatically inferred from the AST node's `outputSchema` field:
-- `outputSchema: "number"` → returns `number`
-- `outputSchema: "string"` → returns `string`
-- `outputSchema: "boolean"` → returns `boolean`
-- `outputSchema: "null"` → returns `null`
-- `outputSchema: "undefined"` → returns `undefined`
-- Other/unknown → returns `unknown`
+The return type is automatically inferred from the AST node's `outputSchema` field using ArkType's type inference:
+
+| outputSchema | Return Type |
+|--------------|-------------|
+| `'number'` | `number` |
+| `'string'` | `string` |
+| `'boolean'` | `boolean` |
+| `'null'` | `null` |
+| `'undefined'` | `undefined` |
+| `'string.email'` | `string` |
+| `'number.integer'` | `number` |
+| `'number >= 0'` | `number` |
+| `'string \| number'` | `string \| number` |
+| `'string[]'` | `string[]` |
+| Other valid ArkType | Inferred via `type.infer<T>` |
+| Invalid/unknown | `unknown` |
 
 ```typescript
-function evaluate<T>(ast: T, ctx: EvalContext): SchemaToType<ExtractOutputSchema<T>>
+function evaluate<T, TData extends ExtractRequiredData<T>>(
+  ast: T,
+  ctx: EvalContext<TData>
+): SchemaToType<ExtractOutputSchema<T>>
 ```
 
 #### Type Utilities
@@ -409,14 +490,20 @@ function evaluate<T>(ast: T, ctx: EvalContext): SchemaToType<ExtractOutputSchema
 // Extract outputSchema from an AST node type
 type ExtractOutputSchema<T> = T extends { outputSchema: infer S extends string } ? S : 'unknown';
 
-// Map schema string to TypeScript type (from src/schema/index.ts)
+// Map schema string to TypeScript type using ArkType inference
 type SchemaToType<T extends string> =
-  T extends "number" ? number :
-  T extends "string" ? string :
-  T extends "boolean" ? boolean :
-  T extends "null" ? null :
-  T extends "undefined" ? undefined :
-  unknown;
+  // Fast path for common primitives
+  T extends 'number' ? number :
+  T extends 'string' ? string :
+  T extends 'boolean' ? boolean :
+  T extends 'null' ? null :
+  T extends 'undefined' ? undefined :
+  T extends 'unknown' ? unknown :
+  // Use ArkType for advanced types (subtypes, constraints, unions, arrays)
+  type.infer<T>;
+
+// Extract required data types from AST identifiers
+type ExtractRequiredData<T> = /* ... */;
 ```
 
 #### Parameters
@@ -623,6 +710,154 @@ if (!result.success && result.error) {
   //  1+
   //    →"
 }
+```
+
+---
+
+## ArkType Integration
+
+Stringent uses [ArkType](https://arktype.io/) for both compile-time and runtime type validation. This section documents how ArkType is integrated throughout the library.
+
+### Supported Types
+
+Stringent supports the full range of ArkType type definitions:
+
+| Category | Examples | TypeScript Inference |
+|----------|----------|---------------------|
+| **Primitives** | `'number'`, `'string'`, `'boolean'`, `'null'`, `'undefined'` | Direct mapping |
+| **Subtypes** | `'string.email'`, `'string.uuid'`, `'string.url'`, `'number.integer'` | Base type (`string`, `number`) |
+| **Constraints** | `'number >= 0'`, `'number > 0'`, `'1 <= number <= 100'`, `'string >= 8'` | Base type |
+| **Unions** | `'string \| number'`, `'boolean \| null'` | Union type |
+| **Arrays** | `'string[]'`, `'number[]'`, `'(string \| number)[]'` | Array type |
+
+### Compile-Time Validation
+
+#### Schema Validation in `parser.parse()`
+
+Schema types passed to `parse()` are validated at compile-time:
+
+```typescript
+const parser = createParser([add] as const);
+
+// Valid - all these are valid ArkType strings
+parser.parse('x + y', { x: 'number', y: 'number' });        // Primitives
+parser.parse('x + y', { x: 'number >= 0', y: 'number' });   // Constraints
+parser.parse('email', { email: 'string.email' });           // Subtypes
+
+// Invalid - TypeScript errors at compile time
+// @ts-expect-error - 'garbage' is not a valid arktype
+parser.parse('x', { x: 'garbage' });
+
+// @ts-expect-error - 'nubmer' is misspelled
+parser.parse('x', { x: 'nubmer' });
+```
+
+#### Constraint Validation in `lhs()`, `rhs()`, `expr()`
+
+```typescript
+// Valid constraints
+lhs('number');           // OK
+lhs('string.email');     // OK
+lhs('number >= 0');      // OK
+
+// @ts-expect-error - Invalid constraint
+lhs('garbage');
+```
+
+#### resultType Validation in `defineNode()`
+
+```typescript
+// Valid result types
+defineNode({ ..., resultType: 'number' });
+defineNode({ ..., resultType: 'string | number' });
+
+// @ts-expect-error - Invalid result type
+defineNode({ ..., resultType: 'garbage' });
+```
+
+### Runtime Validation
+
+When `evaluate()` is called, ArkType validates identifier values against their schemas at runtime:
+
+```typescript
+const result = parser.parse('x', { x: 'number >= 0' });
+
+if (result.length === 2) {
+  // Works - 5 is >= 0
+  evaluate(result[0], { data: { x: 5 }, nodes: [] });
+
+  // Throws at runtime: "Variable 'x' failed validation for schema 'number >= 0'"
+  evaluate(result[0], { data: { x: -5 }, nodes: [] });
+}
+```
+
+#### Subtype Validation
+
+```typescript
+const result = parser.parse('email', { email: 'string.email' });
+
+// Works - valid email format
+evaluate(result[0], { data: { email: 'test@example.com' }, nodes: [] });
+
+// Throws - invalid email format
+evaluate(result[0], { data: { email: 'not-an-email' }, nodes: [] });
+```
+
+#### Type Validation
+
+```typescript
+const result = parser.parse('x', { x: 'number' });
+
+// Works - correct type
+evaluate(result[0], { data: { x: 42 }, nodes: [] });
+
+// Throws - wrong type (string instead of number)
+evaluate(result[0], { data: { x: 'wrong' }, nodes: [] });
+```
+
+### Computed Result Types
+
+For nodes where the result type depends on sub-expressions, use `UnionResultType`:
+
+```typescript
+interface UnionResultType<TBindings extends readonly string[] = readonly string[]> {
+  readonly union: TBindings;
+}
+
+// Example: ternary operator
+const ternary = defineNode({
+  name: 'ternary',
+  pattern: [
+    lhs('boolean').as('condition'),
+    constVal('?'),
+    expr().as('then'),
+    constVal(':'),
+    rhs().as('else'),
+  ],
+  precedence: 0,
+  resultType: { union: ['then', 'else'] } as const,
+  eval: ({ condition, then: t, else: e }) => (condition ? t : e),
+});
+```
+
+When parsing `true ? 1 : "hello"`:
+- `then` branch has `outputSchema: 'number'`
+- `else` branch has `outputSchema: 'string'`
+- Result has `outputSchema: 'number | string'`
+- `evaluate()` returns type `number | string`
+
+#### Single-Binding Propagation
+
+For nodes with `resultType: 'unknown'` and exactly one binding (like parentheses), the `outputSchema` is automatically propagated from the inner expression:
+
+```typescript
+// (1 + 2) - parentheses node
+// Inner expression has outputSchema: 'number'
+// Result has outputSchema: 'number' (propagated)
+
+const result = parser.parse('(1 + 2)', {});
+const value = evaluate(result[0], ctx);
+// TypeScript infers: value is number
 ```
 
 ---
@@ -927,16 +1162,58 @@ type ComputeGrammar<TNodes extends readonly NodeSchema[]> =
 
 ### SchemaToType<T>
 
-Map a type string to its TypeScript type.
+Map an ArkType type string to its TypeScript type using ArkType's inference.
 
 ```typescript
 type SchemaToType<T extends string> =
-  T extends "number" ? number :
-  T extends "string" ? string :
-  T extends "boolean" ? boolean :
-  T extends "null" ? null :
-  T extends "undefined" ? undefined :
-  unknown;
+  // Fast path for common primitives
+  T extends 'number' ? number :
+  T extends 'string' ? string :
+  T extends 'boolean' ? boolean :
+  T extends 'null' ? null :
+  T extends 'undefined' ? undefined :
+  T extends 'unknown' ? unknown :
+  // Use ArkType for advanced types (subtypes, constraints, unions, arrays)
+  type.infer<T>;
+
+// Examples:
+// SchemaToType<'number'>           → number
+// SchemaToType<'string'>           → string
+// SchemaToType<'string.email'>     → string
+// SchemaToType<'number >= 0'>      → number
+// SchemaToType<'string | number'>  → string | number
+// SchemaToType<'string[]'>         → string[]
+// SchemaToType<'garbage'>          → unknown (invalid types fallback)
+```
+
+### ValidArkType<T>
+
+Validate that a string is a valid ArkType type at compile-time.
+
+```typescript
+type ValidArkType<T extends string> = type.validate<T>;
+
+// Used in function parameters to validate type strings:
+function example<const T extends string>(schema: type.validate<T>) { ... }
+
+// Valid types pass through unchanged
+// Invalid types cause TypeScript compile errors
+```
+
+### UnionResultType<TBindings>
+
+Marker type for computed union result types in `defineNode()`.
+
+```typescript
+interface UnionResultType<TBindings extends readonly string[] = readonly string[]> {
+  readonly union: TBindings;
+}
+
+// Usage in defineNode:
+defineNode({
+  // ...
+  resultType: { union: ['then', 'else'] } as const,
+});
 ```
 
 ### InferBindings<Pattern>

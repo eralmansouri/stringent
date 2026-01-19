@@ -547,13 +547,24 @@ const ternary = defineNode({
 - Added 15 tests in `src/runtime/eval.test.ts` under "union type computation (Task 9 Part B)"
 - Tests verify: runtime union computation, type-level inference, createEvaluator integration, edge cases
 
-### Task 10: Update Documentation
+### Task 10: Update Documentation (COMPLETED)
 
-- [ ] Update README with arktype integration examples
-- [ ] Document supported arktype types
-- [ ] Show compile-time and runtime validation examples
-- [ ] Document computed result types
-- [ ] Update API reference
+- [x] Update README with arktype integration examples
+- [x] Document supported arktype types
+- [x] Show compile-time and runtime validation examples
+- [x] Document computed result types
+- [x] Update API reference
+
+**Implementation Notes:**
+- Added ArkType Integration section to README with comprehensive examples
+- Documented all supported ArkType types: primitives, subtypes, constraints, unions, arrays
+- Added compile-time validation examples for `parser.parse()`, `lhs()/rhs()/expr()`, and `defineNode()`
+- Added runtime validation examples showing ArkType constraint and subtype validation
+- Documented computed union result types with `{ union: [...] }` syntax
+- Updated API reference with ArkType Integration section, updated type utilities documentation
+- Updated `lhs()`, `rhs()`, `expr()` documentation to show constraint validation
+- Updated `defineNode()` documentation to show resultType validation and union types
+- Updated `evaluate()` documentation to show ArkType-based return type inference
 
 ---
 
