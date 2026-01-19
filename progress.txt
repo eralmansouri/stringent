@@ -456,3 +456,35 @@
 - src/index.ts (added error exports)
 - src/error-messages.test.ts (new - 62 tests)
 - PRD.md (marked task 3.1 as complete)
+
+### 2026-01-18: Task 3.2 - API Consistency
+
+**Completed:**
+- Reviewed all exports for naming consistency
+- Removed legacy capitalized factory exports that were unused and confusing
+- Simplified the public API surface
+
+**Changes Made:**
+- **Updated `src/primitive/index.ts`:**
+  - Removed `Number`, `String`, `Ident`, `Const` factory exports
+  - Renamed to internal `createNumber`, `createString`, `createIdent`, `createConst` with `@internal` JSDoc
+  - Removed `IParser` and `Primitive` type exports
+  - Kept class types `_Number`, `_String`, `_Ident`, `_Const` for internal use only
+- **Updated `src/index.ts`:**
+  - Removed entire "Legacy Primitives" export section
+  - No longer exports: `Number`, `String`, `Ident`, `Const`, `IParser`, `ParseResult`
+
+**API After Cleanup:**
+- Public factories: `number()`, `string()`, `ident()`, `constVal()`, `lhs()`, `rhs()`, `expr()`, `nullLiteral()`, `booleanLiteral()`, `undefinedLiteral()`
+- Core API: `defineNode()`, `createParser()`, `evaluate()`, `infer()`
+- Error utilities: `parseWithErrors()`, `formatParseError()`, error creation functions
+- Types: All necessary schema, node, and context types
+
+**Test Results:**
+- All 643 tests pass
+- TypeScript typecheck passes
+
+**Files Changed:**
+- src/primitive/index.ts (removed legacy exports, renamed to internal factories)
+- src/index.ts (removed legacy exports section)
+- PRD.md (marked task 3.2 as complete)

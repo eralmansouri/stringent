@@ -194,11 +194,18 @@ Since this is a new project, consider these potential improvements:
 **Files:** `src/errors.ts` (new), `src/runtime/parser.ts`, `src/error-messages.test.ts` (new)
 
 ### 3.2 API Consistency
-- [ ] Review all exports for naming consistency
-- [ ] Ensure factory functions follow consistent patterns
-- [ ] **Remove legacy exports** (Number, String, Ident, Const) - no backward compat needed
-- [ ] Redesign any awkward APIs for better ergonomics
-- [ ] Simplify exports - only expose what's truly needed
+- [x] Review all exports for naming consistency
+- [x] Ensure factory functions follow consistent patterns
+- [x] **Remove legacy exports** (Number, String, Ident, Const) - no backward compat needed
+- [x] Redesign any awkward APIs for better ergonomics
+- [x] Simplify exports - only expose what's truly needed
+
+**Completed:** Cleaned up the public API surface:
+- Removed legacy capitalized factories: `Number`, `String`, `Ident`, `Const`
+- Removed legacy type exports: `IParser`, `ParseResult`, `Primitive`
+- Renamed internal factories to `createNumber`, `createString`, `createIdent`, `createConst` with `@internal` JSDoc
+- Public API now only exposes schema factories: `number()`, `string()`, `ident()`, `constVal()`, etc.
+- All 643 tests pass with the cleaned-up API
 
 ### 3.3 Type Safety Review
 - [ ] Audit for `any` types that could be stricter
