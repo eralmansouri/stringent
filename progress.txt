@@ -773,3 +773,50 @@
 - tsconfig.json (added sourceMap and declarationMap options)
 - tsconfig.build.json (added test-helpers.ts and examples to exclude list)
 - PRD.md (marked task 5.1 as complete)
+
+### 2026-01-18: Task 4.3 - Architecture Documentation
+
+**Completed:**
+- Created comprehensive `/docs/architecture.md` documenting the internal architecture of Stringent
+
+**Documentation Contents:**
+- **Overview:** Core components table mapping files to purposes
+- **Precedence-Based Parsing Algorithm:**
+  - Grammar structure explanation (levels sorted by ascending precedence)
+  - Parsing flow with `parseLevels()` recursive descent
+  - Precedence semantics (lower = tried first = binds loosely)
+  - Example walkthrough with `2 + 3 * 4`
+- **Type-Runtime Mirror Pattern:**
+  - Parallel implementation table (runtime functions ↔ type-level types)
+  - Control flow correspondence with code examples
+  - Synchronization guarantees (grammar computation, return type binding)
+  - Benefits (type safety, IDE support, error detection)
+- **LHS/RHS/Expr Role System:**
+  - LHS: uses `nextLevels`, prevents left-recursion
+  - RHS: uses `currentLevels`, enables right-associativity
+  - Expr: uses `fullGrammar`, resets precedence in delimited contexts
+  - Role selection code examples for both runtime and type-level
+  - Associativity examples table
+- **Grammar Computation:**
+  - Transformation steps (group → entries → sort → extract → append atoms)
+  - Type-level implementation with hotscript
+  - Runtime implementation with `buildGrammar()`
+  - Why const generics matter for literal preservation
+- **Architecture Diagram:**
+  - ASCII diagram showing user code → createParser → compile-time/runtime paths → unified result
+  - Data flow diagram for parsing `"2 + 3 * 4"` showing level traversal
+- **Key Design Decisions:**
+  - Right-associativity by default
+  - Atoms as final level
+  - Pattern-based node definition
+  - Const generics for literal preservation
+  - First match wins
+- **File Reference:** Table mapping all source files to their purposes
+
+**Test Results:**
+- All 691 tests pass
+- TypeScript typecheck passes
+
+**Files Changed:**
+- docs/architecture.md (new - comprehensive architecture documentation)
+- PRD.md (marked task 4.3 as complete)

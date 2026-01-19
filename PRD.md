@@ -268,11 +268,23 @@ Since this is a new project, consider these potential improvements:
 **Files:** `/docs/api-reference.md` (new), `typedoc.json` (new)
 
 ### 4.3 Architecture Documentation
-- [ ] Document precedence-based parsing algorithm
-- [ ] Document type-runtime mirror pattern
-- [ ] Document lhs/rhs/expr role system
-- [ ] Create architecture diagram
-- [ ] Document grammar computation
+- [x] Document precedence-based parsing algorithm
+- [x] Document type-runtime mirror pattern
+- [x] Document lhs/rhs/expr role system
+- [x] Create architecture diagram
+- [x] Document grammar computation
+
+**Completed:** Created comprehensive `/docs/architecture.md` with:
+- Overview of core components and file structure
+- Precedence-based parsing algorithm with level-based recursive descent
+- Type-runtime mirror pattern showing parallel implementations
+- LHS/RHS/Expr role system for avoiding left-recursion and controlling associativity
+- Grammar computation process from node schemas
+- ASCII architecture diagrams showing data flow
+- Expression parsing walkthrough example (`2 + 3 * 4`)
+- Key design decisions and rationale
+
+**Files:** `/docs/architecture.md` (new)
 
 ### 4.4 Examples
 - [x] Create `/examples` directory
