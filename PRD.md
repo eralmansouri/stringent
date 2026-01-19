@@ -338,14 +338,20 @@ Update `lhs()`, `rhs()`, `expr()` to validate constraints via arktype.
 - Added 34 tests in `src/schema/constraint-validation.test.ts`
 - Changed import from `import type { type }` to `import { type }` to access `type.validate`
 
-### Task 4: Fix Schema Validation in defineNode
+### Task 4: Fix Schema Validation in defineNode (COMPLETED)
 
 Update `defineNode()` to validate `resultType` via arktype.
 
-- [ ] Change resultType validation to use arktype
-- [ ] Verify that `resultType: 'garbage'` causes a type error
-- [ ] Verify that `resultType: 'string | number'` works
-- [ ] Update tests
+- [x] Change resultType validation to use arktype
+- [x] Verify that `resultType: 'garbage'` causes a type error
+- [x] Verify that `resultType: 'string | number'` works
+- [x] Update tests
+
+**Implementation Notes:**
+- Updated `defineNode()` to use `type.validate<TResultType>` for the `resultType` parameter
+- Invalid type strings like 'garbage', 'asdfghjkl', 'nubmer' now cause TypeScript errors
+- Valid arktype types work: primitives, subtypes (string.email), constraints (number >= 0), unions
+- Added 10 tests in `src/schema/constraint-validation.test.ts` under "defineNode() resultType validation (Task 4)"
 
 ### Task 5: Fix Schema Validation in parser.parse()
 

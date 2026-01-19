@@ -351,4 +351,176 @@ describe('Constraint Validation - Task 3', () => {
       expect(symbolLhs.constraint).toBe('symbol');
     });
   });
+
+  describe('defineNode() resultType validation (Task 4)', () => {
+    it('accepts valid primitive resultType', () => {
+      const numberNode = defineNode({
+        name: 'numberResult',
+        pattern: [lhs('number').as('value')],
+        precedence: 1,
+        resultType: 'number',
+      });
+
+      expect(numberNode.resultType).toBe('number');
+
+      const stringNode = defineNode({
+        name: 'stringResult',
+        pattern: [lhs('string').as('value')],
+        precedence: 1,
+        resultType: 'string',
+      });
+
+      expect(stringNode.resultType).toBe('string');
+
+      const booleanNode = defineNode({
+        name: 'booleanResult',
+        pattern: [lhs('boolean').as('value')],
+        precedence: 1,
+        resultType: 'boolean',
+      });
+
+      expect(booleanNode.resultType).toBe('boolean');
+    });
+
+    it('accepts valid arktype subtype resultType', () => {
+      const emailNode = defineNode({
+        name: 'emailResult',
+        pattern: [lhs('string').as('value')],
+        precedence: 1,
+        resultType: 'string.email',
+      });
+
+      expect(emailNode.resultType).toBe('string.email');
+
+      const integerNode = defineNode({
+        name: 'integerResult',
+        pattern: [lhs('number').as('value')],
+        precedence: 1,
+        resultType: 'number.integer',
+      });
+
+      expect(integerNode.resultType).toBe('number.integer');
+    });
+
+    it('accepts valid arktype constraint resultType', () => {
+      const positiveNode = defineNode({
+        name: 'positiveResult',
+        pattern: [lhs('number').as('value')],
+        precedence: 1,
+        resultType: 'number >= 0',
+      });
+
+      expect(positiveNode.resultType).toBe('number >= 0');
+
+      const rangeNode = defineNode({
+        name: 'rangeResult',
+        pattern: [lhs('number').as('value')],
+        precedence: 1,
+        resultType: '1 <= number <= 100',
+      });
+
+      expect(rangeNode.resultType).toBe('1 <= number <= 100');
+    });
+
+    it('accepts valid union resultType', () => {
+      const unionNode = defineNode({
+        name: 'unionResult',
+        pattern: [lhs('boolean').as('condition')],
+        precedence: 1,
+        resultType: 'string | number',
+      });
+
+      expect(unionNode.resultType).toBe('string | number');
+
+      const multiUnionNode = defineNode({
+        name: 'multiUnionResult',
+        pattern: [lhs('boolean').as('condition')],
+        precedence: 1,
+        resultType: 'string | number | boolean',
+      });
+
+      expect(multiUnionNode.resultType).toBe('string | number | boolean');
+    });
+
+    it('accepts array resultType', () => {
+      const arrayNode = defineNode({
+        name: 'arrayResult',
+        pattern: [lhs('string[]').as('value')],
+        precedence: 1,
+        resultType: 'string[]',
+      });
+
+      expect(arrayNode.resultType).toBe('string[]');
+    });
+
+    it('accepts unknown resultType for computed types', () => {
+      // 'unknown' is a valid arktype that allows any type
+      // Used for nodes like parentheses where type is propagated
+      const unknownNode = defineNode({
+        name: 'unknownResult',
+        pattern: [lhs().as('inner')],
+        precedence: 'atom',
+        resultType: 'unknown',
+      });
+
+      expect(unknownNode.resultType).toBe('unknown');
+    });
+
+    it('rejects invalid resultType (type error)', () => {
+      const garbageNode = defineNode({
+        name: 'garbageResult',
+        pattern: [lhs('number').as('value')],
+        precedence: 1,
+        // @ts-expect-error - 'garbage' is not a valid arktype
+        resultType: 'garbage',
+      });
+
+      // Runtime still creates the node (validation is compile-time only)
+      expect(garbageNode.resultType).toBe('garbage');
+    });
+
+    it('rejects another invalid resultType (type error)', () => {
+      const invalidNode = defineNode({
+        name: 'invalidResult',
+        pattern: [lhs('string').as('value')],
+        precedence: 1,
+        // @ts-expect-error - 'asdfghjkl' is not a valid arktype
+        resultType: 'asdfghjkl',
+      });
+
+      // Runtime still creates the node (validation is compile-time only)
+      expect(invalidNode.resultType).toBe('asdfghjkl');
+    });
+
+    it('rejects invalid misspelled resultType (type error)', () => {
+      const misspelledNode = defineNode({
+        name: 'misspelledResult',
+        pattern: [lhs('number').as('value')],
+        precedence: 1,
+        // @ts-expect-error - 'nubmer' is not a valid arktype (misspelled)
+        resultType: 'nubmer',
+      });
+
+      // Runtime still creates the node (validation is compile-time only)
+      expect(misspelledNode.resultType).toBe('nubmer');
+    });
+
+    it('preserves resultType type in NodeSchema', () => {
+      const add = defineNode({
+        name: 'add',
+        pattern: [lhs('number').as('left'), constVal('+'), rhs('number').as('right')],
+        precedence: 1,
+        resultType: 'number',
+        eval: ({ left, right }) => left + right,
+      });
+
+      // Type-level check: resultType should be the literal 'number', not string
+      type ResultType = typeof add.resultType;
+      const _check: ResultType = 'number';
+      // @ts-expect-error - resultType is 'number', not 'string'
+      const _badCheck: ResultType = 'string';
+
+      expect(add.resultType).toBe('number');
+    });
+  });
 });

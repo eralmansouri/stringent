@@ -484,3 +484,75 @@ Created `src/schema/constraint-validation.test.ts` with 34 tests:
 - `src/schema/constraint-validation.test.ts`: New test file with 34 tests
 
 All 816 tests pass. TypeScript type checking passes. No lint errors (only pre-existing warnings).
+
+## Task 10 (PRD Task 4): Fix Schema Validation in defineNode (COMPLETED)
+
+Updated `defineNode()` to validate `resultType` at compile time using arktype.
+
+### Implementation
+
+Updated `src/schema/index.ts`:
+
+**Changed the resultType parameter to use `type.validate`:**
+```typescript
+// Before
+export function defineNode<
+  const TName extends string,
+  const TPattern extends readonly PatternSchema[],
+  const TPrecedence extends Precedence,
+  const TResultType extends string,
+>(config: {
+  // ...
+  readonly resultType: TResultType;  // No validation
+  // ...
+})
+
+// After
+export function defineNode<
+  const TName extends string,
+  const TPattern extends readonly PatternSchema[],
+  const TPrecedence extends Precedence,
+  const TResultType extends string,
+>(config: {
+  // ...
+  readonly resultType: type.validate<TResultType>;  // Validates at compile time
+  // ...
+})
+```
+
+### Validation Behavior
+
+**Valid resultType values (no type error):**
+- Primitives: `'number'`, `'string'`, `'boolean'`, `'null'`, `'undefined'`
+- Subtypes: `'string.email'`, `'number.integer'`
+- Constraints: `'number >= 0'`, `'1 <= number <= 100'`
+- Unions: `'string | number'`, `'string | number | boolean'`
+- Arrays: `'string[]'`
+- Special: `'unknown'` (for computed types like parentheses)
+
+**Invalid resultType values (TypeScript compile error):**
+- `resultType: 'garbage'` - Error: `Type '"garbage"' is not assignable to type '"'garbage' is unresolvable"'`
+- `resultType: 'asdfghjkl'` - Same type of error
+- `resultType: 'nubmer'` - Same type of error (misspelled)
+
+### Tests Added
+
+Added 10 tests in `src/schema/constraint-validation.test.ts` under "defineNode() resultType validation (Task 4)":
+
+1. accepts valid primitive resultType
+2. accepts valid arktype subtype resultType
+3. accepts valid arktype constraint resultType
+4. accepts valid union resultType
+5. accepts array resultType
+6. accepts unknown resultType for computed types
+7. rejects invalid resultType (type error)
+8. rejects another invalid resultType (type error)
+9. rejects invalid misspelled resultType (type error)
+10. preserves resultType type in NodeSchema
+
+### Files Modified
+
+- `src/schema/index.ts`: Updated `defineNode()` to use `type.validate<TResultType>` for resultType parameter, updated JSDoc
+- `src/schema/constraint-validation.test.ts`: Added 10 tests for resultType validation
+
+All 826 tests pass. TypeScript type checking passes. No lint errors (only pre-existing warnings).
