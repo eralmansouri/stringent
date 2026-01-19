@@ -1529,3 +1529,61 @@ Updated all existing tests to use the new API:
 - `docs/api-reference.md`: Updated documentation
 
 All 1011 tests pass. TypeScript type checking passes. Lint passes (warnings only).
+
+## Task 20 (PRD Task 13): Update Base Ternary Node (COMPLETED)
+
+Updated the base `ternary` node in eval.test.ts to use computed union result types and removed the duplicate `ternaryWithUnion` definition.
+
+### Implementation
+
+**Updated `ternary` node at line 112:**
+
+Before:
+```typescript
+const ternary = defineNode({
+  name: 'ternary',
+  pattern: [...],
+  precedence: 0,
+  resultType: 'unknown',  // Static type
+  eval: ({ condition, then: thenVal, else: elseVal }) => (condition ? thenVal : elseVal),
+});
+```
+
+After:
+```typescript
+const ternary = defineNode({
+  name: 'ternary',
+  pattern: [...],
+  precedence: 0,
+  resultType: { union: ['then', 'else'] } as const,  // Computed union type
+  eval: ({ condition, then: thenVal, else: elseVal }) => (condition ? thenVal : elseVal),
+});
+```
+
+**Removed duplicate code:**
+- Removed `ternaryWithUnion` definition (lines 2465-2477)
+- Removed `unionParser` definition (line 2480)
+- Changed all `unionParser.parse()` calls to `parser.parse()`
+
+**Updated manually constructed AST test:**
+- Changed `node: 'ternaryUnion'` to `node: 'ternary'`
+- Changed `nodes: [ternaryWithUnion]` to `nodes: allNodes`
+
+**Updated test descriptions:**
+- Updated test "handles ternary with unknown result type" to "handles ternary with computed union result type"
+- Updated test "ternary with static resultType unknown keeps outputSchema unknown" to "ternary with UnionResultType computes outputSchema from branches"
+- Updated test descriptions to reflect the new computed union behavior
+
+### Test Results
+
+All 1011 tests pass. Ternary expressions now correctly compute their outputSchema:
+- `true ? 1 : 2` → `outputSchema: 'number'`
+- `true ? 1 : "hello"` → `outputSchema: 'number | string'`
+- `true ? true : 42` → `outputSchema: 'boolean | number'`
+
+### Files Modified
+
+- `src/runtime/eval.test.ts`: Updated ternary node, removed ternaryWithUnion, updated tests
+- `PRD.md`: Marked Task 13 as complete with implementation notes
+
+All 1011 tests pass. TypeScript type checking passes (only pre-existing warning in createParser.bound-evaluator.test.ts). Lint passes (warnings only).
