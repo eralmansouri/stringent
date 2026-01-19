@@ -369,7 +369,7 @@ Update the parse method to validate schema types via arktype.
 - For generic `string` types, validation is skipped to avoid deep type instantiation issues
 - Added 34 tests in `src/createParser.schema-validation.test.ts`
 
-### Task 6: Connect Parse Schema to Eval Data
+### Task 6: Connect Parse Schema to Eval Data (COMPLETED)
 
 This is the critical fix. The evaluate function must ensure data matches the schema.
 
@@ -396,7 +396,7 @@ Options to consider:
 - [x] Add runtime validation using arktype
 - [x] Update tests
 
-### Task 7: Add Type-Level and Runtime Tests
+### Task 7: Add Type-Level and Runtime Tests (COMPLETED)
 
 Create comprehensive tests for the type safety.
 
@@ -441,7 +441,7 @@ describe('data validation', () => {
 - [x] Runtime tests for arktype constraint validation
 - [x] Tests for arktype subtypes (string.email, etc.)
 
-### Task 8: Fix Evaluate Return Type with ArkType
+### Task 8: Fix Evaluate Return Type with ArkType (COMPLETED)
 
 The `evaluate()` return type must work with ANY valid arktype schema, not just 5 hardcoded types.
 
@@ -474,7 +474,7 @@ SchemaToType<'string | number'>  // Returns string | number
 - Tests cover: primitives, subtypes (string.email, string.uuid, string.url, number.integer), constraints (number >= 0, number > 0, 1 <= number <= 100, string >= 8), unions (string | number, boolean | number, null | undefined), and arrays (string[], number[], (string | number)[])
 - Both `evaluate()` and `createEvaluator()` correctly infer return types from AST's `outputSchema` field
 
-### Task 9: Fix Type/Runtime Mismatch and Computed Result Types
+### Task 9: Fix Type/Runtime Mismatch and Computed Result Types (COMPLETED)
 
 There are TWO related problems:
 
