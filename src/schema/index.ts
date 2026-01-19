@@ -536,81 +536,40 @@ export type ArkTypeSchemaToType<T extends string> = type.infer<T>;
 /**
  * Map a schema type string to its TypeScript runtime type.
  *
- * Handles common primitives directly for performance, then uses arktype's
- * type.infer for advanced types (subtypes, constraints, unions).
+ * Uses arktype's `type.infer<T>` to infer TypeScript types from ANY valid
+ * arktype type string.
  *
- * For common types (fast path):
- * - 'number' → number
- * - 'string' → string
- * - 'boolean' → boolean
- * - 'null' → null
- * - 'undefined' → undefined
- * - 'unknown' → unknown
+ * Supports ALL arktype types:
+ * - Primitives: 'number', 'string', 'boolean', 'null', 'undefined', 'unknown'
+ * - Subtypes: 'string.email', 'string.uuid', 'number.integer', etc.
+ * - Constraints: 'number >= 0', 'number > 0', '1 <= number <= 100', etc.
+ * - Unions: 'string | number', 'boolean | null', etc.
+ * - Arrays: 'string[]', 'number[]', '(string | number)[]', etc.
  *
- * For advanced arktype types (via type.infer):
- * - 'string.email' → string (subtype)
- * - 'number >= 0' → number (constrained)
- * - 'string | number' → string | number (union)
- *
- * Falls back to `unknown` for invalid types.
+ * Falls back to `unknown` for:
+ * - Generic 'string' type (not a literal)
+ * - Invalid arktype type strings
  *
  * @example
  * ```ts
- * type N = SchemaToType<'number'>;         // number
- * type S = SchemaToType<'string'>;         // string
- * type E = SchemaToType<'string.email'>;   // string (subtype inferred as base)
- * type C = SchemaToType<'number >= 0'>;    // number (constraint inferred as base)
+ * type N = SchemaToType<'number'>;          // number
+ * type S = SchemaToType<'string'>;          // string
+ * type E = SchemaToType<'string.email'>;    // string
+ * type C = SchemaToType<'number >= 0'>;     // number
  * type U = SchemaToType<'string | number'>; // string | number
- * type X = SchemaToType<'invalid'>;        // unknown (fallback)
+ * type A = SchemaToType<'string[]'>;        // string[]
+ * type X = SchemaToType<'invalid'>;         // unknown (fallback)
  * ```
  */
 export type SchemaToType<T extends string> =
-  // Fast path for common primitives to avoid deep type instantiation
-  T extends 'number'
-    ? number
-    : T extends 'string'
-      ? string
-      : T extends 'boolean'
-        ? boolean
-        : T extends 'null'
-          ? null
-          : T extends 'undefined'
-            ? undefined
-            : T extends 'unknown'
-              ? unknown
-              : // Detect advanced arktype syntax by checking for literal strings
-                // Only evaluate arktype for LITERAL string types (not generic 'string')
-                string extends T
-                ? unknown // T is generic 'string', use fallback
-                : // T is a literal string, safe to use arktype inference
-                  SchemaToTypeAdvanced<T>;
-
-/**
- * Internal helper for advanced type inference using arktype.
- * Only called when T is a literal string type (not generic 'string').
- */
-type SchemaToTypeAdvanced<T extends string> =
-  // Detect advanced arktype patterns
-  T extends `${string}.${string}` // subtypes like 'string.email'
-    ? ArkTypeSchemaToTypeSafe<T>
-    : T extends `${string} ${string}` // constraints like 'number >= 0'
-      ? ArkTypeSchemaToTypeSafe<T>
-      : T extends `${string}|${string}` // unions without spaces like 'string|number'
-        ? ArkTypeSchemaToTypeSafe<T>
-        : T extends `${string} | ${string}` // unions with spaces like 'string | number'
-          ? ArkTypeSchemaToTypeSafe<T>
-          : T extends `${string}[]` // arrays like 'string[]'
-            ? ArkTypeSchemaToTypeSafe<T>
-            : // Fallback to unknown for unrecognized literal strings
-              unknown;
-
-/**
- * Safe wrapper around type.infer that falls back to unknown for invalid types.
- * This prevents TypeScript from erroring on invalid arktype definitions.
- */
-type ArkTypeSchemaToTypeSafe<T extends string> = [type.infer<T>] extends [never]
-  ? unknown
-  : type.infer<T>;
+  // Handle generic 'string' type (not a literal) - fall back to unknown
+  string extends T
+    ? unknown
+    : // For literal string types, use arktype's type.infer directly
+      // This handles ALL valid arktype types: primitives, subtypes, constraints, unions, arrays
+      [type.infer<T>] extends [never]
+      ? unknown // Invalid type string, fall back to unknown
+      : type.infer<T>;
 
 /**
  * Infer the AST node type from a pattern schema.
