@@ -5,7 +5,16 @@
   "keywords": [
     "parser",
     "expression",
-    "typescript"
+    "typescript",
+    "type-safe",
+    "compile-time",
+    "type-level",
+    "expression-parser",
+    "dsl",
+    "ast",
+    "grammar",
+    "validation",
+    "inference"
   ],
   "homepage": "https://github.com/formeddable/stringent#readme",
   "bugs": {
@@ -18,6 +27,9 @@
   "license": "MIT",
   "author": "Essam Almansouri",
   "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "files": [
     "dist"
   ],
@@ -32,8 +44,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
