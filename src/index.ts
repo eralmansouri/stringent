@@ -55,6 +55,10 @@ export type {
   InferValues,
   VocabOf,
   SchemaShapeOf,
+  TrimWs,
+  ValidExpression,
+  ParsedExpression,
+  ExpressionResult,
 } from "./createParser.js";
 
 // =============================================================================

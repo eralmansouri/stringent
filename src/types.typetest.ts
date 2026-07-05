@@ -12,12 +12,16 @@
 import type {
   ComputeGrammar,
   Context,
+  ExpressionResult,
   InferValues,
   NumberNode,
   StringNode,
+  ParsedExpression,
   PathNode,
   Parse,
   ResolvePath,
+  TrimWs,
+  ValidExpression,
 } from "./index.js";
 import { defineNode, lhs, rhs, constVal, sameAs } from "./index.js";
 import {
@@ -31,6 +35,7 @@ import {
   numberLit,
   parens,
   pow,
+  prefixNodes,
   stringLit,
   sub,
   ternary,
@@ -396,5 +401,90 @@ type PowCanary = Parse<G, "1^2^3^4^5^6^7^8^9^10", EmptyCtx>;
 const _pow: PowCanary extends [{ node: "pow"; outputSchema: "number" }, ""]
   ? true
   : false = true;
+
+// =============================================================================
+// Prefix operators + const-only atoms (prefix mini-grammar)
+// =============================================================================
+
+type PG = ComputeGrammar<typeof prefixNodes>;
+type BoolCtx = Context<{ x: "boolean" }>;
+
+// Const-only atom: named node, static resultType, no bindings
+type TP1 = AssertEqual<
+  Parse<PG, "true", EmptyCtx>,
+  [{ node: "true"; outputSchema: "boolean" }, ""]
+>;
+const _tp1: TP1 = true;
+
+// Leading-const prefix pattern
+type TP2 = Parse<PG, "!x", BoolCtx>;
+type TP2Check = TP2 extends [{ node: "not"; outputSchema: "boolean" }, ""]
+  ? true
+  : false;
+const _tp2: TP2Check = true;
+
+// Right-recursion through the prefix level
+type TP3 = Parse<PG, "!!x", BoolCtx>;
+const _tp3: TP3 extends [{ node: "not"; outputSchema: "boolean" }, ""]
+  ? true
+  : false = true;
+
+// Prefix binds tighter than &&: (!x) && x
+type TP4 = Parse<PG, "!x && x", BoolCtx>;
+const _tp4: TP4 extends [{ node: "and"; outputSchema: "boolean" }, ""]
+  ? true
+  : false = true;
+
+// Non-boolean operand fails the constraint
+type TP5 = AssertEqual<Parse<PG, "!x", Context<{ x: "number" }>>, []>;
+const _tp5: TP5 = true;
+
+// =============================================================================
+// Exported full-parse helpers (ValidExpression / ParsedExpression /
+// ExpressionResult / TrimWs)
+// =============================================================================
+
+// Non-distributive never check (AssertEqual distributes over naked params,
+// so AssertEqual<never, never> is itself never)
+type AssertNever<T> = [T] extends [never] ? true : false;
+
+// Valid literals echo the input (trailing whitespace allowed)
+type TV1 = AssertEqual<ValidExpression<G, "1+2*3", EmptyCtx>, "1+2*3">;
+const _tv1: TV1 = true;
+type TV2 = AssertEqual<ValidExpression<G, "1+2  ", EmptyCtx>, "1+2  ">;
+const _tv2: TV2 = true;
+
+// Invalid, partial, and trailing-junk literals are never
+type TV3 = AssertNever<ValidExpression<G, "1+", EmptyCtx>>;
+const _tv3: TV3 = true;
+type TV4 = AssertNever<ValidExpression<G, "1+2 junk", EmptyCtx>>;
+const _tv4: TV4 = true;
+
+// Wide string is never (dynamic input must use safeParse)
+type TV5 = AssertNever<ValidExpression<G, string, EmptyCtx>>;
+const _tv5: TV5 = true;
+
+// ParsedExpression yields the root node only on a FULL parse
+type TV6 = ParsedExpression<G, "1+2", EmptyCtx>;
+const _tv6: TV6 extends { node: "add"; outputSchema: "number" }
+  ? true
+  : false = true;
+type TV7 = AssertNever<ParsedExpression<G, "1+2 junk", EmptyCtx>>;
+const _tv7: TV7 = true;
+
+// ExpressionResult yields the result-type NAME — the slot-gating primitive
+type TV8 = AssertEqual<
+  ExpressionResult<G, "values.password == values.confirmPassword", FormCtx>,
+  "boolean"
+>;
+const _tv8: TV8 = true;
+type TV9 = AssertEqual<ExpressionResult<G, "'a'+'b'", EmptyCtx>, "string">;
+const _tv9: TV9 = true;
+type TV10 = AssertNever<ExpressionResult<G, "1+", EmptyCtx>>;
+const _tv10: TV10 = true;
+
+// TrimWs is exported and behaves
+type TV11 = AssertEqual<TrimWs<"  \t\n x">, "x">;
+const _tv11: TV11 = true;
 
 export {};

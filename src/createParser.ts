@@ -121,7 +121,8 @@ type EvaluateResult<
   ? SchemaToType<N["outputSchema"]>
   : unknown;
 
-type TrimWs<S extends string> = S extends
+/** Trim leading whitespace from a string type. */
+export type TrimWs<S extends string> = S extends
   | ` ${infer R}`
   | `\t${infer R}`
   | `\n${infer R}`
@@ -142,6 +143,63 @@ type ValidatedInput<
   ? TrimWs<R> extends ""
     ? TInput
     : never
+  : never;
+
+/**
+ * TInput when it FULLY parses against the grammar in the given context
+ * (trailing whitespace allowed), otherwise never.
+ *
+ * The public form of the check parse() applies to its input parameter.
+ * Use it to validate expression string literals embedded inside larger
+ * `as const` structures — e.g. a form definition whose fields carry
+ * `{ $expr: string }` slots — without calling a function.
+ */
+export type ValidExpression<
+  TGrammar extends Grammar,
+  TInput extends string,
+  $ extends Context = Context<{}>
+> = ValidatedInput<TGrammar, TInput, $>;
+
+/**
+ * The root node of a fully-parsed expression literal, or never.
+ *
+ * Like ValidExpression, but yields the parsed AST node type (carrying
+ * `outputSchema`, bindings, etc.) instead of echoing the input.
+ */
+export type ParsedExpression<
+  TGrammar extends Grammar,
+  TInput extends string,
+  $ extends Context = Context<{}>
+> = Parse<TGrammar, TInput, $> extends [infer N, infer R extends string]
+  ? TrimWs<R> extends ""
+    ? N
+    : never
+  : never;
+
+/**
+ * The result-type NAME of a fully-parsed expression literal, or never.
+ *
+ * @example
+ * ExpressionResult<G, "1 == 2", Context<{}>>  // "boolean"
+ * ExpressionResult<G, "1 + 2", Context<{}>>   // "number"
+ * ExpressionResult<G, "1 +", Context<{}>>     // never
+ *
+ * Consumers gate expression slots on this, e.g.
+ * `ExpressionResult<G, S, $> extends "boolean" ? S : ErrorMessage`.
+ */
+export type ExpressionResult<
+  TGrammar extends Grammar,
+  TInput extends string,
+  $ extends Context = Context<{}>
+> = ResultNameOf<ParsedExpression<TGrammar, TInput, $>>;
+
+/** outputSchema of a node, with an explicit never guard (never is the
+ *  bottom type, so a bare `never extends { outputSchema: ... }` would take
+ *  the true branch and infer O as its `string` constraint). */
+type ResultNameOf<N> = [N] extends [never]
+  ? never
+  : N extends { outputSchema: infer O extends string }
+  ? O
   : never;
 
 // =============================================================================

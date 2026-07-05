@@ -146,3 +146,50 @@ export const formSchema = {
   x: "number",
   values: { password: "string", confirmPassword: "string" },
 } as const;
+
+// =============================================================================
+// Prefix / boolean-literal mini-grammar
+//
+// Kept separate from fixtureNodes so the grammar-shape and diagnostics
+// assertions over the main fixture stay stable. Exercises: const-only atoms
+// (no bindings, static resultType) and a leading-const prefix operator.
+// =============================================================================
+
+export const boolTrue = defineNode({
+  name: "true",
+  pattern: [constVal("true")],
+  precedence: "atom",
+  resultType: "boolean",
+  eval: () => true,
+});
+
+export const boolFalse = defineNode({
+  name: "false",
+  pattern: [constVal("false")],
+  precedence: "atom",
+  resultType: "boolean",
+  eval: () => false,
+});
+
+/** Prefix boolean negation: a pattern that starts with a const. */
+export const not = defineNode({
+  name: "not",
+  pattern: [constVal("!"), rhs("boolean").as("value")],
+  precedence: 2,
+  resultType: "boolean",
+  eval: ({ value }) => !value,
+});
+
+export const and = defineNode({
+  name: "and",
+  pattern: [lhs("boolean").as("left"), constVal("&&"), rhs("boolean").as("right")],
+  precedence: 1,
+  associativity: "left",
+  resultType: "boolean",
+  lazy: true,
+  eval: ({ left, right }) => left() && right(),
+});
+
+export const prefixNodes = [boolTrue, boolFalse, variable, not, and] as const;
+
+export const prefixParser = createParser(prefixNodes);
