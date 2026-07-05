@@ -22,7 +22,8 @@
   "type": "module",
   "sideEffects": false,
   "files": [
-    "dist"
+    "dist",
+    "src"
   ],
   "main": "src/index.ts",
   "types": "src/index.ts",
