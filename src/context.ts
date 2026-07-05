@@ -1,11 +1,32 @@
 /**
- * Context - carries schema data for identifier type resolution
+ * Context - carries schema data for identifier/path type resolution
  *
  * The context maps variable names to their types, enabling type-safe
  * parsing of expressions like `x + y` where x and y come from a schema.
  *
- * Grammar is now computed from node schemas via ComputeGrammar<Nodes>.
+ * Schemas may be nested: `{ values: { password: "string" } }` allows
+ * member-access expressions like `values.password` (via the path()
+ * pattern element).
  */
+
+// =============================================================================
+// Schema Shape
+// =============================================================================
+
+/**
+ * The shape of a schema: leaf values are type-name strings ("number",
+ * "string", ...), and nested records describe objects addressable with
+ * dotted paths.
+ *
+ * @example
+ * ```ts
+ * const schema = {
+ *   x: "number",
+ *   values: { password: "string", confirmPassword: "string" },
+ * } satisfies SchemaShape;
+ * ```
+ */
+export type SchemaShape = { readonly [key: string]: string | SchemaShape };
 
 // =============================================================================
 // Context Interface
@@ -22,7 +43,7 @@
  * // x resolves to type "number", y resolves to type "string"
  * ```
  */
-export interface Context<TData extends Record<string, string> = Record<string, string>> {
+export interface Context<TData extends SchemaShape = SchemaShape> {
   /** Schema types for identifier resolution */
   readonly data: TData;
 }

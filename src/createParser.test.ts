@@ -1,253 +1,334 @@
 /**
- * Tests for createParser API
- *
- * Verifies that:
- * 1. Type-level parsing produces correct types (compile-time tests)
- * 2. Runtime parsing produces correct values (runtime tests)
+ * createParser API tests: parse() throwing behavior, safeParse result
+ * shapes, vocabulary validation, and grammar validation at construction.
  */
 
-import assert from "node:assert";
+import { describe, expect, it } from "vitest";
 import {
-  defineNode,
-  number,
-  lhs,
-  rhs,
-  expr,
+  StringentParseError,
   constVal,
   createParser,
-  ident,
+  defineNode,
+  fromBinding,
+  lhs,
+  number,
+  rhs,
+  sameAs,
 } from "./index.js";
-import type { Parse, ComputeGrammar, Context } from "./index.js";
-import type { NumberNode } from "./primitive/index.js";
+import { fixtureParser as parser } from "./__fixtures__/grammar.js";
 
-// AST node type with named bindings
-interface AddNode<TLeft, TRight> {
-  readonly node: "add";
-  readonly outputSchema: "number";
-  readonly left: TLeft;
-  readonly right: TRight;
-}
-
-interface MulNode<TLeft, TRight> {
-  readonly node: "mul";
-  readonly outputSchema: "number";
-  readonly left: TLeft;
-  readonly right: TRight;
-}
-
-// =============================================================================
-// Type Assertion Helpers
-// =============================================================================
-
-type AssertEqual<T, Expected> = T extends Expected
-  ? Expected extends T
-    ? true
-    : false
-  : false;
-
-// =============================================================================
-// Grammar Definition
-// =============================================================================
-
-const identifier = defineNode({
-  name: "ident",
-  pattern: [ident()],
-  precedence: "atom",
-  resultType: "unknown",
-});
-
-const numberLit = defineNode({
-  name: "number",
+const num = defineNode({
+  name: "n",
   pattern: [number()],
   precedence: "atom",
-  resultType: "number",
 });
 
-const add = defineNode({
-  name: "add",
-  pattern: [lhs("number").as("left"), constVal("+"), rhs("number").as("right")],
-  precedence: 1,
-  resultType: "number",
+describe("parse", () => {
+  it("returns the [ast, \"\"] tuple for valid literals", () => {
+    const [ast, rest] = parser.parse("1+2", {});
+    expect(rest).toBe("");
+    expect(ast).toMatchObject({ node: "add", outputSchema: "number" });
+  });
+
+  it("accepts trailing whitespace and returns it as rest (matching Parse<>)", () => {
+    const [ast, rest] = parser.parse("1+2 ", {});
+    expect(ast).toMatchObject({ node: "add" });
+    expect(rest).toBe(" ");
+  });
+
+  it("throws StringentParseError when the compile-time check is bypassed", () => {
+    expect(() => parser.parse("@invalid" as never, {})).toThrow(StringentParseError);
+    try {
+      parser.parse("1+2 junk" as never, {});
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(StringentParseError);
+      expect((error as StringentParseError).position).toBe(4);
+    }
+  });
 });
 
-const mul = defineNode({
-  name: "mul",
-  pattern: [lhs("number").as("left"), constVal("*"), rhs("number").as("right")],
-  precedence: 2,
-  resultType: "number",
+describe("safeParse", () => {
+  it("accepts dynamic strings", () => {
+    const dynamic: string = "1+2";
+    const result = parser.safeParse(dynamic, {});
+    expect(result.success).toBe(true);
+  });
+
+  it("requires full consumption", () => {
+    const result = parser.safeParse("1+2 extra", {});
+    expect(result.success).toBe(false);
+  });
+
+  it("returns structured errors", () => {
+    const result = parser.safeParse("@invalid", {});
+    expect(result).toMatchObject({
+      success: false,
+      error: {
+        code: "PARSE_ERROR",
+        position: 0,
+        found: '"@invalid"',
+      },
+    });
+  });
 });
 
-// Parentheses use expr() - full grammar reset for delimited context
-const parens = defineNode({
-  name: "parens",
-  pattern: [constVal("("), expr("number").as("inner"), constVal(")")],
-  precedence: "atom",
-  resultType: "number",
+describe("type vocabulary", () => {
+  it("exposes the grammar's type names", () => {
+    expect(parser.typeNames.has("number")).toBe(true);
+    expect(parser.typeNames.has("boolean")).toBe(true);
+    expect(parser.typeNames.has("numbr")).toBe(false);
+  });
+
+  it("rejects schema leaves outside the vocabulary (runtime)", () => {
+    expect(() => parser.safeParse("x", { x: "numbr" } as never)).toThrow(
+      /schema key 'x' has unknown type 'numbr'/
+    );
+  });
+
+  it("names the offending nested key", () => {
+    expect(() =>
+      parser.safeParse("x", { a: { b: "numbr" } } as never)
+    ).toThrow(/schema key 'a\.b'/);
+  });
+
+  it("rejects constraint strings outside the vocabulary at construction", () => {
+    const bad = defineNode({
+      name: "bad",
+      pattern: [lhs("numbr").as("l"), constVal("!"), rhs().as("r")],
+      precedence: 1,
+      resultType: "number",
+    });
+    expect(() => createParser([num, bad] as const)).toThrow(
+      /constraint 'numbr' which matches no known type/
+    );
+  });
+
+  it("extends the vocabulary via the types option", () => {
+    const dateVar = defineNode({
+      name: "later",
+      pattern: [lhs("date").as("l"), constVal(">"), rhs("date").as("r")],
+      precedence: 1,
+      resultType: "boolean",
+    });
+    const p = createParser([num, dateVar] as const, { types: ["date"] });
+    expect(p.typeNames.has("date")).toBe(true);
+    expect(() => p.safeParse("1", { created: "date" })).not.toThrow();
+  });
 });
 
-const nodes = [numberLit, identifier, add, mul, parens] as const;
+describe("grammar validation", () => {
+  it("rejects duplicate node names", () => {
+    expect(() => createParser([num, num] as const)).toThrow(/duplicate node name/);
+  });
 
-// =============================================================================
-// Create Parser
-// =============================================================================
+  it("rejects reserved node names", () => {
+    const reserved = defineNode({
+      name: "literal",
+      pattern: [number()],
+      precedence: "atom",
+    });
+    expect(() => createParser([reserved] as const)).toThrow(/reserved/);
+  });
 
-const parser = createParser(nodes);
+  it("rejects negative and fractional precedence", () => {
+    const make = (precedence: number) =>
+      defineNode({
+        name: "bad",
+        pattern: [lhs().as("l"), constVal("!"), rhs().as("r")],
+        precedence,
+        resultType: "number",
+      });
+    expect(() => createParser([num, make(-1)] as const)).toThrow(
+      /non-negative safe integer/
+    );
+    expect(() => createParser([num, make(1.5)] as const)).toThrow(
+      /non-negative safe integer/
+    );
+  });
 
-// =============================================================================
-// Type-Level Tests (compile-time)
-// =============================================================================
+  it("rejects mixed associativity within one precedence level", () => {
+    const left = defineNode({
+      name: "left",
+      pattern: [lhs().as("l"), constVal("+"), rhs().as("r")],
+      precedence: 1,
+      associativity: "left",
+      resultType: "number",
+    });
+    const right = defineNode({
+      name: "right",
+      pattern: [lhs().as("l"), constVal("-"), rhs().as("r")],
+      precedence: 1,
+      associativity: "right",
+      resultType: "number",
+    });
+    expect(() => createParser([num, left, right] as const)).toThrow(
+      /mix left and right associativity/
+    );
+  });
 
-type Grammar = ComputeGrammar<typeof nodes>;
-type Ctx = Context<{}>;
+  it("rejects left-associative nodes whose pattern does not start with lhs", () => {
+    const bad = defineNode({
+      name: "bad",
+      pattern: [constVal("-"), rhs().as("operand")],
+      precedence: 1,
+      associativity: "left",
+      resultType: "number",
+    });
+    expect(() => createParser([num, bad] as const)).toThrow(
+      /must have a pattern starting with lhs/
+    );
+  });
 
-// Test T1: Parse simple number
-type R1 = Parse<Grammar, "42", Ctx>;
-type T1 = AssertEqual<R1, [NumberNode<"42">, ""]>;
-const _t1: T1 = true;
+  it("rejects rhs/expr at position 0 (left recursion → stack overflow)", () => {
+    const postfix = defineNode({
+      name: "postfix",
+      pattern: [rhs("number").as("v"), constVal("!")],
+      precedence: 1,
+      resultType: "number",
+    });
+    expect(() => createParser([num, postfix] as const)).toThrow(
+      /would recurse into the same level forever/
+    );
+  });
 
-// Test T2: Parse simple addition
-type R2 = Parse<Grammar, "1+2", Ctx>;
-type T2 = AssertEqual<R2, [AddNode<NumberNode<"1">, NumberNode<"2">>, ""]>;
-const _t2: T2 = true;
+  it("rejects atoms starting with expression elements", () => {
+    const bad = defineNode({
+      name: "bad",
+      pattern: [lhs().as("v")],
+      precedence: "atom",
+      resultType: "number",
+    });
+    expect(() => createParser([num, bad] as const)).toThrow(
+      /atoms must start with a consuming element/
+    );
+  });
 
-// Test T3: Parse with precedence (mul binds tighter)
-type R3 = Parse<Grammar, "1+2*3", Ctx>;
-type ExpectedR3 = [
-  AddNode<NumberNode<"1">, MulNode<NumberNode<"2">, NumberNode<"3">>>,
-  ""
-];
-type T3 = AssertEqual<R3, ExpectedR3>;
-const _t3: T3 = true;
+  it("rejects empty constVal", () => {
+    const bad = defineNode({
+      name: "bad",
+      pattern: [lhs().as("l"), constVal(""), rhs().as("r")],
+      precedence: 1,
+      resultType: "number",
+    });
+    expect(() => createParser([num, bad] as const)).toThrow(/constVal\(""\)/);
+  });
 
-// Test T4: No match
-type R4 = Parse<Grammar, "@invalid", Ctx>;
-type T4 = AssertEqual<R4, []>;
-const _t4: T4 = true;
+  it("rejects sameAs references to unknown or later bindings", () => {
+    const bad = defineNode({
+      name: "bad",
+      pattern: [lhs(sameAs("nope") as never).as("l"), constVal("!"), rhs().as("r")],
+      precedence: 1,
+      resultType: "number",
+    });
+    expect(() => createParser([num, bad] as const)).toThrow(/sameAs/);
 
-// =============================================================================
-// Runtime Tests
-// =============================================================================
+    const forward = defineNode({
+      name: "fwd",
+      pattern: [lhs().as("l"), constVal("!"), rhs(sameAs("later")).as("later")],
+      precedence: 1,
+      resultType: "number",
+    });
+    expect(() => createParser([num, forward] as const)).toThrow(
+      /no earlier element is named 'later'/
+    );
+  });
 
-console.log("=== createParser Runtime Tests ===");
+  it("rejects binding names that collide with AST structure", () => {
+    for (const name of ["node", "outputSchema", "__proto__"] as const) {
+      const bad = defineNode({
+        name: "bad",
+        pattern: [lhs().as(name), constVal("!"), rhs().as("r")],
+        precedence: 1,
+        resultType: "number",
+      });
+      expect(() => createParser([num, bad] as const)).toThrow(
+        /would collide with the AST node structure/
+      );
+    }
+  });
 
-// Test R1: Parse simple number
-{
-  const result = parser.parse("42", {});
-  assert.ok(result.length === 2, "Should match");
-  assert.strictEqual((result[0] as { node: string }).node, "literal");
-  assert.strictEqual((result[0] as { raw: string }).raw, "42");
-  assert.strictEqual(result[1], "");
-  console.log("  R1: Parse '42' → OK");
-}
+  it("rejects duplicate binding names within one pattern", () => {
+    const bad = defineNode({
+      name: "bad",
+      pattern: [lhs().as("v"), constVal("#"), rhs().as("v")],
+      precedence: 1,
+      resultType: "number",
+    });
+    expect(() => createParser([num, bad] as const)).toThrow(
+      /binds the name 'v' twice/
+    );
+  });
 
-// Test R2: Parse simple addition
-{
-  const result = parser.parse("1+2", {});
-  assert.ok(result.length === 2, "Should match");
-  const node = result[0] as unknown as { node: string };
-  assert.strictEqual(node.node, "add"); // node property now contains the node name
-  assert.strictEqual(result[1], "");
-  console.log("  R2: Parse '1+2' → OK");
-}
+  it("rejects sameAs/fromBinding targeting const elements", () => {
+    const sameAsConst = defineNode({
+      name: "bad1",
+      pattern: [lhs().as("l"), constVal("!").as("b"), rhs(sameAs("b")).as("r")],
+      precedence: 1,
+      resultType: "number",
+    });
+    expect(() => createParser([num, sameAsConst] as const)).toThrow(
+      /sameAs\('b'\) on a const element/
+    );
 
-// Test R3: Parse with precedence
-{
-  const result = parser.parse("1+2*x", { x: "number" });
-  //
-  assert.ok(result.length === 2, "Should match");
-  const node = result[0] as unknown as {
-    node: string;
-    left: unknown;
-    right: unknown;
-  };
-  assert.strictEqual(node.node, "add");
-  // Right should be mul(2, 3)
-  const right = node.right as { node: string };
-  assert.strictEqual(right.node, "mul");
-  console.log("  R3: Parse '1+2*3' → OK (correct precedence)");
-}
+    const fromConst = defineNode({
+      name: "bad2",
+      pattern: [constVal("!").as("b")],
+      precedence: "atom",
+      resultType: fromBinding("b"),
+    });
+    expect(() => createParser([num, fromConst] as const)).toThrow(
+      /fromBinding\('b'\) on a const element/
+    );
+  });
 
-// Test R4: Parse with remaining input
-{
-  // @ts-expect-error - ValidatedInput requires full parsing, but we intentionally test partial parsing here
-  const result = parser.parse("42 rest", {});
-  assert.ok(result.length === 2, "Should match");
-  assert.strictEqual(result[1], " rest");
-  console.log("  R4: Parse '42 rest' → OK (remaining: ' rest')");
-}
+  it("rejects empty constraint lists", () => {
+    const bad = defineNode({
+      name: "bad",
+      pattern: [lhs([]).as("l"), constVal("!"), rhs().as("r")],
+      precedence: 1,
+      resultType: "number",
+    });
+    expect(() => createParser([num, bad] as const)).toThrow(
+      /empty constraint list/
+    );
+  });
 
-// Test R5: No match
-{
-  // @ts-expect-error
-  const result = parser.parse("@invalid", {});
-  assert.strictEqual(result.length, 0, "Should not match");
-  console.log("  R5: Parse '@invalid' → OK (no match)");
-}
+  it("rejects fromBinding references to unknown bindings", () => {
+    const bad = defineNode({
+      name: "bad",
+      pattern: [lhs().as("l"), constVal("!"), rhs().as("r")],
+      precedence: 1,
+      resultType: fromBinding("nope"),
+    });
+    expect(() => createParser([num, bad] as const)).toThrow(
+      /fromBinding\('nope'\)/
+    );
+  });
 
-// Test R6: Chained addition (right-associative)
-{
-  const result = parser.parse("1+2+x", { x: "number" });
-  assert.ok(result.length === 2, "Should match");
-  const node = result[0] as unknown as {
-    node: string;
-    left: unknown;
-    right: unknown;
-  };
-  assert.strictEqual(node.node, "add");
-  // Right should be add(2, 3) due to right-recursion
-  const right = node.right as { node: string };
-  assert.strictEqual(right.node, "add");
-  console.log("  R6: Parse '1+2+3' → OK (right-associative)");
-}
+  it("requires resultType for non-passthrough patterns", () => {
+    const bad = defineNode({
+      name: "bad",
+      pattern: [number().as("n")],
+      precedence: "atom",
+    });
+    expect(() => createParser([bad] as const)).toThrow(/needs a resultType/);
+  });
 
-// Test R7: Precedence with mul on right (2+1*3 → add(2, mul(1,3)))
-{
-  const result = parser.parse("2+1*3", {});
-  assert.ok(result.length === 2, "Should match");
-  const node = result[0] as unknown as {
-    node: string;
-    left: unknown;
-    right: unknown;
-  };
-  assert.strictEqual(node.node, "add");
-  // Left should be 2
-  const left = node.left as { node: string; raw: string };
-  assert.strictEqual(left.node, "literal");
-  assert.strictEqual(left.raw, "2");
-  // Right should be mul(1, 3)
-  const right = node.right as { node: string };
-  assert.strictEqual(right.node, "mul");
-  console.log("  R7: Parse '2+1*3' → OK (mul binds tighter)");
-}
-
-// Test R8: Parentheses (expr() resets to full grammar)
-{
-  const result = parser.parse("(1+2)*3", {});
-  assert.ok(result.length === 2, "Should match");
-  const node = result[0] as unknown as {
-    node: string;
-    left: unknown;
-    right: unknown;
-  };
-  assert.strictEqual(node.node, "mul");
-  // Left should be the parens node containing add(1, 2)
-  const left = node.left as { node: string; inner: unknown };
-  assert.strictEqual(left.node, "parens");
-  console.log("  R8: Parse '(1+2)*3' → OK (parens reset precedence)");
-}
-
-// Test R9: Nested parens
-{
-  const result = parser.parse("((1+2))", {});
-  assert.ok(result.length === 2, "Should match");
-  const node = result[0] as unknown as { node: string };
-  assert.strictEqual(node.node, "parens");
-  console.log("  R9: Parse '((1+2))' → OK (nested parens)");
-}
-
-console.log("");
-console.log("========================================");
-console.log("All createParser tests passed!");
-console.log("========================================");
-
-export {};
+  it("allows const-only atoms with a declared resultType", () => {
+    const boolTrue = defineNode({
+      name: "true",
+      pattern: [constVal("true")],
+      precedence: "atom",
+      resultType: "boolean",
+      eval: () => true,
+    });
+    const p = createParser([num, boolTrue] as const);
+    const result = p.safeParse("true", {});
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.ast).toEqual({ node: "true", outputSchema: "boolean" });
+      expect(p.evaluateAst(result.ast, {})).toBe(true);
+    }
+  });
+});

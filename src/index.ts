@@ -11,38 +11,71 @@
 // Main API: defineNode & createParser
 // =============================================================================
 
-export { defineNode, number, string, ident, constVal, lhs, rhs, expr } from "./schema/index.js";
+export {
+  defineNode,
+  number,
+  string,
+  ident,
+  path,
+  constVal,
+  lhs,
+  rhs,
+  expr,
+  sameAs,
+  fromBinding,
+} from "./schema/index.js";
 export type {
   NodeSchema,
   PatternSchema,
   NumberSchema,
   StringSchema,
   IdentSchema,
+  PathSchema,
   ConstSchema,
   ExprSchema,
   ExprRole,
   Precedence,
-  ConfigureFn,
+  Associativity,
+  ConstraintSpec,
+  ResultSpec,
+  SameAsRef,
+  FromBindingRef,
   EvalFn,
+  Thunked,
   SchemaToType,
   InferBindings,
   InferEvaluatedBindings,
 } from "./schema/index.js";
 
 export { createParser } from "./createParser.js";
-export type { Parser } from "./createParser.js";
+export type {
+  Parser,
+  SafeParseResult,
+  AnyAstNode,
+  InferValues,
+  VocabOf,
+  SchemaShapeOf,
+} from "./createParser.js";
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+export { StringentParseError } from "./runtime/diagnostics.js";
+export type { StringentError } from "./runtime/diagnostics.js";
+export { EvaluationError } from "./runtime/evaluate.js";
 
 // =============================================================================
 // Types: Parse, Grammar, Context
 // =============================================================================
 
-export type { Parse, BinaryNode, ParseError, TypeMismatchError, NoMatchError } from "./parse/index.js";
+export type { Parse, BinaryNode, ResolvePath } from "./parse/index.js";
 export type { ComputeGrammar, Grammar } from "./grammar/index.js";
-export type { Context, EmptyContext } from "./context.js";
+export type { Context, EmptyContext, SchemaShape } from "./context.js";
 export { emptyContext } from "./context.js";
 
 // =============================================================================
-// Primitive Node Types
+// AST Node Types
 // =============================================================================
 
 export type {
@@ -51,24 +84,6 @@ export type {
   NumberNode,
   StringNode,
   IdentNode,
+  PathNode,
   ConstNode,
 } from "./primitive/index.js";
-
-// =============================================================================
-// Legacy Primitives (for backwards compatibility)
-// =============================================================================
-
-export {
-  Number,
-  String,
-  Ident,
-  Const,
-  type IParser,
-  type ParseResult,
-} from "./primitive/index.js";
-
-// =============================================================================
-// Legacy Combinators (for backwards compatibility)
-// =============================================================================
-
-export { Union, Tuple, Optional, Many } from "./combinators/index.js";
