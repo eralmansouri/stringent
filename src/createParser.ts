@@ -234,6 +234,11 @@ function checkConstraintVocabulary(
   const spec = element.constraint;
   if (spec === undefined || isSameAs(spec)) return;
   const names = typeof spec === "string" ? [spec] : spec;
+  if (names.length === 0) {
+    throw new Error(
+      `stringent: node '${nodeName}' has an empty constraint list — the slot could never match anything`
+    );
+  }
   for (const name of names) {
     if (!vocab.has(name)) {
       throw new Error(
@@ -242,6 +247,10 @@ function checkConstraintVocabulary(
     }
   }
 }
+
+/** Binding names that would collide with AST node structure or JS proto
+ *  setter semantics */
+const RESERVED_BINDING_NAMES = new Set(["node", "outputSchema", "__proto__"]);
 
 function validateNodes(
   nodes: readonly NodeSchema[],
@@ -288,10 +297,10 @@ function validateNodes(
     }
 
     // --- Per-element checks -----------------------------------------------
-    const namedSoFar = new Set<string>();
-    const allNamed = new Set<string>();
+    const namedSoFar = new Map<string, PatternSchema>();
+    const allNamed = new Map<string, PatternSchema>();
     for (const element of node.pattern) {
-      if (isNamed(element)) allNamed.add(element.name);
+      if (isNamed(element)) allNamed.set(element.name, element);
     }
     let hasNamed = false;
 
@@ -304,14 +313,32 @@ function validateNodes(
       if (element.kind === "expr") {
         checkConstraintVocabulary(node.name, element as ExprSchema, vocab);
         const spec = (element as ExprSchema).constraint;
-        if (isSameAs(spec) && !namedSoFar.has(spec.binding)) {
-          throw new Error(
-            `stringent: node '${node.name}' uses sameAs('${spec.binding}') but no earlier element is named '${spec.binding}'`
-          );
+        if (isSameAs(spec)) {
+          const target = namedSoFar.get(spec.binding);
+          if (target === undefined) {
+            throw new Error(
+              `stringent: node '${node.name}' uses sameAs('${spec.binding}') but no earlier element is named '${spec.binding}'`
+            );
+          }
+          if (target.kind === "const") {
+            throw new Error(
+              `stringent: node '${node.name}' uses sameAs('${spec.binding}') on a const element — const bindings carry their matched text as their type, which no expression can produce`
+            );
+          }
         }
       }
       if (isNamed(element)) {
-        namedSoFar.add(element.name);
+        if (RESERVED_BINDING_NAMES.has(element.name)) {
+          throw new Error(
+            `stringent: node '${node.name}' uses the binding name '${element.name}', which would collide with the AST node structure`
+          );
+        }
+        if (namedSoFar.has(element.name)) {
+          throw new Error(
+            `stringent: node '${node.name}' binds the name '${element.name}' twice — binding names must be unique within a pattern`
+          );
+        }
+        namedSoFar.set(element.name, element);
         hasNamed = true;
       }
     }
@@ -320,10 +347,18 @@ function validateNodes(
     const isPassthrough =
       !hasNamed && node.pattern.length === 1 && node.pattern[0].kind !== "const";
     const resultSpec = node.resultType;
-    if (isFromBinding(resultSpec) && !allNamed.has(resultSpec.binding)) {
-      throw new Error(
-        `stringent: node '${node.name}' uses fromBinding('${resultSpec.binding}') but no element is named '${resultSpec.binding}'`
-      );
+    if (isFromBinding(resultSpec)) {
+      const target = allNamed.get(resultSpec.binding);
+      if (target === undefined) {
+        throw new Error(
+          `stringent: node '${node.name}' uses fromBinding('${resultSpec.binding}') but no element is named '${resultSpec.binding}'`
+        );
+      }
+      if (target.kind === "const") {
+        throw new Error(
+          `stringent: node '${node.name}' uses fromBinding('${resultSpec.binding}') on a const element — const bindings carry their matched text as their type, which would escape the type vocabulary`
+        );
+      }
     }
     if (!isPassthrough && resultSpec === undefined) {
       throw new Error(
@@ -448,7 +483,7 @@ export function createParser<
   function safeParseImpl(
     input: string,
     schema: SchemaShape
-  ): SafeParseResult<AnyAstNode> {
+  ): SafeParseResult<AnyAstNode> & { rest?: string } {
     validateSchema(schema, vocab);
     const context: Context = { data: schema };
     const { result, diagnostics } = parseWithDiagnostics(nodes, input, context);
@@ -462,7 +497,7 @@ export function createParser<
         error: toUnexpectedInputError(diagnostics, rest),
       };
     }
-    return { success: true, ast: ast as AnyAstNode };
+    return { success: true, ast: ast as AnyAstNode, rest };
   }
 
   return {
@@ -471,12 +506,14 @@ export function createParser<
       if (!result.success) {
         throw new StringentParseError(result.error);
       }
-      // Mirror the type-level [node, rest] tuple shape
-      return [result.ast, ""] as never;
+      // Mirror the type-level [node, rest] tuple — rest is "" or trailing
+      // whitespace, exactly as Parse<> computes it
+      return [result.ast, result.rest ?? ""] as never;
     },
 
     safeParse(input: string, schema: SchemaShape) {
-      return safeParseImpl(input, schema) as never;
+      const { rest: _rest, ...result } = safeParseImpl(input, schema);
+      return result as never;
     },
 
     evaluate(input: string, schema: SchemaShape, values: EvaluationValues) {

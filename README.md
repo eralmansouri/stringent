@@ -249,9 +249,11 @@ their compile-time validation was bypassed with a cast. `evaluateAst` throws
 - **Precedence** must be `"atom"` or a non-negative safe integer.
 - **Dynamic strings** are rejected by `parse()` at compile time — use `safeParse()`.
 - **Type-level input length**: left-associative chains use a tail-recursive
-  fold and comfortably handle 100+ terms. Right-associative chains and deeply
-  nested expressions hit TypeScript's instantiation-depth limit around a few
-  dozen tokens. Runtime parsing (`safeParse`) has no such limit.
+  fold and comfortably handle 100+ terms. Right-associative chains and
+  `expr()` nesting (parens, ternary branches) pay instantiation depth per
+  precedence level — on the 6-level test grammar that's ~14 right-assoc
+  terms and ~3 nesting levels before TS2589 (fewer levels stretch this).
+  Runtime parsing (`safeParse`) has no such limit.
 - **Whitespace** is skipped between tokens, but not allowed inside paths around `.`.
 
 ## Development

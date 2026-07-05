@@ -62,9 +62,13 @@ Validation happens at three layers:
    schema), covering dynamically-built schemas. Schema errors throw — they
    are programmer errors, distinct from input errors, which never throw.
 
-`"unknown"` is the type of unresolved identifiers/paths. Constrained slots
-reject it, which is how "identifier not in schema" surfaces as a
-`TYPE_MISMATCH` with the offending name.
+`"unknown"` is the type of unresolved identifiers/paths. Name-constrained
+slots reject it, which is how "identifier not in schema" surfaces as a
+`TYPE_MISMATCH` with the offending name. Note that `sameAs` compares parsed
+types, so two *unknown* operands agree: `zz == yy` with an empty schema
+parses (both sides are `"unknown"`) and only fails at evaluation. If a
+grammar wants unresolved identifiers rejected structurally, it should
+constrain slots with type names rather than relying on `sameAs` alone.
 
 ### Constraints (operand slots)
 
@@ -149,9 +153,13 @@ inherited. Until then: type names are opaque tags, related only by equality.
   precedence; mixed associativity in a level; left patterns not shaped
   `[lhs, ...rest]`; `rhs`/`expr` at position 0 (guaranteed infinite
   recursion); atoms starting with expression elements; `constVal("")`;
-  `sameAs` referencing a missing/later binding; `fromBinding` referencing a
-  missing binding; missing `resultType` where one is required; constraint
-  strings outside the vocabulary.
+  empty constraint lists (`lhs([])`); binding names that collide with AST
+  structure (`node`, `outputSchema`, `__proto__`) or repeat within a
+  pattern; `sameAs` referencing a missing/later/const binding;
+  `fromBinding` referencing a missing/const binding (const bindings carry
+  their matched text as their type, which would escape the vocabulary);
+  missing `resultType` where one is required; constraint strings outside
+  the vocabulary.
 
 ## Evaluation model
 
@@ -190,6 +198,14 @@ the token story wins. `parse()`/`evaluate()` throw `StringentParseError`
 (same fields) when their compile-time guarantee is bypassed; the evaluator
 throws `EvaluationError` for undefined identifiers/paths and missing `eval`.
 
+Known ranking weakness (tracked): unclosed delimiters (`"(1"`, `"(1))"`)
+can report a speculative constraint mismatch (a low-precedence rule probing
+its condition) instead of the missing/stray delimiter, because the mismatch
+span ties the delimiter failure at end-of-input. A proper fix needs a
+credibility signal on mismatches (e.g. only prefer one whose pattern also
+matched its following token); until then delimiter errors may read as type
+errors.
+
 ## Dual-engine parity
 
 The two engines are hand-mirrored, function-for-function
@@ -205,10 +221,22 @@ Known engine-behavior notes:
   conditional types — matching them as required silently never matches
   (this caused two real bugs; see `NormalizeConstraint` and
   `ResultSchemaOf`).
-- Type-level input length: left-associative chains handle 100+ terms;
-  right-associative/deeply-nested expressions recurse per level and hit
-  TS2589 around a few dozen tokens. The runtime engine has no such limit.
-- `parse()` accepts trailing whitespace, exactly like `safeParse`.
+- Type-level input length: left-associative chains handle 100+ terms
+  (tail-recursive fold). Everything that recurses per level pays
+  instantiation depth proportional to the level count: on the 6-level test
+  grammar, right-associative chains handle ~14 terms and `expr()` nesting
+  (parens, ternary branches) ~3 levels deep before TS2589. Fewer precedence
+  levels stretch these limits; the runtime engine has none. Canaries in
+  `types.typetest.ts` pin the measured floor.
+- `parse()` accepts trailing whitespace, exactly like `safeParse`, and
+  returns it in the tuple's rest slot (matching `Parse<>`).
+- `parse()`'s compile-time guarantee assumes literal schema types. A
+  schema typed as a wide `Record<string, "number">` makes the type engine
+  resolve every identifier optimistically, so an invalid literal can
+  compile and then throw `StringentParseError` at runtime — an inherent
+  structural-typing limit. Similarly, a `__proto__` key in a schema object
+  literal is visible to the type engine but creates no own property at
+  runtime. Use literal schemas with `parse()`; use `safeParse()` otherwise.
 
 ## Limits & non-goals (current)
 

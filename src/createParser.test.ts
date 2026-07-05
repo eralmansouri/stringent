@@ -30,9 +30,10 @@ describe("parse", () => {
     expect(ast).toMatchObject({ node: "add", outputSchema: "number" });
   });
 
-  it("accepts trailing whitespace (matching safeParse)", () => {
-    const [ast] = parser.parse("1+2 ", {});
+  it("accepts trailing whitespace and returns it as rest (matching Parse<>)", () => {
+    const [ast, rest] = parser.parse("1+2 ", {});
     expect(ast).toMatchObject({ node: "add" });
+    expect(rest).toBe(" ");
   });
 
   it("throws StringentParseError when the compile-time check is bypassed", () => {
@@ -230,6 +231,66 @@ describe("grammar validation", () => {
     });
     expect(() => createParser([num, forward] as const)).toThrow(
       /no earlier element is named 'later'/
+    );
+  });
+
+  it("rejects binding names that collide with AST structure", () => {
+    for (const name of ["node", "outputSchema", "__proto__"] as const) {
+      const bad = defineNode({
+        name: "bad",
+        pattern: [lhs().as(name), constVal("!"), rhs().as("r")],
+        precedence: 1,
+        resultType: "number",
+      });
+      expect(() => createParser([num, bad] as const)).toThrow(
+        /would collide with the AST node structure/
+      );
+    }
+  });
+
+  it("rejects duplicate binding names within one pattern", () => {
+    const bad = defineNode({
+      name: "bad",
+      pattern: [lhs().as("v"), constVal("#"), rhs().as("v")],
+      precedence: 1,
+      resultType: "number",
+    });
+    expect(() => createParser([num, bad] as const)).toThrow(
+      /binds the name 'v' twice/
+    );
+  });
+
+  it("rejects sameAs/fromBinding targeting const elements", () => {
+    const sameAsConst = defineNode({
+      name: "bad1",
+      pattern: [lhs().as("l"), constVal("!").as("b"), rhs(sameAs("b")).as("r")],
+      precedence: 1,
+      resultType: "number",
+    });
+    expect(() => createParser([num, sameAsConst] as const)).toThrow(
+      /sameAs\('b'\) on a const element/
+    );
+
+    const fromConst = defineNode({
+      name: "bad2",
+      pattern: [constVal("!").as("b")],
+      precedence: "atom",
+      resultType: fromBinding("b"),
+    });
+    expect(() => createParser([num, fromConst] as const)).toThrow(
+      /fromBinding\('b'\) on a const element/
+    );
+  });
+
+  it("rejects empty constraint lists", () => {
+    const bad = defineNode({
+      name: "bad",
+      pattern: [lhs([]).as("l"), constVal("!"), rhs().as("r")],
+      precedence: 1,
+      resultType: "number",
+    });
+    expect(() => createParser([num, bad] as const)).toThrow(
+      /empty constraint list/
     );
   });
 

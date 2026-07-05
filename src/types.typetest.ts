@@ -383,4 +383,18 @@ type CanaryCheck = Canary extends [{ node: "add"; outputSchema: "number" }, ""]
   : false;
 const _canary: CanaryCheck = true;
 
+// Nesting canaries: each expr() reset (parens) costs instantiation depth
+// proportional to the level count, so this 6-level grammar handles ~3
+// nested parens; right-assoc pow chains handle ~10 terms. These pin the
+// measured floor so engine changes that regress depth fail loudly.
+type NestCanary = Parse<G, "(((1)))", EmptyCtx>;
+const _nest: NestCanary extends [{ node: "parens"; outputSchema: "number" }, ""]
+  ? true
+  : false = true;
+
+type PowCanary = Parse<G, "1^2^3^4^5^6^7^8^9^10", EmptyCtx>;
+const _pow: PowCanary extends [{ node: "pow"; outputSchema: "number" }, ""]
+  ? true
+  : false = true;
+
 export {};
