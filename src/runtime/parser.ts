@@ -8,7 +8,9 @@
  *   3. Base case: try atoms (last level)
  *
  * Left-associative levels are parsed with an iterative fold, mirroring
- * ParseLeftLevel in src/parse/index.ts.
+ * ParseLeftLevel in src/parse/index.ts. Constraints resolve against
+ * already-parsed siblings (sameAs) and result types may derive from
+ * operands (fromBinding).
  *
  * A mutable Diagnostics object is threaded through as a trailing parameter;
  * it records the furthest failure for error reporting and does not affect
@@ -20,12 +22,14 @@ import { Token } from "@sinclair/parsebox";
 import type { Context } from "../context.js";
 import type { ComputeGrammar, Grammar } from "../grammar/index.js";
 import type { Parse } from "../parse/index.js";
-import type {
-  NodeSchema,
-  PatternSchema,
-  StringSchema,
-  ConstSchema,
-  ExprSchema,
+import {
+  type NodeSchema,
+  type PatternSchema,
+  type StringSchema,
+  type ConstSchema,
+  type ExprSchema,
+  isFromBinding,
+  isSameAs,
 } from "../schema/index.js";
 
 import type {
@@ -85,9 +89,10 @@ function parseString(
   ];
 }
 
-/** Resolve an identifier's type from (possibly nested) schema data */
+/** Resolve an identifier's type from (possibly nested) schema data.
+ *  Own properties only — prototype members must not leak into the schema. */
 function resolveIdent(data: Record<string, unknown>, name: string): string {
-  const value = name in data ? data[name] : undefined;
+  const value = Object.hasOwn(data, name) ? data[name] : undefined;
   return typeof value === "string" ? value : "unknown";
 }
 
@@ -112,14 +117,15 @@ function parseIdent(
   ];
 }
 
-/** Resolve a dotted path against (possibly nested) schema data */
+/** Resolve a dotted path against (possibly nested) schema data.
+ *  Own properties only — prototype members must not leak into the schema. */
 export function resolvePath(data: unknown, segments: readonly string[]): string {
   let current: unknown = data;
   for (const segment of segments) {
     if (
       current !== null &&
       typeof current === "object" &&
-      segment in (current as object)
+      Object.hasOwn(current, segment)
     ) {
       current = (current as Record<string, unknown>)[segment];
     } else {
@@ -231,6 +237,65 @@ export function buildGrammar(nodes: readonly NodeSchema[]): Grammar {
 }
 
 // =============================================================================
+// Constraint Resolution
+// =============================================================================
+
+interface ResolvedConstraint {
+  /** undefined = unconstrained; string = exact; string[] = any-of */
+  readonly accepted: string | readonly string[] | undefined;
+  /** Human description for diagnostics */
+  readonly describe: string | undefined;
+}
+
+const UNCONSTRAINED: ResolvedConstraint = {
+  accepted: undefined,
+  describe: undefined,
+};
+
+/**
+ * Resolve an element's constraint against the already-parsed siblings.
+ * Mirrors ResolveSpec in src/parse/index.ts.
+ */
+function resolveConstraintSpec(
+  element: PatternSchema,
+  done: readonly PatternSchema[],
+  children: readonly ASTNode[]
+): ResolvedConstraint {
+  const spec = (element as ExprSchema).constraint;
+  if (spec === undefined) return UNCONSTRAINED;
+  if (typeof spec === "string") return { accepted: spec, describe: spec };
+  if (isSameAs(spec)) {
+    let resolved = "unknown";
+    for (let i = 0; i < done.length; i++) {
+      const el = done[i] as { __named?: boolean; name?: string };
+      if (el.__named === true && el.name === spec.binding) {
+        const out = (children[i] as { outputSchema?: unknown }).outputSchema;
+        resolved = typeof out === "string" ? out : "unknown";
+        break;
+      }
+    }
+    return {
+      accepted: resolved,
+      describe: `${resolved} (same type as '${spec.binding}')`,
+    };
+  }
+  // readonly string[]
+  return { accepted: spec, describe: spec.join(" | ") };
+}
+
+/** Check an outputSchema against a resolved constraint (exact-name semantics).
+ *  Mirrors CheckConstraint in src/parse/index.ts. */
+function constraintAccepts(
+  constraint: ResolvedConstraint,
+  outputSchema: string | undefined
+): boolean {
+  const accepted = constraint.accepted;
+  if (accepted === undefined) return true;
+  if (typeof accepted === "string") return outputSchema === accepted;
+  return outputSchema !== undefined && accepted.includes(outputSchema);
+}
+
+// =============================================================================
 // Pattern Element Parsing
 // =============================================================================
 
@@ -274,12 +339,13 @@ function parseElementWithLevel(
   currentLevels: Grammar,
   nextLevels: Grammar,
   fullGrammar: Grammar,
+  done: readonly PatternSchema[],
+  children: readonly ASTNode[],
   diag: Diagnostics
 ): ParseResult {
   if (element.kind === "expr") {
-    const exprElement = element as ExprSchema;
-    const constraint = exprElement.constraint;
-    const role = exprElement.role;
+    const constraint = resolveConstraintSpec(element, done, children);
+    const role = (element as ExprSchema).role;
 
     if (role === "lhs") {
       return parseExprWithConstraint(
@@ -315,6 +381,11 @@ function parseElementWithLevel(
 
 /**
  * Parse a pattern tuple.
+ *
+ * seedDone/seedChildren pre-populate the consumed prefix (used by the
+ * left-fold to make sameAs("left") resolvable inside operator tails).
+ * The returned children INCLUDE the seeded prefix, aligned with the node's
+ * full pattern.
  */
 function parsePatternTuple(
   pattern: readonly PatternSchema[],
@@ -323,10 +394,13 @@ function parsePatternTuple(
   currentLevels: Grammar,
   nextLevels: Grammar,
   fullGrammar: Grammar,
-  diag: Diagnostics
+  diag: Diagnostics,
+  seedDone: readonly PatternSchema[] = [],
+  seedChildren: readonly ASTNode[] = []
 ): [] | [ASTNode[], string] {
   let remaining = input;
-  const children: ASTNode[] = [];
+  const done: PatternSchema[] = [...seedDone];
+  const children: ASTNode[] = [...seedChildren];
 
   for (const element of pattern) {
     const result = parseElementWithLevel(
@@ -336,9 +410,12 @@ function parsePatternTuple(
       currentLevels,
       nextLevels,
       fullGrammar,
+      done,
+      children,
       diag
     );
     if (result.length === 0) return [];
+    done.push(element);
     children.push(result[0]);
     remaining = result[1];
   }
@@ -352,7 +429,7 @@ function parsePatternTuple(
  */
 function extractBindings(
   pattern: readonly PatternSchema[],
-  children: ASTNode[]
+  children: readonly ASTNode[]
 ): Record<string, ASTNode> {
   const bindings: Record<string, ASTNode> = {};
 
@@ -369,25 +446,47 @@ function extractBindings(
   return bindings;
 }
 
+/** Compute a node's outputSchema: static string, or derived via fromBinding.
+ *  Mirrors ResultSchemaOf in src/parse/index.ts. */
+function resultSchemaOf(
+  nodeSchema: NodeSchema,
+  bindings: Record<string, ASTNode>
+): string {
+  const spec = nodeSchema.resultType;
+  if (isFromBinding(spec)) {
+    const bound = bindings[spec.binding] as { outputSchema?: unknown } | undefined;
+    return bound !== undefined && typeof bound.outputSchema === "string"
+      ? bound.outputSchema
+      : "unknown";
+  }
+  return typeof spec === "string" ? spec : "unknown";
+}
+
 /**
  * Build AST node from parsed children.
  *
- * Uses named bindings from .as() to determine node fields.
- * - Single child without names: passthrough (atom behavior)
- * - Otherwise: bindings become node fields directly
+ * - Single unnamed non-const child → passthrough (atom behavior)
+ * - Otherwise: bindings become node fields, outputSchema from resultSchemaOf
  */
-function buildNodeResult(nodeSchema: NodeSchema, children: ASTNode[]): ASTNode {
+function buildNodeResult(
+  nodeSchema: NodeSchema,
+  children: readonly ASTNode[]
+): ASTNode {
   const bindings = extractBindings(nodeSchema.pattern, children);
 
-  // Single unnamed child → passthrough (atom behavior)
-  if (Object.keys(bindings).length === 0 && children.length === 1) {
+  // Single unnamed non-const child → passthrough (atom behavior)
+  if (
+    Object.keys(bindings).length === 0 &&
+    children.length === 1 &&
+    children[0].node !== "const"
+  ) {
     return children[0];
   }
 
   // Build node with bindings as fields
   return {
     node: nodeSchema.name,
-    outputSchema: nodeSchema.resultType,
+    outputSchema: resultSchemaOf(nodeSchema, bindings),
     ...bindings,
   } as ASTNode;
 }
@@ -424,7 +523,7 @@ function parseExprWithConstraint(
   startLevels: Grammar,
   input: string,
   context: Context,
-  constraint: string | undefined,
+  constraint: ResolvedConstraint,
   fullGrammar: Grammar,
   diag: Diagnostics
 ): ParseResult {
@@ -433,18 +532,17 @@ function parseExprWithConstraint(
 
   const [node, remaining] = result;
 
-  if (constraint !== undefined) {
-    const nodeOutputSchema = (node as { outputSchema?: string }).outputSchema;
-    if (nodeOutputSchema !== constraint) {
-      failConstraint(
-        diag,
-        input,
-        constraint,
-        nodeOutputSchema ?? "unknown",
-        subjectOf(node)
-      );
-      return [];
-    }
+  const outputSchema = (node as { outputSchema?: string }).outputSchema;
+  if (!constraintAccepts(constraint, outputSchema)) {
+    failConstraint(
+      diag,
+      input,
+      remaining,
+      constraint.describe ?? "expression",
+      outputSchema ?? "unknown",
+      subjectOf(node)
+    );
+    return [];
   }
 
   return [node, remaining];
@@ -516,17 +614,26 @@ function parseLeftLevel(
     for (const node of nodes) {
       const [lhsEl, ...tail] = node.pattern;
 
-      // Check the folded-so-far node against the lhs constraint
-      const constraint = (lhsEl as ExprSchema).constraint;
-      if (
-        constraint !== undefined &&
-        (left as { outputSchema?: string }).outputSchema !== constraint
-      ) {
+      // Check the folded-so-far node against the lhs constraint. Record
+      // mismatches so schema typos surface in errors (the seed's start
+      // offset is the operand's position).
+      const constraint = resolveConstraintSpec(lhsEl, [], []);
+      const leftOutput = (left as { outputSchema?: string }).outputSchema;
+      if (!constraintAccepts(constraint, leftOutput)) {
+        failConstraint(
+          diag,
+          input,
+          rest,
+          constraint.describe ?? "expression",
+          leftOutput ?? "unknown",
+          subjectOf(left)
+        );
         continue;
       }
 
       // The tail's rhs elements parse at the NEXT level (currentLevels :=
-      // nextLevels), which is what makes the fold left-associative.
+      // nextLevels), which is what makes the fold left-associative. TAcc/
+      // TDone are seeded with the left operand so sameAs("left") resolves.
       const tailResult = parsePatternTuple(
         tail,
         rest,
@@ -534,7 +641,9 @@ function parseLeftLevel(
         nextLevels,
         nextLevels,
         fullGrammar,
-        diag
+        diag,
+        [lhsEl],
+        [left]
       );
       if (tailResult.length === 0) continue;
 
@@ -542,7 +651,7 @@ function parseLeftLevel(
       // validation makes this unreachable)
       if (tailResult[1] === rest) continue;
 
-      left = buildNodeResult(node, [left, ...tailResult[0]]);
+      left = buildNodeResult(node, tailResult[0]);
       rest = tailResult[1];
       continue outer;
     }

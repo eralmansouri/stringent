@@ -21,6 +21,8 @@ export {
   lhs,
   rhs,
   expr,
+  sameAs,
+  fromBinding,
 } from "./schema/index.js";
 export type {
   NodeSchema,
@@ -34,7 +36,12 @@ export type {
   ExprRole,
   Precedence,
   Associativity,
+  ConstraintSpec,
+  ResultSpec,
+  SameAsRef,
+  FromBindingRef,
   EvalFn,
+  Thunked,
   SchemaToType,
   InferBindings,
   InferEvaluatedBindings,
@@ -46,6 +53,8 @@ export type {
   SafeParseResult,
   AnyAstNode,
   InferValues,
+  VocabOf,
+  SchemaShapeOf,
 } from "./createParser.js";
 
 // =============================================================================

@@ -1,10 +1,18 @@
 /**
  * Evaluator tests: literal/identifier/path lookup, eval() dispatch,
- * left-vs-right associativity correctness, and error cases.
+ * associativity correctness, polymorphic eval, lazy short-circuiting,
+ * security, and error cases.
  */
 
 import { describe, expect, it } from "vitest";
-import { EvaluationError, createParser, defineNode, ident, number, path } from "./index.js";
+import {
+  EvaluationError,
+  createParser,
+  defineNode,
+  ident,
+  number,
+  path,
+} from "./index.js";
 import { fixtureParser as parser, formSchema } from "./__fixtures__/grammar.js";
 
 describe("evaluate", () => {
@@ -27,6 +35,11 @@ describe("evaluate", () => {
     expect(parser.evaluate("(1+2)*3", {}, {})).toBe(9);
   });
 
+  it("evaluates the overloaded add for both types", () => {
+    expect(parser.evaluate("1+2", {}, {})).toBe(3);
+    expect(parser.evaluate("'a'+'b'+'c'", {}, {})).toBe("abc");
+  });
+
   it("looks up identifiers in values", () => {
     expect(parser.evaluate("x+1", { x: "number" }, { x: 41 })).toBe(42);
   });
@@ -47,6 +60,21 @@ describe("evaluate", () => {
     expect(differing).toBe(false);
   });
 
+  it("evaluates ternaries", () => {
+    expect(parser.evaluate("1==2 ? 3 : 4", {}, {})).toBe(4);
+    expect(parser.evaluate("1==1 ? 'yes' : 'no'", {}, {})).toBe("yes");
+    expect(parser.evaluate("1==2 ? 1 : 2==2 ? 4 : 5", {}, {})).toBe(4);
+  });
+
+  it("short-circuits lazy nodes: untaken branches are never evaluated", () => {
+    // x is not in values — evaluating the else branch would throw
+    const result = parser.safeParse("1==1 ? 2 : x", { x: "number" });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(parser.evaluateAst(result.ast, {})).toBe(2);
+    }
+  });
+
   it("evaluates ASTs from safeParse (dynamic input)", () => {
     const dynamic: string = ["4", "*", "2"].join("");
     const result = parser.safeParse(dynamic, {});
@@ -57,8 +85,12 @@ describe("evaluate", () => {
   });
 
   it("throws EvaluationError for undefined identifiers", () => {
-    expect(() => parser.evaluateAst({ node: "identifier", name: "missing", outputSchema: "unknown" }, {}))
-      .toThrow(EvaluationError);
+    expect(() =>
+      parser.evaluateAst(
+        { node: "identifier", name: "missing", outputSchema: "unknown" },
+        {}
+      )
+    ).toThrow(EvaluationError);
   });
 
   it("throws EvaluationError for undefined path segments", () => {
@@ -69,6 +101,30 @@ describe("evaluate", () => {
         "'values.password' is not defined"
       );
     }
+  });
+
+  it("does not leak prototype members through identifier lookup", () => {
+    expect(() =>
+      parser.evaluateAst(
+        { node: "identifier", name: "constructor", outputSchema: "unknown" },
+        {}
+      )
+    ).toThrow("'constructor' is not defined");
+    expect(() =>
+      parser.evaluateAst(
+        { node: "identifier", name: "__proto__", outputSchema: "unknown" },
+        {}
+      )
+    ).toThrow("'__proto__' is not defined");
+  });
+
+  it("does not leak prototype members through path lookup", () => {
+    expect(() =>
+      parser.evaluateAst(
+        { node: "path", path: ["x", "constructor"], outputSchema: "unknown" },
+        { x: {} }
+      )
+    ).toThrow("'x.constructor' is not defined");
   });
 
   it("throws EvaluationError for nodes without eval", () => {
@@ -90,16 +146,14 @@ describe("evaluate", () => {
 
   it("evaluates single-segment ident() elements", () => {
     const numberLit = defineNode({
-      name: "number",
+      name: "n",
       pattern: [number()],
       precedence: "atom",
-      resultType: "number",
     });
     const variable = defineNode({
-      name: "var",
+      name: "v",
       pattern: [ident()],
       precedence: "atom",
-      resultType: "unknown",
     });
     const p = createParser([numberLit, variable] as const);
     const parsed = p.safeParse("y", { y: "number" });

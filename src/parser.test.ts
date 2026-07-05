@@ -1,6 +1,7 @@
 /**
- * Runtime parser tests: AST shapes, precedence, associativity, paths,
- * whitespace rules and diagnostics.
+ * Runtime parser tests: AST shapes, precedence, associativity, polymorphic
+ * nodes (sameAs/fromBinding/union constraints), paths, whitespace rules and
+ * diagnostics.
  *
  * The expected AST objects here are mirrored by type-level assertions in
  * src/types.typetest.ts — together they pin both engines to the same
@@ -133,6 +134,83 @@ describe("associativity", () => {
   });
 });
 
+describe("polymorphic nodes (union + sameAs + fromBinding)", () => {
+  it("add derives its type per parse: numbers", () => {
+    expect(parseOk("1+2")).toEqual(bin("add", "number", num("1"), num("2")));
+  });
+
+  it("add derives its type per parse: string concat", () => {
+    expect(parseOk("'a'+'b'")).toEqual(bin("add", "string", str("a"), str("b")));
+  });
+
+  it("concat folds left-associatively", () => {
+    expect(parseOk("'a'+'b'+'c'")).toEqual(
+      bin("add", "string", bin("add", "string", str("a"), str("b")), str("c"))
+    );
+  });
+
+  it("sameAs rejects mixed operand types: 1+'a'", () => {
+    const error = parseErr("1+'a'");
+    expect(error.code).toBe("TYPE_MISMATCH");
+    expect(error.message).toContain("number");
+    expect(error.message).toContain("string");
+    expect(error.message).toContain("same type as 'left'");
+  });
+
+  it("eq requires same-typed operands", () => {
+    expect(parseOk("1==2")).toEqual(bin("eq", "boolean", num("1"), num("2")));
+    const error = parseErr("1=='a'");
+    expect(error.code).toBe("TYPE_MISMATCH");
+  });
+
+  it("parens are polymorphic via fromBinding", () => {
+    expect(parseOk("('a')")).toEqual({
+      node: "parens",
+      outputSchema: "string",
+      inner: str("a"),
+    });
+  });
+});
+
+describe("ternary", () => {
+  it("parses with derived result type", () => {
+    expect(parseOk("1==2 ? 3 : 4")).toEqual({
+      node: "ternary",
+      outputSchema: "number",
+      cond: bin("eq", "boolean", num("1"), num("2")),
+      then: num("3"),
+      else: num("4"),
+    });
+  });
+
+  it("derives string when branches are strings", () => {
+    const ast = parseOk("1==1 ? 'yes' : 'no'") as { outputSchema: string };
+    expect(ast.outputSchema).toBe("string");
+  });
+
+  it("chains right-associatively in the else branch", () => {
+    const ast = parseOk("1==2 ? 1 : 2==2 ? 4 : 5");
+    expect(ast).toMatchObject({ node: "ternary", else: { node: "ternary" } });
+  });
+
+  it("nests in the then branch via expr() reset", () => {
+    const ast = parseOk("1==1 ? 1==2 ? 10 : 20 : 30");
+    expect(ast).toMatchObject({ node: "ternary", then: { node: "ternary" } });
+  });
+
+  it("rejects a non-boolean condition", () => {
+    const error = parseErr("1 ? 2 : 3");
+    expect(error.code).toBe("UNEXPECTED_INPUT"); // 1 parses, '?' can't continue
+    expect(error.position).toBe(2);
+  });
+
+  it("rejects disagreeing branches (sameAs)", () => {
+    const error = parseErr("1==1 ? 1 : 'no'");
+    expect(error.code).toBe("TYPE_MISMATCH");
+    expect(error.message).toContain("same type as 'then'");
+  });
+});
+
 describe("member access (paths)", () => {
   it("parses dotted paths and resolves nested schemas", () => {
     expect(parseOk("values.password", formSchema)).toEqual(
@@ -163,6 +241,13 @@ describe("member access (paths)", () => {
     expect(parseOk("values", formSchema)).toEqual(pathNode(["values"], "unknown"));
   });
 
+  it("does not traverse the prototype chain during type resolution", () => {
+    expect(parseOk("constructor")).toEqual(pathNode(["constructor"], "unknown"));
+    expect(parseOk("x.constructor", formSchema)).toEqual(
+      pathNode(["x", "constructor"], "unknown")
+    );
+  });
+
   it("space BEFORE a dot ends the path", () => {
     // "values .password" → path is just ["values"], then " .password" is trailing
     const error = parseErr("values .password", formSchema);
@@ -190,12 +275,18 @@ describe("diagnostics", () => {
     expect(error.expected).toContain("number");
   });
 
-  it("reports type mismatches with schema hint", () => {
+  it("reports unknown identifiers in constrained slots", () => {
     const error = parseErr("1+zz");
     expect(error.code).toBe("TYPE_MISMATCH");
     expect(error.position).toBe(2);
     expect(error.message).toContain("'zz' is not in the schema");
     expect(error.message).toContain("number");
+  });
+
+  it("reports unknown identifiers on the LHS of left-assoc operators", () => {
+    const error = parseErr("zz+1");
+    expect(error.code).toBe("TYPE_MISMATCH");
+    expect(error.message).toContain("'zz' is not in the schema");
   });
 
   it("reports trailing input with expected continuations", () => {
@@ -210,17 +301,12 @@ describe("diagnostics", () => {
     expect(error.code).toBe("PARSE_ERROR");
     expect(error.position).toBe(0);
   });
-
-  it("reports constraint mismatch for wrongly-typed operands", () => {
-    const error = parseErr("1+'a'");
-    expect(error.code).toBe("TYPE_MISMATCH");
-    expect(error.message).toContain("number");
-    expect(error.message).toContain("string");
-  });
 });
 
-describe("const node parity", () => {
-  it("parses parens (unnamed const elements are dropped from the AST)", () => {
+describe("const-only atoms", () => {
+  it("build a node carrying the declared resultType (no passthrough)", () => {
+    // Covered in createParser.test.ts with a dedicated grammar; here we
+    // just pin that parens' unnamed consts stay out of the AST.
     expect(parseOk("(1)")).toEqual({
       node: "parens",
       outputSchema: "number",

@@ -5,9 +5,23 @@
  *   - parse(): compile-time validated parsing of string literals
  *   - safeParse(): runtime parsing of dynamic strings with rich errors
  *   - evaluate() / evaluateAst(): runtime evaluation via node eval() hooks
+ *
+ * The parser derives a closed TYPE VOCABULARY from the grammar (every
+ * static resultType, the built-in element types, plus createParser's
+ * `types` option). Constraint strings are validated against it at
+ * construction; schema leaves are validated against it at compile time
+ * (via the SchemaShapeOf bound) and at runtime (safeParse walks the
+ * schema). This closes the "any string is a type" hole.
  */
 
-import type { NodeSchema, SchemaToType } from "./schema/index.js";
+import {
+  type NodeSchema,
+  type SchemaToType,
+  type ExprSchema,
+  type PatternSchema,
+  isFromBinding,
+  isSameAs,
+} from "./schema/index.js";
 import type { ComputeGrammar, Grammar } from "./grammar/index.js";
 import type { Parse } from "./parse/index.js";
 import type { Context, SchemaShape } from "./context.js";
@@ -18,7 +32,42 @@ import {
   toParseError,
   toUnexpectedInputError,
 } from "./runtime/diagnostics.js";
-import { type EvaluationValues, evaluateAst } from "./runtime/evaluate.js";
+import {
+  type EvaluationValues,
+  RESERVED_NODE_NAMES,
+  evaluateAst,
+} from "./runtime/evaluate.js";
+
+// =============================================================================
+// Type Vocabulary
+// =============================================================================
+
+/** Output types of the built-in pattern elements */
+type BuiltinTypeName = "number" | "string" | "boolean" | "unknown";
+
+const BUILTIN_TYPE_NAMES: readonly BuiltinTypeName[] = [
+  "number",
+  "string",
+  "boolean",
+  "unknown",
+];
+
+/**
+ * The closed set of type names a grammar knows about: every static
+ * resultType, the built-ins, and any extra `types` passed to createParser.
+ */
+export type VocabOf<
+  TNodes extends readonly NodeSchema[],
+  TExtra extends readonly string[]
+> =
+  | Extract<NonNullable<TNodes[number]["resultType"]>, string>
+  | BuiltinTypeName
+  | TExtra[number];
+
+/** A schema whose leaves are restricted to a known type vocabulary */
+export type SchemaShapeOf<TVocab extends string> = {
+  readonly [key: string]: TVocab | SchemaShapeOf<TVocab>;
+};
 
 // =============================================================================
 // Result Types
@@ -72,16 +121,28 @@ type EvaluateResult<
   ? SchemaToType<N["outputSchema"]>
   : unknown;
 
+type TrimWs<S extends string> = S extends
+  | ` ${infer R}`
+  | `\t${infer R}`
+  | `\n${infer R}`
+  | `\r${infer R}`
+  ? TrimWs<R>
+  : S;
+
 /**
- * Only accept literal inputs that fully parse against the grammar.
- * Dynamic strings and invalid literals resolve to never — use safeParse
- * for runtime-provided input.
+ * Only accept literal inputs that fully parse against the grammar
+ * (trailing whitespace allowed, matching safeParse). Dynamic strings and
+ * invalid literals resolve to never — use safeParse for runtime input.
  */
 type ValidatedInput<
   TGrammar extends Grammar,
   TInput extends string,
   $ extends Context
-> = Parse<TGrammar, TInput, $> extends [any, ""] ? TInput : never;
+> = Parse<TGrammar, TInput, $> extends [any, infer R extends string]
+  ? TrimWs<R> extends ""
+    ? TInput
+    : never
+  : never;
 
 // =============================================================================
 // Parser Interface
@@ -92,10 +153,13 @@ type ValidatedInput<
  *
  * TGrammar: The computed grammar type from node schemas
  * TNodes: The tuple of node schemas
+ * TVocab: The grammar's closed type-name vocabulary (schema leaves are
+ *         checked against it at compile time)
  */
 export interface Parser<
   TGrammar extends Grammar,
-  TNodes extends readonly NodeSchema[]
+  TNodes extends readonly NodeSchema[],
+  TVocab extends string = string
 > {
   /**
    * Parse a string literal, validated at compile time.
@@ -104,14 +168,8 @@ export interface Parser<
    * anything else is a compile-time error. For runtime-provided strings,
    * use safeParse. Throws StringentParseError if the compile-time check
    * was bypassed and the input is invalid.
-   *
-   * @example
-   * ```ts
-   * const [ast] = parser.parse("1+2", {});
-   * //     ^? { node: "add"; left: ...; right: ... }
-   * ```
    */
-  parse<TInput extends string, const TSchema extends SchemaShape>(
+  parse<TInput extends string, const TSchema extends SchemaShapeOf<TVocab>>(
     input: ValidatedInput<TGrammar, TInput, Context<TSchema>>,
     schema: TSchema
   ): Parse<TGrammar, TInput, Context<TSchema>>;
@@ -119,18 +177,11 @@ export interface Parser<
   /**
    * Parse any string (including runtime-provided input).
    *
-   * Requires the whole input to be consumed. Never throws; returns a
-   * discriminated result with a structured error (position, expected
-   * tokens, found text) on failure.
-   *
-   * @example
-   * ```ts
-   * const result = parser.safeParse(userInput, { x: "number" });
-   * if (result.success) console.log(result.ast);
-   * else console.error(result.error.message);
-   * ```
+   * Requires the whole input to be consumed. Never throws for invalid
+   * INPUT (returns a structured error with position/expected/found);
+   * throws for invalid SCHEMAS (unknown type names — a programmer error).
    */
-  safeParse<TInput extends string, const TSchema extends SchemaShape>(
+  safeParse<TInput extends string, const TSchema extends SchemaShapeOf<TVocab>>(
     input: TInput,
     schema: TSchema
   ): SafeParseResult<AstFor<TGrammar, TInput, TSchema>>;
@@ -140,14 +191,8 @@ export interface Parser<
    *
    * Node eval() functions (from defineNode) compute the result. The values
    * object must match the schema's shape.
-   *
-   * @example
-   * ```ts
-   * const result = parser.evaluate("x + 1", { x: "number" }, { x: 2 });
-   * //     ^? number (= 3)
-   * ```
    */
-  evaluate<TInput extends string, const TSchema extends SchemaShape>(
+  evaluate<TInput extends string, const TSchema extends SchemaShapeOf<TVocab>>(
     input: ValidatedInput<TGrammar, TInput, Context<TSchema>>,
     schema: TSchema,
     values: InferValues<TSchema>
@@ -155,15 +200,7 @@ export interface Parser<
 
   /**
    * Evaluate an already-parsed AST against runtime values.
-   * Use with safeParse for dynamic input:
-   *
-   * @example
-   * ```ts
-   * const result = parser.safeParse(userInput, schema);
-   * if (result.success) {
-   *   const value = parser.evaluateAst(result.ast, values);
-   * }
-   * ```
+   * Use with safeParse for dynamic input.
    */
   evaluateAst<TAst extends { outputSchema: string }>(
     ast: TAst,
@@ -172,13 +209,44 @@ export interface Parser<
 
   /** The node schemas used to create this parser */
   readonly nodes: TNodes;
+
+  /** The grammar's type-name vocabulary (resultTypes + built-ins + extras) */
+  readonly typeNames: ReadonlySet<string>;
 }
 
 // =============================================================================
 // Grammar Validation
 // =============================================================================
 
-function validateNodes(nodes: readonly NodeSchema[]): void {
+const CONSUMING_KINDS = new Set(["number", "string", "ident", "path", "const"]);
+
+function isNamed(element: PatternSchema): element is PatternSchema & {
+  name: string;
+} {
+  return "__named" in element && element.__named === true;
+}
+
+function checkConstraintVocabulary(
+  nodeName: string,
+  element: ExprSchema,
+  vocab: ReadonlySet<string>
+): void {
+  const spec = element.constraint;
+  if (spec === undefined || isSameAs(spec)) return;
+  const names = typeof spec === "string" ? [spec] : spec;
+  for (const name of names) {
+    if (!vocab.has(name)) {
+      throw new Error(
+        `stringent: node '${nodeName}' has constraint '${name}' which matches no known type — known types: ${[...vocab].sort().join(", ")}`
+      );
+    }
+  }
+}
+
+function validateNodes(
+  nodes: readonly NodeSchema[],
+  vocab: ReadonlySet<string>
+): void {
   const seen = new Set<string>();
   const associativityByPrecedence = new Map<number, "left" | "right">();
 
@@ -186,15 +254,102 @@ function validateNodes(nodes: readonly NodeSchema[]): void {
     if (seen.has(node.name)) {
       throw new Error(`stringent: duplicate node name '${node.name}'`);
     }
+    if (RESERVED_NODE_NAMES.has(node.name)) {
+      throw new Error(
+        `stringent: node name '${node.name}' is reserved (used by the parser's primitive nodes)`
+      );
+    }
     seen.add(node.name);
 
+    if (node.pattern.length === 0) {
+      throw new Error(`stringent: node '${node.name}' has an empty pattern`);
+    }
+
+    // --- Position 0: must consume input or descend strictly ---------------
+    const first = node.pattern[0];
+    if (first.kind === "expr") {
+      const role = (first as ExprSchema).role;
+      if (node.precedence === "atom") {
+        throw new Error(
+          `stringent: atom '${node.name}' cannot start with an expression element — atoms must start with a consuming element (number, string, ident, path, const)`
+        );
+      }
+      if (role !== "lhs") {
+        throw new Error(
+          `stringent: node '${node.name}' starts with ${role}(...), which would recurse into the same level forever — operator patterns must start with lhs(...) or a consuming element`
+        );
+      }
+      const spec = (first as ExprSchema).constraint;
+      if (isSameAs(spec)) {
+        throw new Error(
+          `stringent: node '${node.name}' uses sameAs(...) on its first element — there is no earlier operand to reference`
+        );
+      }
+    }
+
+    // --- Per-element checks -----------------------------------------------
+    const namedSoFar = new Set<string>();
+    const allNamed = new Set<string>();
+    for (const element of node.pattern) {
+      if (isNamed(element)) allNamed.add(element.name);
+    }
+    let hasNamed = false;
+
+    for (const element of node.pattern) {
+      if (element.kind === "const" && (element as { value: string }).value === "") {
+        throw new Error(
+          `stringent: node '${node.name}' uses constVal("") — empty constants match zero width and cannot terminate`
+        );
+      }
+      if (element.kind === "expr") {
+        checkConstraintVocabulary(node.name, element as ExprSchema, vocab);
+        const spec = (element as ExprSchema).constraint;
+        if (isSameAs(spec) && !namedSoFar.has(spec.binding)) {
+          throw new Error(
+            `stringent: node '${node.name}' uses sameAs('${spec.binding}') but no earlier element is named '${spec.binding}'`
+          );
+        }
+      }
+      if (isNamed(element)) {
+        namedSoFar.add(element.name);
+        hasNamed = true;
+      }
+    }
+
+    // --- Result type --------------------------------------------------------
+    const isPassthrough =
+      !hasNamed && node.pattern.length === 1 && node.pattern[0].kind !== "const";
+    const resultSpec = node.resultType;
+    if (isFromBinding(resultSpec) && !allNamed.has(resultSpec.binding)) {
+      throw new Error(
+        `stringent: node '${node.name}' uses fromBinding('${resultSpec.binding}') but no element is named '${resultSpec.binding}'`
+      );
+    }
+    if (!isPassthrough && resultSpec === undefined) {
+      throw new Error(
+        `stringent: node '${node.name}' needs a resultType (a type name or fromBinding(...)) — only single-element passthrough patterns can omit it`
+      );
+    }
+    if (typeof resultSpec === "string" && !vocab.has(resultSpec)) {
+      // Static resultTypes are part of the vocabulary by construction, so
+      // this only triggers for exotic cases (e.g. proxied node objects).
+      throw new Error(
+        `stringent: node '${node.name}' has resultType '${resultSpec}' which is not in the vocabulary`
+      );
+    }
+
+    // --- Precedence & associativity ----------------------------------------
     if (node.precedence !== "atom") {
       const prec = node.precedence;
-      if (typeof prec !== "number" || !Number.isInteger(prec) || prec < 0) {
+      if (
+        typeof prec !== "number" ||
+        !Number.isSafeInteger(prec) ||
+        prec < 0
+      ) {
         throw new Error(
           `stringent: node '${node.name}' has invalid precedence ${String(
             prec
-          )} — precedence must be "atom" or a non-negative integer`
+          )} — precedence must be "atom" or a non-negative safe integer`
         );
       }
 
@@ -208,17 +363,42 @@ function validateNodes(nodes: readonly NodeSchema[]): void {
       associativityByPrecedence.set(prec, assoc);
 
       if (assoc === "left") {
-        const first = node.pattern[0];
         const firstIsLhs =
-          first !== undefined &&
-          first.kind === "expr" &&
-          (first as { role?: string }).role === "lhs";
+          first.kind === "expr" && (first as ExprSchema).role === "lhs";
         if (!firstIsLhs || node.pattern.length < 2) {
           throw new Error(
             `stringent: left-associative node '${node.name}' must have a pattern starting with lhs(...) followed by at least one more element`
           );
         }
       }
+    }
+  }
+}
+
+// =============================================================================
+// Schema Validation (runtime)
+// =============================================================================
+
+function validateSchema(
+  schema: SchemaShape,
+  vocab: ReadonlySet<string>,
+  pathPrefix = ""
+): void {
+  for (const key of Object.keys(schema)) {
+    const value = schema[key];
+    const keyPath = pathPrefix === "" ? key : `${pathPrefix}.${key}`;
+    if (typeof value === "string") {
+      if (!vocab.has(value)) {
+        throw new Error(
+          `stringent: schema key '${keyPath}' has unknown type '${value}' — known types: ${[...vocab].sort().join(", ")}. Add custom type names via createParser(nodes, { types: [...] }).`
+        );
+      }
+    } else if (value !== null && typeof value === "object") {
+      validateSchema(value, vocab, keyPath);
+    } else {
+      throw new Error(
+        `stringent: schema key '${keyPath}' must be a type name or a nested schema, got ${typeof value}`
+      );
     }
   }
 }
@@ -235,39 +415,31 @@ function validateNodes(nodes: readonly NodeSchema[]): void {
  * - Runtime parsing that matches the type structure
  *
  * @param nodes - Tuple of node schemas defining the grammar
- * @returns Parser instance with parse/safeParse/evaluate methods
+ * @param options.types - Extra type names to allow in schemas/constraints
+ *   beyond the grammar's own resultTypes (e.g. ["date"])
  *
  * @example
  * ```ts
- * import { defineNode, number, lhs, rhs, constVal, createParser } from "stringent";
- *
- * const numberLit = defineNode({
- *   name: "number",
- *   pattern: [number()],
- *   precedence: "atom",
- *   resultType: "number",
- * });
- *
- * const add = defineNode({
- *   name: "add",
- *   pattern: [lhs("number").as("left"), constVal("+"), rhs("number").as("right")],
- *   precedence: 1,
- *   associativity: "left",
- *   resultType: "number",
- *   eval: ({ left, right }) => left + right,
- * });
- *
- * const parser = createParser([numberLit, add] as const);
- *
- * const [ast] = parser.parse("1+2", {});          // compile-time validated
- * const result = parser.safeParse(dynamic, {});    // runtime strings
- * const sum = parser.evaluate("1+2", {}, {});      // 3
+ * const parser = createParser([numberLit, variable, ternary, add] as const);
+ * const [ast] = parser.parse("1+2", {});           // compile-time validated
+ * const result = parser.safeParse(dynamic, {});     // runtime strings
+ * const sum = parser.evaluate("1+2", {}, {});       // 3
  * ```
  */
-export function createParser<const TNodes extends readonly NodeSchema[]>(
-  nodes: TNodes
-): Parser<ComputeGrammar<TNodes>, TNodes> {
-  validateNodes(nodes);
+export function createParser<
+  const TNodes extends readonly NodeSchema[],
+  const TExtra extends readonly string[] = readonly []
+>(
+  nodes: TNodes,
+  options?: { readonly types?: TExtra }
+): Parser<ComputeGrammar<TNodes>, TNodes, VocabOf<TNodes, TExtra>> {
+  const vocab = new Set<string>(BUILTIN_TYPE_NAMES);
+  for (const node of nodes) {
+    if (typeof node.resultType === "string") vocab.add(node.resultType);
+  }
+  for (const extra of options?.types ?? []) vocab.add(extra);
+
+  validateNodes(nodes, vocab);
 
   const nodesByName = new Map<string, NodeSchema>(
     nodes.map((node) => [node.name, node])
@@ -277,6 +449,7 @@ export function createParser<const TNodes extends readonly NodeSchema[]>(
     input: string,
     schema: SchemaShape
   ): SafeParseResult<AnyAstNode> {
+    validateSchema(schema, vocab);
     const context: Context = { data: schema };
     const { result, diagnostics } = parseWithDiagnostics(nodes, input, context);
     if (result.length === 0) {
@@ -319,5 +492,6 @@ export function createParser<const TNodes extends readonly NodeSchema[]>(
     },
 
     nodes,
-  } as Parser<ComputeGrammar<TNodes>, TNodes>;
+    typeNames: vocab,
+  } as Parser<ComputeGrammar<TNodes>, TNodes, VocabOf<TNodes, TExtra>>;
 }

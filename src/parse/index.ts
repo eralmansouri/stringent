@@ -15,8 +15,12 @@
  * Levels whose nodes declare associativity: "left" are parsed with an
  * iterative fold (see ParseLeftLevel) instead of right-recursion.
  *
- * This file MUST stay behaviorally in sync with the runtime engine in
- * src/runtime/parser.ts — the parity test suite guards this.
+ * Constraints resolve against already-parsed siblings (sameAs) and node
+ * result types may derive from operands (fromBinding) — both are
+ * declarative data interpreted identically here and in the runtime engine.
+ *
+ * This file MUST stay behaviorally in sync with src/runtime/parser.ts —
+ * the parity test suite guards this.
  */
 
 import type { Token } from "@sinclair/parsebox";
@@ -32,6 +36,10 @@ import type {
   IdentSchema,
   PathSchema,
   ConstSchema,
+  SameAsRef,
+  FromBindingRef,
+  NormalizeConstraint,
+  ExtractSpecOf,
 } from "../schema/index.js";
 import type {
   NumberNode,
@@ -165,6 +173,59 @@ type ParseConstPrimitive<
   : [];
 
 // =============================================================================
+// Constraint Resolution
+// =============================================================================
+
+/**
+ * Resolve a sameAs reference against the already-consumed pattern prefix
+ * (TDone) and its parsed children (TAcc). Returns the referenced child's
+ * outputSchema, or "unknown" when not found.
+ */
+type FindBoundOutput<
+  TDone extends readonly PatternSchema[],
+  TAcc extends readonly unknown[],
+  B extends string
+> = TDone extends readonly [
+  infer F extends PatternSchema,
+  ...infer RD extends readonly PatternSchema[]
+]
+  ? TAcc extends readonly [infer C, ...infer RA extends readonly unknown[]]
+    ? F extends { __named: true; name: B }
+      ? C extends { outputSchema: infer O extends string }
+        ? O
+        : "unknown"
+      : FindBoundOutput<RD, RA, B>
+    : "unknown"
+  : "unknown";
+
+/**
+ * Resolve an element's constraint to a concrete check:
+ * string (exact), readonly string[] (any-of), or undefined (unconstrained).
+ */
+type ResolveSpec<
+  TElement extends PatternSchema,
+  TDone extends readonly PatternSchema[],
+  TAcc extends readonly unknown[]
+> = NormalizeConstraint<ExtractSpecOf<TElement>> extends infer N
+  ? N extends SameAsRef<infer B>
+    ? FindBoundOutput<TDone, TAcc, B>
+    : N
+  : never;
+
+/** Check an outputSchema against a resolved constraint (exact-name semantics) */
+type CheckConstraint<O extends string, RC> = [RC] extends [undefined]
+  ? true
+  : RC extends readonly string[]
+  ? [O] extends [RC[number]]
+    ? true
+    : false
+  : RC extends string
+  ? [O] extends [RC]
+    ? true
+    : false
+  : false;
+
+// =============================================================================
 // Pattern Element Parsing
 // =============================================================================
 
@@ -194,6 +255,13 @@ type ParseElement<
  * TCurrentLevels - grammar from current level onward (for rhs)
  * TNextLevels - grammar from next level onward (for lhs, avoids left-recursion)
  * TFullGrammar - complete grammar (for expr role, full reset)
+ * TAcc - children parsed so far (also feeds sameAs resolution)
+ * TDone - pattern elements consumed so far (aligned with TAcc)
+ *
+ * The left-fold seeds TAcc/TDone with the already-parsed left operand so
+ * sameAs("left") resolves inside operator tails.
+ *
+ * Returns [children, rest] where children INCLUDES any seeded prefix.
  */
 type ParsePatternTuple<
   TPattern extends readonly PatternSchema[],
@@ -202,7 +270,8 @@ type ParsePatternTuple<
   TCurrentLevels extends Grammar,
   TNextLevels extends Grammar,
   TFullGrammar extends Grammar,
-  TAcc extends unknown[] = []
+  TAcc extends unknown[] = [],
+  TDone extends readonly PatternSchema[] = []
 > = TPattern extends readonly [
   infer First extends PatternSchema,
   ...infer Rest extends readonly PatternSchema[]
@@ -213,7 +282,9 @@ type ParsePatternTuple<
       TContext,
       TCurrentLevels,
       TNextLevels,
-      TFullGrammar
+      TFullGrammar,
+      TDone,
+      TAcc
     > extends [infer R, infer Remaining extends string]
     ? ParsePatternTuple<
         Rest,
@@ -222,38 +293,19 @@ type ParsePatternTuple<
         TCurrentLevels,
         TNextLevels,
         TFullGrammar,
-        [...TAcc, R]
+        [...TAcc, R],
+        [...TDone, First]
       >
     : []
   : [TAcc, TInput];
 
 /**
- * Extract constraint from an ExprSchema.
- *
- * The constraint property is OPTIONAL on ExprSchema, so it must be matched
- * with `constraint?:` — matching against a required property never succeeds
- * and silently disables constraint checking. Unconstrained elements (plain
- * `string` constraint or undefined) resolve to undefined.
- */
-type ExtractConstraint<T> = T extends { constraint?: infer C }
-  ? [Exclude<C, undefined>] extends [never]
-    ? undefined // constraint absent
-    : [string] extends [Exclude<C, undefined>]
-    ? undefined // unconstrained: lhs()/rhs()/expr() without argument
-    : Exclude<C, undefined>
-  : undefined;
-
-/**
  * Parse an expression element based on its role.
- * Works with both plain schemas and NamedSchema (intersection type).
  *
  * Role determines which grammar slice is used:
  * - "lhs": TNextLevels (avoids left-recursion)
  * - "rhs": TCurrentLevels (maintains precedence, enables right-associativity)
  * - "expr": TFullGrammar (full reset for delimited contexts)
- *
- * Uses structural matching on `kind: "expr"` and `role` property to handle
- * both plain ExprSchema and NamedSchema<ExprSchema, ...> intersection types.
  */
 type ParseElementWithLevel<
   TElement extends PatternSchema,
@@ -261,13 +313,15 @@ type ParseElementWithLevel<
   TContext extends Context,
   TCurrentLevels extends Grammar,
   TNextLevels extends Grammar,
-  TFullGrammar extends Grammar
+  TFullGrammar extends Grammar,
+  TDone extends readonly PatternSchema[],
+  TAcc extends readonly unknown[]
 > = TElement extends { kind: "expr"; role: infer Role }
   ? Role extends "lhs"
-    ? ParseExprWithConstraint<TNextLevels, TInput, TContext, ExtractConstraint<TElement>, TFullGrammar>
+    ? ParseExprWithConstraint<TNextLevels, TInput, TContext, ResolveSpec<TElement, TDone, TAcc>, TFullGrammar>
     : Role extends "rhs"
-    ? ParseExprWithConstraint<TCurrentLevels, TInput, TContext, ExtractConstraint<TElement>, TFullGrammar>
-    : ParseExprWithConstraint<TFullGrammar, TInput, TContext, ExtractConstraint<TElement>, TFullGrammar>
+    ? ParseExprWithConstraint<TCurrentLevels, TInput, TContext, ResolveSpec<TElement, TDone, TAcc>, TFullGrammar>
+    : ParseExprWithConstraint<TFullGrammar, TInput, TContext, ResolveSpec<TElement, TDone, TAcc>, TFullGrammar>
   : ParseElement<TElement, TInput, TContext>;
 
 // =============================================================================
@@ -325,11 +379,35 @@ type ExtractBindings<
   : TAcc;
 
 /**
+ * Compute a node's outputSchema: static string, or derived from a named
+ * binding via fromBinding.
+ *
+ * resultType is an OPTIONAL property, so undefined must be stripped before
+ * matching — `TNode["resultType"] extends string` is never true for
+ * `"boolean" | undefined` (same bug class as the constraint extraction fix).
+ */
+type ResultSchemaOf<TNode extends NodeSchema, Bindings> = Exclude<
+  TNode["resultType"],
+  undefined
+> extends infer R
+  ? [R] extends [FromBindingRef<infer B>]
+    ? B extends keyof Bindings
+      ? Bindings[B] extends { outputSchema: infer O extends string }
+        ? O
+        : "unknown"
+      : "unknown"
+    : [R] extends [string]
+    ? R
+    : "unknown"
+  : never;
+
+/**
  * Build the result node from parsed children.
  *
- * Uses named bindings from .as() to determine node fields.
- * - Single unnamed child: passthrough (atom behavior)
- * - Otherwise: bindings become node fields
+ * - Single unnamed non-const child: passthrough (atom behavior)
+ * - Otherwise: bindings become node fields, outputSchema from ResultSchemaOf
+ *   (const-only and multi-unnamed patterns build a plain node — mirroring
+ *   the runtime engine, never `never`)
  */
 type BuildNodeResult<
   TNode extends NodeSchema,
@@ -337,11 +415,19 @@ type BuildNodeResult<
 > = ExtractBindings<TNode["pattern"], TChildren> extends infer Bindings
   ? keyof Bindings extends never
     ? TChildren extends [infer Only]
-      ? Only // Single unnamed element - passthrough (atom)
-      : never // Multiple unnamed children - error
+      ? Only extends { node: "const" }
+        ? {
+            readonly node: TNode["name"];
+            readonly outputSchema: ResultSchemaOf<TNode, {}>;
+          }
+        : Only // Single unnamed non-const element - passthrough (atom)
+      : {
+          readonly node: TNode["name"];
+          readonly outputSchema: ResultSchemaOf<TNode, {}>;
+        }
     : {
         readonly node: TNode["name"];
-        readonly outputSchema: TNode["resultType"];
+        readonly outputSchema: ResultSchemaOf<TNode, Bindings>;
       } & Bindings
   : never;
 
@@ -350,23 +436,22 @@ type BuildNodeResult<
 // =============================================================================
 
 /**
- * Parse an expression with optional type constraint.
+ * Parse an expression with a resolved constraint
+ * (string exact-match, string[] any-of, or undefined).
  */
 type ParseExprWithConstraint<
   TStartLevels extends Grammar,
   TInput extends string,
   TContext extends Context,
-  TConstraint extends string | undefined,
+  TConstraint,
   TFullGrammar extends Grammar
 > = ParseLevels<TStartLevels, TInput, TContext, TFullGrammar> extends [
   infer Node extends { outputSchema: string },
   infer Rest extends string
 ]
-  ? TConstraint extends string
-    ? Node["outputSchema"] extends TConstraint
-      ? [Node, Rest]
-      : [] // Type mismatch - backtrack
-    : [Node, Rest]
+  ? CheckConstraint<Node["outputSchema"], TConstraint> extends true
+    ? [Node, Rest]
+    : [] // Type mismatch - backtrack
   : [];
 
 // =============================================================================
@@ -420,22 +505,23 @@ type IsLeftLevel<TNodes extends readonly NodeSchema[]> =
       : false
     : false;
 
-/** Check TLeft against the constraint of the pattern's leading lhs element. */
-type LhsConstraintOk<LhsEl, TLeft> = LhsEl extends { kind: "expr" }
-  ? ExtractConstraint<LhsEl> extends infer C
-    ? C extends string
-      ? TLeft extends { outputSchema: C }
-        ? true
-        : false
-      : true
-    : never
+/** Check TLeft against the constraint of the pattern's leading lhs element.
+ *  (sameAs is invalid at position 0 — createParser rejects it.) */
+type LhsConstraintOk<LhsEl extends PatternSchema, TLeft> = LhsEl extends {
+  kind: "expr";
+}
+  ? TLeft extends { outputSchema: infer O extends string }
+    ? CheckConstraint<O, ResolveSpec<LhsEl, [], []>>
+    : false
   : false;
 
 /**
  * Try one node's tail (pattern minus the leading lhs element) against the
  * input, folding TLeft into a new left-nested node on success.
- * The tail's rhs elements parse at the NEXT level (currentLevels := Next),
- * which is what makes the fold left-associative.
+ *
+ * TAcc/TDone are seeded with the left operand so sameAs("left") resolves
+ * inside the tail. The tail's rhs elements parse at the NEXT level
+ * (currentLevels := Next), which is what makes the fold left-associative.
  */
 type ParseLeftTail<
   N extends NodeSchema,
@@ -449,11 +535,17 @@ type ParseLeftTail<
   ...infer Tail extends readonly PatternSchema[]
 ]
   ? LhsConstraintOk<LhsEl, TLeft> extends true
-    ? ParsePatternTuple<Tail, TInput, TContext, Next, Next, TFull> extends [
-        infer Children extends unknown[],
-        infer Rest extends string
-      ]
-      ? [BuildNodeResult<N, [TLeft, ...Children]>, Rest]
+    ? ParsePatternTuple<
+        Tail,
+        TInput,
+        TContext,
+        Next,
+        Next,
+        TFull,
+        [TLeft],
+        [LhsEl]
+      > extends [infer Children extends unknown[], infer Rest extends string]
+      ? [BuildNodeResult<N, Children>, Rest]
       : []
     : []
   : [];

@@ -14,6 +14,8 @@
 export interface ConstraintMismatch {
   /** Offset into the original input where the mismatched expression starts */
   offset: number;
+  /** Offset just past the mismatched expression (its span is offset..end) */
+  end: number;
   /** The constraint the slot required (e.g. "number") */
   expected: string;
   /** The outputSchema the expression actually had */
@@ -58,17 +60,24 @@ export function fail(
   }
 }
 
-/** Record a constraint (type) mismatch; keeps the furthest one */
+/**
+ * Record a constraint (type) mismatch; keeps the one reaching furthest.
+ *
+ * @param before - the input at the START of the mismatched expression
+ * @param after - the input just PAST the mismatched expression
+ */
 export function failConstraint(
   diag: Diagnostics,
-  remaining: string,
+  before: string,
+  after: string,
   expected: string,
   actual: string,
   subject?: string
 ): void {
-  const offset = offsetOf(diag, remaining);
-  if (diag.mismatch === undefined || offset >= diag.mismatch.offset) {
-    diag.mismatch = { offset, expected, actual, subject };
+  const offset = offsetOf(diag, before);
+  const end = diag.source.length - after.length;
+  if (diag.mismatch === undefined || end >= diag.mismatch.end) {
+    diag.mismatch = { offset, end, expected, actual, subject };
   }
 }
 
@@ -98,23 +107,30 @@ function formatExpected(expected: readonly string[]): string {
   return `${expected.slice(0, -1).join(", ")} or ${expected[expected.length - 1]}`;
 }
 
-/** Build a StringentError from diagnostics after a failed parse */
+function toMismatchError(diag: Diagnostics): StringentError {
+  const mismatch = diag.mismatch!;
+  const subject =
+    mismatch.subject !== undefined
+      ? mismatch.actual === "unknown"
+        ? ` ('${mismatch.subject}' is not in the schema)`
+        : ` ('${mismatch.subject}')`
+      : "";
+  return {
+    code: "TYPE_MISMATCH",
+    message: `Expected a ${mismatch.expected} expression at position ${mismatch.offset}, got ${mismatch.actual}${subject}`,
+    position: mismatch.offset,
+    expected: [mismatch.expected],
+    found: foundAt(diag.source, mismatch.offset),
+  };
+}
+
+/** Build a StringentError from diagnostics after a failed parse.
+ *  A constraint mismatch wins when its SPAN reaches the furthest failure —
+ *  token failures further right are usually downstream noise of the
+ *  alternatives that backtracked. */
 export function toParseError(diag: Diagnostics): StringentError {
-  const mismatch = diag.mismatch;
-  if (mismatch !== undefined && mismatch.offset >= diag.furthestOffset) {
-    const subject =
-      mismatch.subject !== undefined
-        ? mismatch.actual === "unknown"
-          ? ` ('${mismatch.subject}' is not in the schema)`
-          : ` ('${mismatch.subject}')`
-        : "";
-    return {
-      code: "TYPE_MISMATCH",
-      message: `Expected a ${mismatch.expected} expression at position ${mismatch.offset}, got ${mismatch.actual}${subject}`,
-      position: mismatch.offset,
-      expected: [mismatch.expected],
-      found: foundAt(diag.source, mismatch.offset),
-    };
+  if (diag.mismatch !== undefined && diag.mismatch.end >= diag.furthestOffset) {
+    return toMismatchError(diag);
   }
   const expected = [...diag.expected].sort();
   return {
@@ -137,10 +153,16 @@ export function toUnexpectedInputError(
   remaining: string
 ): StringentError {
   const position = offsetOf(diag, remaining);
+  // A mismatch explains WHY the parse could not continue only when its span
+  // reaches both the stuck point and the furthest token failure — otherwise
+  // it is backtracking noise (e.g. a ternary probing its condition).
   if (
-    (diag.mismatch !== undefined && diag.mismatch.offset >= position) ||
-    diag.furthestOffset > position
+    diag.mismatch !== undefined &&
+    diag.mismatch.end >= Math.max(position, diag.furthestOffset)
   ) {
+    return toMismatchError(diag);
+  }
+  if (diag.furthestOffset > position) {
     return toParseError(diag);
   }
   const expected = [...diag.expected].sort();

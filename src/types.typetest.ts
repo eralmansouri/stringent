@@ -19,8 +19,10 @@ import type {
   Parse,
   ResolvePath,
 } from "./index.js";
+import { defineNode, lhs, rhs, constVal, sameAs } from "./index.js";
 import {
   add,
+  div,
   eq,
   fixtureNodes,
   fixtureParser,
@@ -31,8 +33,8 @@ import {
   pow,
   stringLit,
   sub,
+  ternary,
   variable,
-  div,
 } from "./__fixtures__/grammar.js";
 
 // =============================================================================
@@ -56,13 +58,14 @@ type EmptyCtx = Context<{}>;
 type FormCtx = Context<typeof formSchema>;
 
 // =============================================================================
-// ComputeGrammar (hotscript-free)
+// ComputeGrammar (hotscript-free, digit-wise precedence comparison)
 // =============================================================================
 
 // Levels sorted ascending by precedence, atoms last, definition order kept
 type TG1 = AssertEqual<
   G,
   [
+    [typeof ternary],
     [typeof eq],
     [typeof add, typeof sub],
     [typeof mul, typeof div],
@@ -71,6 +74,28 @@ type TG1 = AssertEqual<
   ]
 >;
 const _tg1: TG1 = true;
+
+// Precedences beyond the old ~999 tuple ceiling compare fine (digit-wise Lte)
+{
+  const n = defineNode({ name: "n", pattern: [], precedence: "atom" });
+  const lo = defineNode({
+    name: "lo",
+    pattern: [lhs().as("l"), constVal("!"), rhs().as("r")],
+    precedence: 100,
+    resultType: "number",
+  });
+  const hi = defineNode({
+    name: "hi",
+    pattern: [lhs().as("l"), constVal("!!"), rhs().as("r")],
+    precedence: 1500,
+    resultType: "number",
+  });
+  type BigG = ComputeGrammar<readonly [typeof n, typeof hi, typeof lo]>;
+  const _big: AssertEqual<
+    BigG,
+    [[typeof lo], [typeof hi], [typeof n]]
+  > = true;
+}
 
 // =============================================================================
 // Atoms
@@ -153,6 +178,45 @@ type S3 = AssertEqual<
 const _s3: S3 = true;
 
 // =============================================================================
+// Polymorphic nodes (union + sameAs + fromBinding)
+// =============================================================================
+
+// add derives its output type per parse
+type PM1 = AssertEqual<
+  Parse<G, "1+2", EmptyCtx>,
+  [Bin<"add", "number", NumberNode<"1">, NumberNode<"2">>, ""]
+>;
+const _pm1: PM1 = true;
+
+type PM2 = AssertEqual<
+  Parse<G, "'a'+'b'", EmptyCtx>,
+  [Bin<"add", "string", StringNode<"a">, StringNode<"b">>, ""]
+>;
+const _pm2: PM2 = true;
+
+// sameAs rejects mixed operands at the type level too
+type PM3 = AssertEqual<Parse<G, "1+'a'", EmptyCtx>, [NumberNode<"1">, "+'a'"]>;
+const _pm3: PM3 = true;
+
+// parens are polymorphic via fromBinding
+type PM4 = Parse<G, "('a')", EmptyCtx>[0];
+const _pm4: PM4 extends { node: "parens"; outputSchema: "string" } ? true : false =
+  true;
+
+// ternary derives its result type from the branches
+type PM5 = Parse<G, "1==2 ? 3 : 4", EmptyCtx>[0];
+const _pm5: PM5 extends { node: "ternary"; outputSchema: "number" } ? true : false =
+  true;
+
+type PM6 = Parse<G, "1==2 ? 'yes' : 'no'", EmptyCtx>[0];
+const _pm6: PM6 extends { node: "ternary"; outputSchema: "string" } ? true : false =
+  true;
+
+// disagreeing ternary branches are rejected (parse stops at the eq)
+type PM7 = Parse<G, "1==1 ? 1 : 'no'", EmptyCtx>;
+const _pm7: PM7 extends [{ node: "eq" }, string] ? true : false = true;
+
+// =============================================================================
 // Member access (paths)
 // =============================================================================
 
@@ -215,11 +279,6 @@ const _r2: R2 = true;
 type F1 = AssertEqual<Parse<G, "@invalid", EmptyCtx>, []>;
 const _f1: F1 = true;
 
-// Type constraint rejects wrongly-typed operands: 1+'a' backtracks to 1
-type F2 = Parse<G, "1+'a'", EmptyCtx>;
-type F2Check = AssertEqual<F2, [NumberNode<"1">, "+'a'"]>;
-const _f2: F2Check = true;
-
 // =============================================================================
 // parse() input validation
 // =============================================================================
@@ -233,6 +292,25 @@ fixtureParser.parse("1+2 junk", {});
 // @ts-expect-error - dynamic strings must use safeParse
 fixtureParser.parse("1+2" as string, {});
 
+// @ts-expect-error - mixed operand types are rejected at compile time
+fixtureParser.parse("1+'a'", {});
+
+// trailing whitespace is fine (matches safeParse)
+fixtureParser.parse("1+2 ", {});
+
+// =============================================================================
+// Schema vocabulary validation (compile time)
+// =============================================================================
+
+// @ts-expect-error - 'numbr' is not in the grammar's type vocabulary
+fixtureParser.safeParse("x", { x: "numbr" });
+
+// @ts-expect-error - nested leaves are checked too
+fixtureParser.safeParse("x", { a: { b: "numbr" } });
+
+fixtureParser.safeParse("x", { x: "number" }); // ok
+fixtureParser.safeParse("x", { a: { b: "string" } }); // ok
+
 // =============================================================================
 // evaluate() result types
 // =============================================================================
@@ -240,12 +318,18 @@ fixtureParser.parse("1+2" as string, {});
 const evalNum = fixtureParser.evaluate("1+2", {}, {});
 const _e1: AssertEqual<typeof evalNum, number> = true;
 
+const evalStr = fixtureParser.evaluate("'a'+'b'", {}, {});
+const _e2: AssertEqual<typeof evalStr, string> = true;
+
+const evalTernary = fixtureParser.evaluate("1==2 ? 'yes' : 'no'", {}, {});
+const _e3: AssertEqual<typeof evalTernary, string> = true;
+
 const evalBool = fixtureParser.evaluate(
   "values.password == values.confirmPassword",
   formSchema,
   { x: 0, values: { password: "a", confirmPassword: "b" } }
 );
-const _e2: AssertEqual<typeof evalBool, boolean> = true;
+const _e4: AssertEqual<typeof evalBool, boolean> = true;
 
 // InferValues maps schemas to runtime value shapes
 type V1 = AssertEqual<
@@ -259,6 +343,29 @@ type V1 = AssertEqual<
   }
 >;
 const _v1: V1 = true;
+
+// =============================================================================
+// eval binding types
+// =============================================================================
+
+// Union constraints and resolved sameAs flow into eval's parameter types;
+// lazy nodes receive thunks.
+defineNode({
+  name: "check",
+  pattern: [
+    lhs(["number", "string"]).as("left"),
+    constVal("~"),
+    rhs(sameAs("left")).as("right"),
+  ],
+  precedence: 1,
+  resultType: "boolean",
+  lazy: true,
+  eval: ({ left, right }) => {
+    const _l: () => number | string = left;
+    const _r: () => number | string = right;
+    return left() === right();
+  },
+});
 
 // =============================================================================
 // Recursion canary

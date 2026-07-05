@@ -4,6 +4,13 @@
  * Evaluates a parsed AST against a runtime values object. Post-order walk:
  * children are evaluated first, then the node's eval() function (from
  * defineNode) is applied to the evaluated bindings.
+ *
+ * Nodes with lazy: true receive memoized THUNKS instead of values, enabling
+ * short-circuit semantics (ternary, &&, ||).
+ *
+ * Security: all identifier/path lookups use own-property checks only —
+ * expressions like `__proto__` or `x.constructor` never traverse the
+ * prototype chain.
  */
 
 import type { NodeSchema } from "../schema/index.js";
@@ -18,6 +25,18 @@ export class EvaluationError extends Error {
 
 /** Values object: maps identifier names (possibly nested) to runtime values */
 export type EvaluationValues = Record<string, unknown>;
+
+/**
+ * Node names produced directly by the parser's primitive elements. User
+ * nodes must not reuse them (the evaluator dispatches on node names) —
+ * createParser rejects grammars that try.
+ */
+export const RESERVED_NODE_NAMES = new Set([
+  "literal",
+  "identifier",
+  "path",
+  "const",
+]);
 
 function isAstNode(value: unknown): value is { node: string; outputSchema: unknown } {
   return (
@@ -34,7 +53,7 @@ function lookupPath(values: EvaluationValues, path: readonly string[]): unknown 
     if (
       current !== null &&
       typeof current === "object" &&
-      segment in (current as object)
+      Object.hasOwn(current, segment)
     ) {
       current = (current as Record<string, unknown>)[segment];
     } else {
@@ -42,6 +61,19 @@ function lookupPath(values: EvaluationValues, path: readonly string[]): unknown 
     }
   }
   return current;
+}
+
+/** Memoize a thunk so lazy eval functions can call bindings repeatedly */
+function once<T>(compute: () => T): () => T {
+  let done = false;
+  let value: T;
+  return () => {
+    if (!done) {
+      value = compute();
+      done = true;
+    }
+    return value;
+  };
 }
 
 /**
@@ -69,7 +101,7 @@ export function evaluateAst(
 
     case "identifier": {
       const name = node.name as string;
-      if (!(name in values)) {
+      if (!Object.hasOwn(values, name)) {
         throw new EvaluationError(`'${name}' is not defined`);
       }
       return values[name];
@@ -89,21 +121,28 @@ export function evaluateAst(
         );
       }
 
-      // Evaluate every AST-node field (the named bindings); pass other
-      // fields through unchanged.
-      const evaluated: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(node)) {
-        if (key === "node" || key === "outputSchema") continue;
-        evaluated[key] = isAstNode(value)
-          ? evaluateAst(value, nodesByName, values)
-          : value;
-      }
-
       if (schema.eval === undefined) {
         throw new EvaluationError(
           `Node '${node.node}' has no eval function. Add one to its defineNode call, e.g. eval: ({ inner }) => inner`
         );
       }
+
+      // Evaluate every AST-node field (the named bindings); pass other
+      // fields through unchanged. Lazy nodes get memoized thunks instead.
+      const evaluated: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(node)) {
+        if (key === "node" || key === "outputSchema") continue;
+        if (schema.lazy === true) {
+          evaluated[key] = once(() =>
+            isAstNode(value) ? evaluateAst(value, nodesByName, values) : value
+          );
+        } else {
+          evaluated[key] = isAstNode(value)
+            ? evaluateAst(value, nodesByName, values)
+            : value;
+        }
+      }
+
       return schema.eval(evaluated, values);
     }
   }
