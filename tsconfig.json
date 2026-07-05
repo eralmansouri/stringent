@@ -4,6 +4,9 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
+    // Source ships to git-dependency consumers and is type-checked under
+    // THEIR flags; this is the strictest common one, so hold the line here.
+    "exactOptionalPropertyTypes": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "declaration": true,

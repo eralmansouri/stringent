@@ -261,11 +261,13 @@ export const constVal = <const TValue extends string>(value: TValue) =>
 export const lhs = <const TConstraint extends ConstraintSpec>(
   constraint?: TConstraint
 ) =>
-  withAs<ExprSchema<TConstraint, "lhs">>({
-    kind: "expr",
-    constraint: constraint,
-    role: "lhs",
-  });
+  // Conditional construction (not `constraint: maybeUndefined`) keeps the
+  // element assignable under consumers' exactOptionalPropertyTypes.
+  withAs<ExprSchema<TConstraint, "lhs">>(
+    (constraint === undefined
+      ? { kind: "expr", role: "lhs" }
+      : { kind: "expr", constraint, role: "lhs" }) as ExprSchema<TConstraint, "lhs">
+  );
 
 /**
  * Create a RIGHT-HAND SIDE expression element.
@@ -279,11 +281,11 @@ export const lhs = <const TConstraint extends ConstraintSpec>(
 export const rhs = <const TConstraint extends ConstraintSpec>(
   constraint?: TConstraint
 ) =>
-  withAs<ExprSchema<TConstraint, "rhs">>({
-    kind: "expr",
-    constraint: constraint,
-    role: "rhs",
-  });
+  withAs<ExprSchema<TConstraint, "rhs">>(
+    (constraint === undefined
+      ? { kind: "expr", role: "rhs" }
+      : { kind: "expr", constraint, role: "rhs" }) as ExprSchema<TConstraint, "rhs">
+  );
 
 /**
  * Create a FULL expression element.
@@ -294,11 +296,11 @@ export const rhs = <const TConstraint extends ConstraintSpec>(
 export const expr = <const TConstraint extends ConstraintSpec>(
   constraint?: TConstraint
 ) =>
-  withAs<ExprSchema<TConstraint, "expr">>({
-    kind: "expr",
-    constraint: constraint,
-    role: "expr",
-  });
+  withAs<ExprSchema<TConstraint, "expr">>(
+    (constraint === undefined
+      ? { kind: "expr", role: "expr" }
+      : { kind: "expr", constraint, role: "expr" }) as ExprSchema<TConstraint, "expr">
+  );
 
 // =============================================================================
 // Node Definition Schema

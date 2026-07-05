@@ -77,7 +77,7 @@ export function failConstraint(
   const offset = offsetOf(diag, before);
   const end = diag.source.length - after.length;
   if (diag.mismatch === undefined || end >= diag.mismatch.end) {
-    diag.mismatch = { offset, end, expected, actual, subject };
+    diag.mismatch = { offset, end, expected, actual, ...(subject !== undefined ? { subject } : {}) };
   }
 }
 
@@ -174,7 +174,7 @@ export function toUnexpectedInputError(
     code: "UNEXPECTED_INPUT",
     message: `Unexpected input at position ${position}: found ${foundAt(diag.source, position)}${hint}`,
     position,
-    expected: expected.length > 0 ? expected : undefined,
+    ...(expected.length > 0 ? { expected } : {}),
     found: foundAt(diag.source, position),
   };
 }
@@ -183,8 +183,10 @@ export function toUnexpectedInputError(
 export class StringentParseError extends Error {
   readonly code: StringentError["code"];
   readonly position: number;
-  readonly expected?: readonly string[];
-  readonly found?: string;
+  // `| undefined` rather than optional: assigned unconditionally in the
+  // constructor, which exactOptionalPropertyTypes consumers require.
+  readonly expected: readonly string[] | undefined;
+  readonly found: string | undefined;
 
   constructor(error: StringentError) {
     super(error.message);
