@@ -12,6 +12,7 @@ import type {
   NumberNode,
   StringNode,
   IdentNode,
+  PathNode,
   ConstNode,
 } from "../primitive/index.js";
 
@@ -32,8 +33,11 @@ export interface StringSchema<
   readonly quotes: TQuotes;
 }
 
-/** Identifier pattern element */
+/** Identifier pattern element (single segment, no dots) */
 export interface IdentSchema extends Schema<"ident"> {}
+
+/** Member-access path pattern element: matches `ident(.ident)*` */
+export interface PathSchema extends Schema<"path"> {}
 
 /** Constant (exact match) pattern element */
 export interface ConstSchema<TValue extends string = string>
@@ -46,12 +50,6 @@ export type ExprRole = "lhs" | "rhs" | "expr";
 
 /** Recursive expression pattern element with optional type constraint and role */
 export interface ExprSchema<
-  /** This technically shouldn't require a string
-   * because JSON or array or other types could be used in the future.
-   * For now, I would prefer that we just keep it open tbh. And validate at the
-   * expr()/lhs()/rhs() usage site by
-   * using arktype.type.validate<> (see createBox example: https://arktype.io/docs/generics).
-   **/
   TConstraint extends string = string,
   TRole extends ExprRole = ExprRole
 > extends Schema<"expr"> {
@@ -64,6 +62,7 @@ export type PatternSchemaBase =
   | NumberSchema
   | StringSchema<readonly string[]>
   | IdentSchema
+  | PathSchema
   | ConstSchema<string>
   | ExprSchema<string, ExprRole>;
 
@@ -123,8 +122,29 @@ export const string = <const TQuotes extends readonly string[]>(
   quotes: TQuotes
 ) => withAs<StringSchema<TQuotes>>({ kind: "string", quotes });
 
-/** Create an identifier pattern element */
+/** Create an identifier pattern element (single segment, no dots) */
 export const ident = () => withAs<IdentSchema>({ kind: "ident" });
+
+/**
+ * Create a member-access path pattern element.
+ *
+ * Matches `ident(.ident)*` — e.g. `values.password` — and resolves the
+ * type by walking the (possibly nested) schema. Whitespace around the
+ * dots is not allowed: `values . password` parses as just `values`.
+ *
+ * @example
+ * ```ts
+ * const variable = defineNode({
+ *   name: "var",
+ *   pattern: [path()],
+ *   precedence: "atom",
+ *   resultType: "unknown",
+ * });
+ * // With schema { values: { password: "string" } }:
+ * // "values.password" → PathNode with outputSchema "string"
+ * ```
+ */
+export const path = () => withAs<PathSchema>({ kind: "path" });
 
 /** Create a constant (exact match) pattern element */
 export const constVal = <const TValue extends string>(value: TValue) =>
@@ -202,8 +222,11 @@ export const expr = <const TConstraint extends string>(constraint?: TConstraint)
 // Node Definition Schema
 // =============================================================================
 
-/** Precedence type: number for operators, "atom" for atoms (literals) */
+/** Precedence type: non-negative integer for operators, "atom" for atoms (literals) */
 export type Precedence = number | "atom";
+
+/** Associativity for operator nodes. Defaults to "right". */
+export type Associativity = "left" | "right";
 
 /**
  * A node definition schema.
@@ -214,33 +237,26 @@ export type Precedence = number | "atom";
  * - TPattern: The pattern elements as a tuple type
  * - TPrecedence: The precedence (number for operators, "atom" for atoms)
  * - TResultType: The result type (e.g., "number", "string")
+ * - TAssoc: The associativity ("left" or "right", default "right")
  */
 export interface NodeSchema<
   TName extends string = string,
   TPattern extends readonly PatternSchema[] = readonly PatternSchema[],
   TPrecedence extends Precedence = Precedence,
-  TResultType extends string = string
+  TResultType extends string = string,
+  TAssoc extends Associativity = Associativity
 > {
   readonly name: TName;
   readonly pattern: TPattern;
   readonly precedence: TPrecedence;
   readonly resultType: TResultType;
+  readonly associativity: TAssoc;
 
   /**
-   * Optional: Transform parsed bindings into node fields.
-   * If not provided, bindings are used directly as fields.
+   * Optional: Evaluate the node to produce a runtime value.
    *
-   * @param bindings - The named values extracted from pattern via .as()
-   * @param ctx - The parse context
-   * @returns The fields to add to the AST node
-   */
-  readonly configure?: ConfigureFn;
-
-  /**
-   * Optional: Evaluate the AST node to produce a runtime value.
-   *
-   * @param node - The full AST node including name, outputSchema, and fields
-   * @param ctx - The evaluation context
+   * @param values - The named bindings from the pattern, already evaluated
+   * @param runtimeValues - The runtime values object passed to evaluate()
    * @returns The evaluated value
    */
   readonly eval?: EvalFn;
@@ -250,28 +266,26 @@ export interface NodeSchema<
 // Stored Function Types
 // =============================================================================
 //
-// NOTE: These types use loose typing (Record<string, unknown>) intentionally.
+// NOTE: This type uses loose typing (Record<string, unknown>) intentionally.
 //
-// When you call defineNode(), your eval/configure functions receive PROPERLY
-// TYPED parameters via InferBindings and InferEvaluatedBindings. For example:
+// When you call defineNode(), your eval function receives PROPERLY TYPED
+// parameters via InferEvaluatedBindings. For example:
 //
 //   defineNode({
 //     pattern: [lhs("number").as("left"), constVal("+"), rhs("number").as("right")],
 //     eval: ({ left, right }) => left + right,  // ← left, right are typed as number!
 //   })
 //
-// The loose types below are only used for STORAGE in NodeSchema. They must be
+// The loose type below is only used for STORAGE in NodeSchema. It must be
 // loose because of function parameter contravariance: to store different nodes
 // (with different binding types) in a NodeSchema[] array, we need a common type.
-//
-// TL;DR: Your IDE will show correct types. The loose types are internal only.
 // =============================================================================
 
-/** Stored function type for configure - loose for variance compatibility */
-export type ConfigureFn = <$>(bindings: Record<string, unknown>, ctx: $) => Record<string, unknown>;
-
 /** Stored function type for eval - loose for variance compatibility */
-export type EvalFn = <$>(values: Record<string, unknown>, ctx: $) => unknown;
+export type EvalFn = (
+  values: Record<string, unknown>,
+  runtimeValues: Record<string, unknown>
+) => unknown;
 
 /**
  * Define a node type for the grammar.
@@ -287,6 +301,7 @@ export type EvalFn = <$>(values: Record<string, unknown>, ctx: $) => unknown;
  *   name: "add",
  *   pattern: [lhs("number").as("left"), constVal("+"), rhs("number").as("right")],
  *   precedence: 1,
+ *   associativity: "left",
  *   resultType: "number",
  *   eval: ({ left, right }) => left + right,  // left and right are already numbers
  * });
@@ -295,22 +310,23 @@ export function defineNode<
   const TName extends string,
   const TPattern extends readonly PatternSchema[],
   const TPrecedence extends Precedence,
-  const TResultType extends string
+  const TResultType extends string,
+  const TAssoc extends Associativity = "right"
 >(config: {
   readonly name: TName;
   readonly pattern: TPattern;
   readonly precedence: TPrecedence;
   readonly resultType: TResultType;
-  readonly configure?: <$>(
-    bindings: InferBindings<TPattern>,
-    ctx: $
-  ) => Record<string, unknown>;
-  readonly eval?: <$>(
+  readonly associativity?: TAssoc;
+  readonly eval?: (
     values: InferEvaluatedBindings<TPattern>,
-    ctx: $
+    runtimeValues: Record<string, unknown>
   ) => SchemaToType<TResultType>;
-}): NodeSchema<TName, TPattern, TPrecedence, TResultType> {
-  return config as NodeSchema<TName, TPattern, TPrecedence, TResultType>;
+}): NodeSchema<TName, TPattern, TPrecedence, TResultType, TAssoc> {
+  return {
+    ...config,
+    associativity: config.associativity ?? ("right" as TAssoc),
+  } as NodeSchema<TName, TPattern, TPrecedence, TResultType, TAssoc>;
 }
 
 // =============================================================================
@@ -345,14 +361,15 @@ export type SchemaToType<T extends string> =
  * Infer the AST node type from a pattern schema.
  * This maps schema types to their corresponding node types.
  *
- * Note: ExprSchema maps to `unknown` since the actual type depends on the constraint
- * and what's parsed. The runtime parser will fill this in.
+ * Note: ExprSchema maps to `{ outputSchema: C }` since the actual type depends
+ * on the constraint and what's parsed. The runtime parser will fill this in.
  */
 export type InferNodeType<TSchema extends PatternSchemaBase> =
   TSchema extends NumberSchema ? NumberNode
   : TSchema extends StringSchema ? StringNode
   : TSchema extends IdentSchema ? IdentNode
-  : TSchema extends ConstSchema ? ConstNode
+  : TSchema extends PathSchema ? PathNode
+  : TSchema extends ConstSchema<infer V> ? ConstNode<V>
   : TSchema extends ExprSchema<infer C> ? { outputSchema: C }
   : never;
 
@@ -364,7 +381,8 @@ export type InferEvaluatedType<TSchema extends PatternSchemaBase> =
   TSchema extends NumberSchema ? number
   : TSchema extends StringSchema ? string
   : TSchema extends IdentSchema ? unknown
-  : TSchema extends ConstSchema ? never  // constants are matched, not captured as values
+  : TSchema extends PathSchema ? unknown
+  : TSchema extends ConstSchema<infer V> ? V // the matched text
   : TSchema extends ExprSchema<infer C extends string> ? SchemaToType<C>
   : never;
 
@@ -380,7 +398,6 @@ type ExtractNamedSchemas<TPattern extends readonly PatternSchema[]> =
 
 /**
  * Infer bindings object type from a pattern (AST nodes).
- * Used for configure() - receives parsed AST nodes.
  *
  * @example
  * ```ts
