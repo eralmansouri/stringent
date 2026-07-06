@@ -1,0 +1,268 @@
+---
+title: Getting Started
+description: Install stringent, define a grammar, and parse and evaluate your first expressions.
+sidebar:
+  order: 1
+---
+
+import { Tabs, TabItem, Steps } from "@astrojs/starlight/components";
+
+Stringent is a type-safe expression parser and evaluator for TypeScript. One
+grammar definition drives two engines:
+
+- a **type-level parser** — expressions in string literals are validated and
+  fully typed at compile time, and
+- a **runtime parser** — dynamic strings get structured errors and evaluation.
+
+## Installation
+
+<Tabs syncKey="pkg">
+  <TabItem label="npm">
+    ```sh
+    npm install stringent
+    ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```sh
+    pnpm add stringent
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    ```sh
+    yarn add stringent
+    ```
+  </TabItem>
+</Tabs>
+
+Stringent is ESM-only and ships its own type definitions.
+
+## Quickstart
+
+<Steps>
+
+1. **Define your grammar.** Each `defineNode` call declares one grammar rule:
+   a pattern of elements, a precedence, and (optionally) a result type and an
+   evaluation function.
+
+   ```ts twoslash
+   import {
+     defineNode, number, string, path, lhs, rhs, expr, constVal,
+     sameAs, fromBinding, createParser,
+   } from "stringent";
+
+   // Atoms — single-element passthrough patterns need no resultType
+   const numberLit = defineNode({ name: "num", pattern: [number()], precedence: "atom" });
+   const stringLit = defineNode({ name: "str", pattern: [string(['"', "'"])], precedence: "atom" });
+   const variable  = defineNode({ name: "var", pattern: [path()], precedence: "atom" });
+   // path() matches identifiers and dotted paths: x, values.password
+
+   // Polymorphic parens: the result type is whatever is inside
+   const parens = defineNode({
+     name: "parens",
+     pattern: [constVal("("), expr().as("inner"), constVal(")")],
+     precedence: "atom",
+     resultType: fromBinding("inner"),
+     eval: ({ inner }) => inner,
+   });
+
+   // Same-type equality: 1 == 'a' is a parse-time type error
+   const eq = defineNode({
+     name: "eq",
+     pattern: [lhs().as("left"), constVal("=="), rhs(sameAs("left")).as("right")],
+     precedence: 1,
+     resultType: "boolean",
+     eval: ({ left, right }) => left === right,
+   });
+
+   // ONE overloaded add: number+number → number, string+string → string
+   const add = defineNode({
+     name: "add",
+     pattern: [lhs(["number", "string"]).as("left"), constVal("+"), rhs(sameAs("left")).as("right")],
+     precedence: 2,            // lower = binds looser
+     associativity: "left",    // 1+2+3 parses as (1+2)+3
+     resultType: fromBinding("left"),
+     eval: ({ left, right }) => (left as any) + (right as any),
+   });
+
+   const mul = defineNode({
+     name: "mul",
+     pattern: [lhs("number").as("left"), constVal("*"), rhs("number").as("right")],
+     precedence: 3,            // higher = binds tighter
+     associativity: "left",
+     resultType: "number",
+     eval: ({ left, right }) => left * right,
+   });
+
+   // A short-circuiting polymorphic ternary
+   const ternary = defineNode({
+     name: "ternary",
+     pattern: [
+       lhs("boolean").as("cond"), constVal("?"),
+       expr().as("then"), constVal(":"),
+       rhs(sameAs("then")).as("else"),   // branches must agree
+     ],
+     precedence: 0,
+     resultType: fromBinding("then"),    // result = the branches' type
+     lazy: true,                         // eval receives thunks
+     eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
+   });
+
+   const parser = createParser(
+     [numberLit, stringLit, variable, parens, ternary, eq, add, mul] as const
+   );
+   ```
+
+2. **Parse string literals (compile-time checked).** `parse()` only accepts
+   literals that fully parse against the grammar — an invalid expression is a
+   **compile-time error**, and the AST type is fully inferred. Hover `ast`
+   below to see it:
+
+   ```ts twoslash
+   import {
+     defineNode, number, string, path, lhs, rhs, expr, constVal,
+     sameAs, fromBinding, createParser,
+   } from "stringent";
+
+   const numberLit = defineNode({ name: "num", pattern: [number()], precedence: "atom" });
+   const stringLit = defineNode({ name: "str", pattern: [string(['"', "'"])], precedence: "atom" });
+   const variable  = defineNode({ name: "var", pattern: [path()], precedence: "atom" });
+
+   const eq = defineNode({
+     name: "eq",
+     pattern: [lhs().as("left"), constVal("=="), rhs(sameAs("left")).as("right")],
+     precedence: 1,
+     resultType: "boolean",
+     eval: ({ left, right }) => left === right,
+   });
+
+   const add = defineNode({
+     name: "add",
+     pattern: [lhs(["number", "string"]).as("left"), constVal("+"), rhs(sameAs("left")).as("right")],
+     precedence: 2,
+     associativity: "left",
+     resultType: fromBinding("left"),
+     eval: ({ left, right }) => (left as any) + (right as any),
+   });
+
+   const mul = defineNode({
+     name: "mul",
+     pattern: [lhs("number").as("left"), constVal("*"), rhs("number").as("right")],
+     precedence: 3,
+     associativity: "left",
+     resultType: "number",
+     eval: ({ left, right }) => left * right,
+   });
+
+   const parser = createParser([numberLit, stringLit, variable, eq, add, mul] as const);
+   // ---cut---
+   const [ast] = parser.parse("1+2*3", {});
+   //     ^?
+   ```
+
+   Invalid expressions don't compile:
+
+   ```ts
+   parser.parse("1+", {});               // ✗ compile error
+   parser.parse("1+'a'", {});            // ✗ compile error: operand types disagree
+   parser.parse("1+x", { x: "number" }); // ✓
+   parser.parse("1+x", { x: "numbr" });  // ✗ compile error AT THE SCHEMA LEAF
+   ```
+
+   Schema leaves are validated against the grammar's **type vocabulary** (all
+   declared `resultType`s + `number`/`string`/`boolean`/`unknown` + anything
+   in `createParser(nodes, { types: [...] })`), so schema typos fail at the
+   typo, not somewhere downstream.
+
+3. **Parse dynamic strings (runtime checked).** Runtime-provided input goes
+   through `safeParse()`, which requires full consumption and returns
+   structured errors instead of throwing:
+
+   ```ts
+   const result = parser.safeParse(userInput, { x: "number" });
+   if (result.success) {
+     console.log(result.ast);
+   } else {
+     console.error(result.error.message);
+     // e.g. Expected a number expression at position 2, got unknown ('zz' is not in the schema)
+     // e.g. Expected a number (same type as 'left') expression at position 2, got string
+     // e.g. Unexpected input at position 4: found "junk!!" (expected "*", "+" or "==")
+     result.error.position; // 0-based offset
+     result.error.expected; // tokens that would have been valid there
+   }
+   ```
+
+4. **Evaluate.** `evaluate()` parses and evaluates in one step; the result
+   type is inferred from the expression — including through polymorphic
+   nodes:
+
+   ```ts twoslash
+   import {
+     defineNode, number, string, path, lhs, rhs, expr, constVal,
+     sameAs, fromBinding, createParser,
+   } from "stringent";
+
+   const numberLit = defineNode({ name: "num", pattern: [number()], precedence: "atom" });
+   const stringLit = defineNode({ name: "str", pattern: [string(['"', "'"])], precedence: "atom" });
+   const variable  = defineNode({ name: "var", pattern: [path()], precedence: "atom" });
+
+   const eq = defineNode({
+     name: "eq",
+     pattern: [lhs().as("left"), constVal("=="), rhs(sameAs("left")).as("right")],
+     precedence: 1,
+     resultType: "boolean",
+     eval: ({ left, right }) => left === right,
+   });
+
+   const add = defineNode({
+     name: "add",
+     pattern: [lhs(["number", "string"]).as("left"), constVal("+"), rhs(sameAs("left")).as("right")],
+     precedence: 2,
+     associativity: "left",
+     resultType: fromBinding("left"),
+     eval: ({ left, right }) => (left as any) + (right as any),
+   });
+
+   const mul = defineNode({
+     name: "mul",
+     pattern: [lhs("number").as("left"), constVal("*"), rhs("number").as("right")],
+     precedence: 3,
+     associativity: "left",
+     resultType: "number",
+     eval: ({ left, right }) => left * right,
+   });
+
+   const parser = createParser([numberLit, stringLit, variable, eq, add, mul] as const);
+   // ---cut---
+   const seven = parser.evaluate("1+2*3", {}, {});
+   //    ^?
+
+   const ab = parser.evaluate("'a'+'b'", {}, {});
+   //    ^?
+
+   const answer = parser.evaluate("x*2", { x: "number" }, { x: 21 });
+   //    ^?
+   ```
+
+   For dynamic input, combine `safeParse` with `evaluateAst`:
+
+   ```ts
+   const parsed = parser.safeParse(userInput, schema);
+   if (parsed.success) {
+     const value = parser.evaluateAst(parsed.ast, values);
+   }
+   ```
+
+</Steps>
+
+## Where to next?
+
+- [Defining a grammar](/stringent/guides/defining-a-grammar/) — pattern
+  elements, precedence, associativity, and grammar validation.
+- [Schemas & types](/stringent/guides/schemas-and-types/) — the type
+  vocabulary, nested schemas, and polymorphic nodes.
+- [Parsing & evaluation](/stringent/guides/parsing-and-evaluation/) — the
+  three entry points and lazy evaluation.
+- [Error handling](/stringent/guides/error-handling/) — structured errors and
+  what throws when.
+- [Playground](/stringent/playground/) — try the runtime engine live in your
+  browser.

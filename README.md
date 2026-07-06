@@ -15,6 +15,10 @@ const result = parser.evaluate(
 > Pre-1.0: the API is stabilizing but may still change between minor versions.
 > See [DESIGN.md](./DESIGN.md) for the architecture and its rationale.
 
+**Documentation:** guides, a live playground, and the generated API reference
+live at [eralmansouri.github.io/stringent](https://eralmansouri.github.io/stringent/)
+(source in [`docs/`](./docs)).
+
 ## Installation
 
 ```bash

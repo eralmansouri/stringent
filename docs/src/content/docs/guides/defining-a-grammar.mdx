@@ -1,0 +1,123 @@
+---
+title: Defining a Grammar
+description: Grammar nodes, pattern elements, precedence, associativity, and construction-time validation.
+sidebar:
+  order: 2
+---
+
+A grammar is a list of **nodes**, each declared with `defineNode` and combined
+with `createParser`. A node is a pattern of elements, a precedence, and
+(optionally) a result type and an evaluation function:
+
+```ts
+const mul = defineNode({
+  name: "mul",                    // unique node name (appears in the AST)
+  pattern: [                      // what to match, in order
+    lhs("number").as("left"),
+    constVal("*"),
+    rhs("number").as("right"),
+  ],
+  precedence: 3,                  // binding strength; "atom" for literals
+  associativity: "left",          // per precedence level; defaults to "right"
+  resultType: "number",           // the type this node produces
+  eval: ({ left, right }) => left * right,
+});
+```
+
+## Pattern elements
+
+| Pattern | Description |
+|---------|-------------|
+| `number()` | Numeric literals |
+| `string(quotes)` | Quoted strings, e.g. `string(['"', "'"])` |
+| `ident()` | Single identifier, type resolved from schema |
+| `path()` | Identifier or dotted path (`values.password`), resolved via nested schema |
+| `constVal(value)` | Exact string (operators, keywords, delimiters) |
+| `lhs(constraint?)` | Left operand — parses at the next-higher precedence level |
+| `rhs(constraint?)` | Right operand — same level (right-assoc) or next level (left-assoc fold) |
+| `expr(constraint?)` | Full expression — resets to the whole grammar (parens, ternary branches) |
+
+Use `.as(name)` to capture an element as a named **binding** — bindings become
+fields on the AST node and typed parameters of `eval`.
+
+## Precedence & associativity
+
+- **Precedence** is a non-negative integer, or `"atom"` for literals. Lower
+  numbers bind looser (outermost in the tree); higher numbers bind tighter.
+  Duplicate precedences share a level; nodes within a level are tried in
+  definition order with backtracking.
+- **Associativity** is a property of a precedence level (all nodes at one
+  level must agree) and defaults to `"right"`:
+  - `associativity: "left"`: `5-2-1` parses as `(5-2)-1` — for `-`, `/`, and
+    friends.
+  - `"right"` (the default): `2^3^2` parses as `2^(3^2)` — for
+    exponentiation and ternaries.
+
+The roles connect to precedence like this: `lhs` parses at the next level up
+(preventing left recursion); `rhs` parses at the current level (right
+associativity) or, on left-associative levels, the next level up; `expr`
+resets to the full grammar — that's what you want inside parentheses, ternary
+branches, and call arguments.
+
+On left-associative levels the parser seeds an operand from the next level and
+then iteratively folds `op operand`. The fold re-checks each candidate node's
+`lhs` constraint against the folded-so-far result on every iteration, so
+heterogeneous operators can share a level.
+
+## Result types
+
+| Form | Meaning |
+|---|---|
+| `resultType: "boolean"` | static — the node mints a type |
+| `resultType: fromBinding("then")` | derived — the node's type is whatever the named operand parsed as |
+| omitted | only for passthrough patterns (a single unnamed non-const element) |
+
+`resultType` is only required where it cannot be derived: single-element
+passthrough atoms omit it entirely, [derivation handles polymorphic
+operators](/stringent/guides/schemas-and-types/#polymorphic-nodes), and a
+static name is for nodes that mint a new type (like an `eq` node producing
+`"boolean"`).
+
+## Lazy nodes
+
+`lazy: true` makes `eval` receive memoized thunks (`() => value`) instead of
+values — this is how ternaries and short-circuiting `&&`/`||` avoid evaluating
+untaken branches:
+
+```ts
+const ternary = defineNode({
+  name: "ternary",
+  pattern: [
+    lhs("boolean").as("cond"), constVal("?"),
+    expr().as("then"), constVal(":"),
+    rhs(sameAs("then")).as("else"),
+  ],
+  precedence: 0,
+  resultType: fromBinding("then"),
+  lazy: true,                         // eval receives thunks
+  eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
+});
+```
+
+Eager is the default; laziness is per-node and visible in `eval`'s parameter
+types.
+
+## Construction-time validation
+
+`createParser` validates the whole grammar up front and throws descriptive
+errors for:
+
+- duplicate or reserved node names (`literal`, `identifier`, `path`, `const`)
+- invalid precedence values and mixed associativity within a level
+- left patterns not shaped `[lhs, ...rest]`, and `rhs`/`expr` at position 0
+  (guaranteed infinite recursion)
+- atoms starting with expression elements, `constVal("")`, and empty
+  constraint lists (`lhs([])`)
+- binding names that collide with AST structure (`node`, `outputSchema`,
+  `__proto__`) or repeat within a pattern
+- `sameAs` referencing a missing, later, or const binding, and `fromBinding`
+  referencing a missing or const binding
+- missing `resultType` where one is required, and constraint strings outside
+  the [type vocabulary](/stringent/guides/schemas-and-types/#the-type-vocabulary)
+
+A grammar that constructs is a grammar that parses safely.
