@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Required for npm trusted publishing (OIDC).
+  id-token: write
+
+jobs:
+  publish:
+    # Trusted publishing requires a GitHub-hosted runner.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm >= 11.5.1.
+      - name: Update npm
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify tag matches package.json version
+        if: github.ref_type == 'tag'
+        run: |
+          pkg="$(node -p "require('./package.json').version")"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$pkg" != "$tag" ]; then
+            echo "Tag v$tag does not match package.json version $pkg" >&2
+            exit 1
+          fi
+
+      # Publishes via npm trusted publishing (OIDC) — the trusted publisher
+      # for this package on npmjs.com points at this workflow file, so no
+      # token is needed. Provenance is generated automatically.
+      # prepublishOnly runs typecheck, tests, build, and package checks.
+      - name: Publish to npm
+        run: npm publish --access public
