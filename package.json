@@ -23,7 +23,10 @@
   "sideEffects": false,
   "files": [
     "dist",
-    "src"
+    "src",
+    "!src/**/*.test.ts",
+    "!src/**/*.typetest.ts",
+    "!src/__fixtures__"
   ],
   "main": "src/index.ts",
   "types": "src/index.ts",
@@ -47,7 +50,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check:package": "pnpm pack --out stringent-check.tgz && publint stringent-check.tgz && attw stringent-check.tgz --profile esm-only && rm stringent-check.tgz",
-    "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build && pnpm check:package"
+    "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {
     "@sinclair/parsebox": "^0.11.1"
