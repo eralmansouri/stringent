@@ -1,6 +1,13 @@
 # Stringent
 
-A type-safe expression parser and evaluator for TypeScript. One grammar definition drives two engines: a **type-level parser** (expressions in string literals are validated and fully typed at compile time) and a **runtime parser** (dynamic strings get structured errors and evaluation).
+[![npm](https://img.shields.io/npm/v/stringent)](https://www.npmjs.com/package/stringent)
+[![CI](https://github.com/eralmansouri/stringent/actions/workflows/ci.yml/badge.svg)](https://github.com/eralmansouri/stringent/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+
+A type-safe expression parser and evaluator for TypeScript. One grammar
+definition drives two engines: a **type-level parser** (expressions in string
+literals are validated and fully typed at compile time) and a **runtime
+parser** (dynamic strings get structured errors and evaluation).
 
 ```typescript
 const result = parser.evaluate(
@@ -11,58 +18,53 @@ const result = parser.evaluate(
 //    ^? boolean (= true)
 ```
 
+**📚 Documentation:** guides, a live playground, and the API reference live at
+**[eralmansouri.github.io/stringent](https://eralmansouri.github.io/stringent/)**.
+The code examples there are compiled against the real library on every docs
+build — hover them to see the actual inferred types.
+
 > **Note**
 > Pre-1.0: the API is stabilizing but may still change between minor versions.
 > See [DESIGN.md](./DESIGN.md) for the architecture and its rationale.
 
-**Documentation:** guides, a live playground, and the generated API reference
-live at [eralmansouri.github.io/stringent](https://eralmansouri.github.io/stringent/)
-(source in [`docs/`](./docs)).
+## Why stringent
+
+- **Compile-time validation** — `parse()` only accepts string literals that
+  fully parse against your grammar. Syntax errors, operand type mismatches,
+  and even typos in schema leaves are compile errors, and valid expressions
+  get an exactly inferred AST and result type.
+- **Structured runtime errors** — `safeParse()` never throws for input. You
+  get an error code (`PARSE_ERROR` / `TYPE_MISMATCH` / `UNEXPECTED_INPUT`), a
+  0-based position, and the tokens that would have been valid there.
+- **Polymorphic grammars** — union constraints, `sameAs()` and `fromBinding()`
+  give you overloaded operators without per-type node variants: one `add` node
+  handles `number+number → number` and `string+string → string`.
+- **Secure by default** — expressions are untrusted input. All identifier and
+  path lookups are own-property only; `__proto__` and `constructor` never
+  resolve to prototype internals.
 
 ## Installation
 
 ```bash
-npm install stringent
-# or
-pnpm add stringent
+npm install stringent   # or: pnpm add stringent
 ```
 
-## Quickstart
+ESM-only, with one small dependency.
 
-### 1. Define your grammar
+## Quickstart
 
 Each `defineNode` call declares one grammar rule: a pattern of elements, a
 precedence, and (optionally) a result type and evaluation function.
 
 ```typescript
 import {
-  defineNode, number, string, path, lhs, rhs, expr, constVal,
+  defineNode, number, path, lhs, rhs, constVal,
   sameAs, fromBinding, createParser,
 } from "stringent";
 
 // Atoms — single-element passthrough patterns need no resultType
 const numberLit = defineNode({ name: "num", pattern: [number()], precedence: "atom" });
-const stringLit = defineNode({ name: "str", pattern: [string(['"', "'"])], precedence: "atom" });
 const variable  = defineNode({ name: "var", pattern: [path()], precedence: "atom" });
-// path() matches identifiers and dotted paths: x, values.password
-
-// Polymorphic parens: the result type is whatever is inside
-const parens = defineNode({
-  name: "parens",
-  pattern: [constVal("("), expr().as("inner"), constVal(")")],
-  precedence: "atom",
-  resultType: fromBinding("inner"),
-  eval: ({ inner }) => inner,
-});
-
-// Same-type equality: 1 == 'a' is a parse-time type error
-const eq = defineNode({
-  name: "eq",
-  pattern: [lhs().as("left"), constVal("=="), rhs(sameAs("left")).as("right")],
-  precedence: 1,
-  resultType: "boolean",
-  eval: ({ left, right }) => left === right,
-});
 
 // ONE overloaded add: number+number → number, string+string → string
 const add = defineNode({
@@ -83,182 +85,49 @@ const mul = defineNode({
   eval: ({ left, right }) => left * right,
 });
 
-// A short-circuiting polymorphic ternary
-const ternary = defineNode({
-  name: "ternary",
-  pattern: [
-    lhs("boolean").as("cond"), constVal("?"),
-    expr().as("then"), constVal(":"),
-    rhs(sameAs("then")).as("else"),   // branches must agree
-  ],
-  precedence: 0,
-  resultType: fromBinding("then"),    // result = the branches' type
-  lazy: true,                         // eval receives thunks
-  eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
-});
-
-const parser = createParser(
-  [numberLit, stringLit, variable, parens, ternary, eq, add, mul] as const
-);
+const parser = createParser([numberLit, variable, add, mul] as const);
 ```
 
-### 2. Parse string literals (compile-time checked)
-
-`parse()` only accepts literals that fully parse against the grammar — an
-invalid expression is a **compile-time error**, and the AST type is fully
-inferred:
+**String literals** are checked by the type engine — invalid expressions
+don't compile, and result types are inferred through the grammar:
 
 ```typescript
-const [ast] = parser.parse("1+2*3", {});
-//     ^? { node: "add"; outputSchema: "number"; left: ...; right: ... }
+const [ast] = parser.parse("1+2*3", {});  // AST type fully inferred
+parser.parse("1+", {});                   // ✗ compile error
+parser.parse("1+'a'", {});                // ✗ compile error: operand types disagree
 
-parser.parse("1+", {});               // ✗ compile error
-parser.parse("1+'a'", {});            // ✗ compile error: operand types disagree
-parser.parse("1+x", { x: "number" }); // ✓
-parser.parse("1+x", { x: "numbr" });  // ✗ compile error AT THE SCHEMA LEAF
+parser.evaluate("1+2*3", {}, {});                   // 7, typed number
+parser.evaluate("x*2", { x: "number" }, { x: 21 }); // 42, typed number
 ```
 
-Schema leaves are validated against the grammar's **type vocabulary** (all
-declared `resultType`s + `number`/`string`/`boolean`/`unknown` + anything in
-`createParser(nodes, { types: [...] })`), so schema typos fail at the typo,
-not somewhere downstream.
-
-### 3. Parse dynamic strings (runtime checked)
-
-Runtime-provided input goes through `safeParse()`, which requires full
-consumption and returns structured errors instead of throwing:
+**Dynamic strings** go through `safeParse()`, which returns structured errors
+instead of throwing:
 
 ```typescript
 const result = parser.safeParse(userInput, { x: "number" });
 if (result.success) {
-  console.log(result.ast);
+  parser.evaluateAst(result.ast, { x: 21 });
 } else {
-  console.error(result.error.message);
-  // e.g. Expected a number expression at position 2, got unknown ('zz' is not in the schema)
-  // e.g. Expected a number (same type as 'left') expression at position 2, got string
-  // e.g. Unexpected input at position 4: found "junk!!" (expected "*", "+" or "==")
-  result.error.position; // 0-based offset
+  result.error.message;  // "Expected a number expression at position 2, got string"
+  result.error.position; // 0-based offset into the input
   result.error.expected; // tokens that would have been valid there
 }
 ```
 
-### 4. Evaluate
+There's more — quoted strings, parentheses, lazy short-circuiting ternaries,
+nested schemas with dotted-path member access (`values.password`), and
+construction-time grammar validation:
 
-`evaluate()` parses and evaluates in one step; the result type is inferred
-from the expression — including through polymorphic nodes:
-
-```typescript
-parser.evaluate("1+2*3", {}, {});                 // 7, typed number
-parser.evaluate("'a'+'b'", {}, {});               // "ab", typed string
-parser.evaluate("1==2 ? 'yes' : 'no'", {}, {});   // "no", typed string
-parser.evaluate("x*2", { x: "number" }, { x: 21 }); // 42
-```
-
-For dynamic input, combine `safeParse` with `evaluateAst`:
-
-```typescript
-const parsed = parser.safeParse(userInput, schema);
-if (parsed.success) {
-  const value = parser.evaluateAst(parsed.ast, values);
-}
-```
-
-Nodes with `lazy: true` receive **thunks** in `eval`, so untaken ternary
-branches (and the right side of a short-circuiting `&&`) are never
-evaluated.
-
-## Polymorphic nodes
-
-Three primitives replace per-type node variants:
-
-- **Union constraints** — `lhs(["number", "string"])`: the slot accepts any
-  of the listed types (operator overloading).
-- **`sameAs(binding)`** — `rhs(sameAs("left"))`: this operand must have the
-  same type as an earlier operand, whatever that turned out to be.
-- **`fromBinding(binding)`** — `resultType: fromBinding("left")`: the node's
-  result type is derived per-parse from a named operand.
-
-`resultType` is only required where it cannot be derived: single-element
-passthrough atoms omit it entirely, derivation handles polymorphic
-operators, and a static name is for nodes that mint a new type (like `eq`
-producing `"boolean"`).
-
-## Nested schemas & member access
-
-Schemas can nest; the `path()` element matches dotted paths and resolves
-their types by walking the schema — at compile time *and* runtime:
-
-```typescript
-const schema = { values: { password: "string", confirmPassword: "string" } } as const;
-
-const [ast] = parser.parse("values.password == values.confirmPassword", schema);
-// left/right are PathNode<["values", "password"], "string">, result is "boolean"
-```
-
-Path syntax is strict: `values.password` is valid, but whitespace around the
-dot (`values . password`) and dangling dots (`values.`) are not. Lookups are
-own-property only — `__proto__`, `constructor` and friends never resolve to
-prototype internals, at parse time or eval time.
-
-## Pattern elements
-
-| Pattern | Description |
-|---------|-------------|
-| `number()` | Numeric literals |
-| `string(quotes)` | Quoted strings, e.g. `string(['"', "'"])` |
-| `ident()` | Single identifier, type resolved from schema |
-| `path()` | Identifier or dotted path (`values.password`), resolved via nested schema |
-| `constVal(value)` | Exact string (operators, keywords, delimiters) |
-| `lhs(constraint?)` | Left operand — parses at the next-higher precedence level |
-| `rhs(constraint?)` | Right operand — same level (right-assoc) or next level (left-assoc fold) |
-| `expr(constraint?)` | Full expression — resets to the whole grammar (parens, ternary branches) |
-
-Use `.as(name)` to capture an element as a named binding — bindings become
-fields on the AST node and typed parameters of `eval`.
-
-## Precedence & associativity
-
-- **Precedence** is a non-negative integer (`"atom"` for literals). Lower
-  numbers bind looser (outermost in the tree); higher bind tighter.
-- **Associativity** is per precedence level (all nodes at one level must
-  agree) and defaults to `"right"`:
-  - `associativity: "left"`: `5-2-1` → `(5-2)-1` — for `-`, `/`, and friends.
-  - `"right"` (default): `2^3^2` → `2^(3^2)` — for exponentiation, ternaries.
-- `createParser` validates the whole grammar up front — duplicate/reserved
-  names, malformed patterns, left-recursive shapes, unknown constraint
-  names, dangling `sameAs`/`fromBinding` references — with descriptive
-  errors. A grammar that constructs is a grammar that parses safely.
-
-## Error handling
-
-`safeParse` never throws for input. Its error object:
-
-```typescript
-interface StringentError {
-  code: "PARSE_ERROR" | "TYPE_MISMATCH" | "UNEXPECTED_INPUT";
-  message: string;
-  position: number;              // 0-based offset into the input
-  expected?: readonly string[];  // what would have been valid at position
-  found?: string;                // the next few characters at position
-}
-```
-
-Invalid **schemas** (unknown type names) throw — they are programmer errors,
-not input errors. `parse()` and `evaluate()` throw `StringentParseError` if
-their compile-time validation was bypassed with a cast. `evaluateAst` throws
-`EvaluationError` for undefined identifiers/paths or nodes without `eval`.
-
-## Limits & rules
-
-- **Precedence** must be `"atom"` or a non-negative safe integer.
-- **Dynamic strings** are rejected by `parse()` at compile time — use `safeParse()`.
-- **Type-level input length**: left-associative chains use a tail-recursive
-  fold and comfortably handle 100+ terms. Right-associative chains and
-  `expr()` nesting (parens, ternary branches) pay instantiation depth per
-  precedence level — on the 6-level test grammar that's ~14 right-assoc
-  terms and ~3 nesting levels before TS2589 (fewer levels stretch this).
-  Runtime parsing (`safeParse`) has no such limit.
-- **Whitespace** is skipped between tokens, but not allowed inside paths around `.`.
+- [Getting started](https://eralmansouri.github.io/stringent/guides/getting-started/)
+  — the full quickstart with hover-able types
+- [Defining a grammar](https://eralmansouri.github.io/stringent/guides/defining-a-grammar/)
+  — pattern elements, precedence, associativity
+- [Schemas & types](https://eralmansouri.github.io/stringent/guides/schemas-and-types/)
+  — the type vocabulary and polymorphic nodes
+- [Error handling](https://eralmansouri.github.io/stringent/guides/error-handling/)
+  — the error model in detail
+- [Playground](https://eralmansouri.github.io/stringent/playground/)
+  — try the runtime engine in your browser
 
 ## Development
 

@@ -18,7 +18,7 @@ hero:
       variant: minimal
 ---
 
-import { Card, CardGrid } from "@astrojs/starlight/components";
+import { Card, CardGrid, LinkCard, Tabs, TabItem } from "@astrojs/starlight/components";
 
 ```ts twoslash
 import {
@@ -47,7 +47,122 @@ const result = parser.evaluate("values.password == values.confirmPassword", sche
 //    ^?
 ```
 
-*Hover the code above — every type is real, produced by the actual library at documentation build time.*
+**Hover the code above.** Every type on this page is real — produced by the
+actual library, at documentation build time, from a grammar *you* define.
+
+## One grammar. Two engines.
+
+You declare each rule once — as data. The same declaration drives a
+**type-level parser** that checks string literals in your code, and a
+**runtime parser** that checks strings from users and config files.
+
+<Tabs>
+  <TabItem label="Compile time — string literals" icon="approve-check">
+    Result types are inferred *through* the grammar — the same overloaded `+`
+    yields `number` or `string` depending on its operands, and expressions
+    that don't parse **don't compile**:
+
+    ```ts twoslash
+    // @errors: 2345
+    import {
+      defineNode, number, string, path, lhs, rhs, expr, constVal,
+      sameAs, fromBinding, createParser,
+    } from "stringent";
+
+    const numberLit = defineNode({ name: "num", pattern: [number()], precedence: "atom" });
+    const stringLit = defineNode({ name: "str", pattern: [string(['"', "'"])], precedence: "atom" });
+    const variable  = defineNode({ name: "var", pattern: [path()], precedence: "atom" });
+
+    const eq = defineNode({
+      name: "eq",
+      pattern: [lhs().as("left"), constVal("=="), rhs(sameAs("left")).as("right")],
+      precedence: 1,
+      resultType: "boolean",
+      eval: ({ left, right }) => left === right,
+    });
+
+    const add = defineNode({
+      name: "add",
+      pattern: [lhs(["number", "string"]).as("left"), constVal("+"), rhs(sameAs("left")).as("right")],
+      precedence: 2,
+      associativity: "left",
+      resultType: fromBinding("left"),
+      eval: ({ left, right }) => (left as any) + (right as any),
+    });
+
+    const mul = defineNode({
+      name: "mul",
+      pattern: [lhs("number").as("left"), constVal("*"), rhs("number").as("right")],
+      precedence: 3,
+      associativity: "left",
+      resultType: "number",
+      eval: ({ left, right }) => left * right,
+    });
+
+    const ternary = defineNode({
+      name: "ternary",
+      pattern: [
+        lhs("boolean").as("cond"), constVal("?"),
+        expr().as("then"), constVal(":"),
+        rhs(sameAs("then")).as("else"),
+      ],
+      precedence: 0,
+      resultType: fromBinding("then"),
+      lazy: true,
+      eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
+    });
+
+    const parser = createParser(
+      [numberLit, stringLit, variable, ternary, eq, add, mul] as const
+    );
+    // ---cut---
+    const seven = parser.evaluate("1+2*3", {}, {});
+    //    ^?
+
+    const greeting = parser.evaluate("'Hello '+name", { name: "string" }, { name: "Ada" });
+    //    ^?
+
+    const label = parser.evaluate("1==2 ? 'yes' : 'no'", {}, {});
+    //    ^?
+
+    // ...and an expression that doesn't parse doesn't compile:
+    parser.parse("1+'a'", {});
+    ```
+  </TabItem>
+  <TabItem label="Runtime — dynamic strings" icon="warning">
+    The same grammar parses untrusted input with `safeParse()`, which never
+    throws — you get an error code, an exact position, and what would have
+    been valid there. These are the engine's real error objects:
+
+    ```ts
+    parser.safeParse("price * quantitty", { price: "number", quantity: "number" });
+    // {
+    //   code: "TYPE_MISMATCH",
+    //   message: "Expected a number expression at position 8, got unknown ('quantitty' is not in the schema)",
+    //   position: 8,
+    //   expected: ["number"],
+    //   found: "\"quantitty\"",
+    // }
+
+    parser.safeParse("price *", schema);
+    // { code: "PARSE_ERROR", position: 7,
+    //   message: "Expected identifier or number at position 7, found end of input" }
+
+    parser.safeParse("price * 2 oops", schema);
+    // { code: "UNEXPECTED_INPUT", position: 10,
+    //   message: "Unexpected input at position 10: found \"oops\" (expected \"*\")" }
+    ```
+
+    Parse once, evaluate as often as you like:
+
+    ```ts
+    const result = parser.safeParse(userInput, schema);
+    if (result.success) {
+      const value = parser.evaluateAst(result.ast, values);
+    }
+    ```
+  </TabItem>
+</Tabs>
 
 <CardGrid stagger>
   <Card title="Compile-time validation" icon="approve-check">
@@ -71,6 +186,31 @@ const result = parser.evaluate("values.password == values.confirmPassword", sche
     lookups are own-property only — `__proto__`, `constructor` and friends
     never resolve to prototype internals, at parse time or eval time.
   </Card>
+</CardGrid>
+
+## Dive in
+
+<CardGrid>
+  <LinkCard
+    title="Getting started"
+    description="Install stringent and build the quickstart grammar — every example hover-able."
+    href="/stringent/guides/getting-started/"
+  />
+  <LinkCard
+    title="Playground"
+    description="Type expressions against a live grammar and watch them parse, type-check, and evaluate."
+    href="/stringent/playground/"
+  />
+  <LinkCard
+    title="Architecture"
+    description="The dual-engine design and the one law that makes it work: semantics are data."
+    href="/stringent/explanation/architecture/"
+  />
+  <LinkCard
+    title="API reference"
+    description="Generated from the source on every build — always in sync with the published types."
+    href="/stringent/api/"
+  />
 </CardGrid>
 
 :::note[Pre-1.0]
