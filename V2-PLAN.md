@@ -33,6 +33,11 @@ sections get rewritten.
 | D8 | Built-in literals gain `true`/`false`/`null`/`undefined` alongside number/string. | Biggest functional gap vs. the archive. Port the keyword-prefix-guard approach (so `nullable` ≠ `null` + `able`) in both engines. |
 | D9 | String escape handling (`\n \t \r \\ \" \' \0 \b \f \v \xHH \uHHHH`) in the runtime tokenizer, with the archive's 405-line test corpus ported. | v1 delegates to parsebox raw tokens; escapes silently don't work. |
 | D10 | Version: v2 ships as **0.1.0** (first minor bump; breaking). | Marks the API break under the 0.0.x scheme. |
+| D11 | **Schemas are arktype scopes/Types**, not a custom record-walking system. Identifier/path resolution uses `Type.get('address', 'zip')`; the legal-identifier set is `schema.keyof()`; nested access maps onto (rooted) submodules; `onUndeclaredKey: 'reject'` gives a strict no-undeclared-variables mode. `createParser(nodes, { scope })` accepts a user scope/module, which also makes arktype's keyword library (`string.email`, `number.integer`, …) valid in constraints for free. | Replaces v1's hand-rolled `resolveIdent`/`resolvePath`/`validateSchema` subsystem with public, typed arktype primitives. |
+| D12 | **A compiled rule is exposed as an arktype `Type`** (`parser.compile(input, schema)` → a Type whose input is the values schema and whose morph is evaluation; cross-field predicate rules lower to `narrow` with `ctx.reject({ path })`). | The integration story: a stringent rule becomes a Standard Schema, so it drops directly into react-hook-form (`arktypeResolver`), tRPC `.input`, hono, oRPC. `.in` introspects which variables a rule reads; `.in.toJsonSchema()` exports the form contract. |
+| D13 | **Evaluation/validation failures are `ArkErrors`** (serializable, `flatByPath` for per-field form state, `hasCode()` for programmatic handling, `actual: () => ''` to keep secret values out of messages). Parse-time failures remain stringent's own positioned `StringentError` diagnostics. | Two error domains, each using the representation built for it: source positions for parse errors, field paths for data errors. |
+| D14 | **Polymorphic eval may be written with arktype's `match`** (`match({ '{acc: string, append: string}': …, '{acc: number, append: number}': …, default: 'never' })`) as the idiomatic style; plain functions with narrowing stay supported. | Kills typeof chains while preserving correlation; match compiles to set-theory-discriminated dispatch (docs: ~9ns/case vs ~765ns for ts-pattern). |
+| D15 | **Runtime type relations use arktype set operations**: constraint matching = `candidate.extends(slot)` (with `ifExtends` driving backtracking); `overlaps` powers a new `createParser`-time **grammar ambiguity lint** (two nodes at one level whose operand types overlap); unit reduction gives static "this rule can never pass" detection when constraints intersect to `never`. | The runtime gets the same set-theory semantics TS applies at compile time, from public APIs — no `.internal` walking needed for the core path (respects the no-refinements-in-constraints assumption). |
 
 ## API sketch — the fixture grammar in v2
 
@@ -131,6 +136,35 @@ cached alongside.
 - Construction error when nodes at one precedence level disagree on tail
   shape.
 
+## ArkType usage discipline (from docs review)
+
+Rules the implementation must follow, sourced from arktype's own docs:
+
+- **Compose, don't transform.** `.or`/`.pipe`/string-embedded syntax/spread-
+  `merge` create cheap referencing Types; `.configure`/`.onUndeclaredKey`/
+  `.and` require full traversal and are expensive both at runtime and
+  in-editor. Inside a recursive parser every avoided transform is multiplied
+  across the tree. Prefer `merge` over intersection for non-overlapping
+  props.
+- **Compile once, cache forever.** Types JIT-precompile validators on
+  instantiation (`new Function`); every distinct constraint/resultType
+  definition is compiled once per parser and reused. Expose arktype's
+  `jitless` config for `new Function`-hostile environments (CF Workers).
+- **Depth escape hatch.** Mirror arktype's own `regex.as<>()` pattern: a
+  `parser.parse.as<Result>(input, schema)` form that skips type-level
+  parsing for expressions that hit TS2589, without losing runtime checking.
+- **Stability adapter.** `.internal`/`select`/`@ark/schema` are explicitly
+  not semver-frozen. The core path needs none of them (D15 uses public set
+  ops); anything that does (introspection tooling, editor autocomplete via
+  `.props`) goes behind one adapter module with a compatibility test, and
+  arktype gets pinned with a renovate rule.
+- **Evaluation stays synchronous.** Arktype morphs cannot be async (FAQ);
+  async operators (e.g. DB lookups) must be promise-valued outputs handled
+  outside the morph pipeline — out of scope for v2.
+- **Morph/union caveat.** Overlapping unioned morphs are a `ParseError` in
+  arktype; when lowering rules to Types (D12), keep overload branches
+  non-overlapping in input or identical in transform.
+
 ## Phases
 
 **Phase 0 — Spike (go/no-go).** Prove arktype at the type level inside the
@@ -138,8 +172,10 @@ literal-parse loop: wire `type.validate`/`type.infer` into one constraint
 check and one resultType resolution; run the recursion canaries
 (`types.typetest.ts`) and measure how far the TS2589 ceilings move. Decide:
 full arktype at compile time vs. hybrid (arktype at leaves, vocabulary
-matching mid-parse). Verify exact runtime APIs (subtype check, scope
-composition). Exit: written decision + measured canary floors.
+matching mid-parse). Verify runtime APIs on real code: `.extends`/
+`.ifExtends` semantics, `.get()` path resolution, scope spread composition,
+`match` dispatch cost in an eval loop. Exit: written decision + measured
+canary floors.
 
 **Phase 1 — Schema layer** (`src/schema/index.ts`, `src/createParser.ts`).
 New element factories (drop `sameAs`/`fromBinding`), binding-reference
@@ -167,12 +203,33 @@ leaf nodes with keyword-prefix guards in both engines; escape processing in
 the runtime string tokenizer. Port the archive's string-escape and
 primitive-literal test corpora (adapted to the v2 API).
 
-**Phase 6 — Docs, tests, release.** Rewrite affected DESIGN.md sections;
-update Starlight guides + playground fixture; port archive benchmark shapes
+**Phase 6 — Rule-as-Type integration (D12/D13).** `parser.compile()`
+returning an arktype Type; predicate rules via `narrow` + `ctx.reject({
+path })`; ArkErrors surfacing (`flatByPath`); `.in`/`.in.toJsonSchema()`
+introspection; Standard Schema conformance test against react-hook-form's
+`arktypeResolver`. Independent of Phases 1–5's internals; can develop in
+parallel once Phase 1's API lands.
+
+**Phase 7 — Docs, tests, release.** Rewrite affected DESIGN.md sections;
+update Starlight guides + playground fixture (playground gains identifier
+autocomplete via `schema.props`); port archive benchmark shapes
 (`vitest bench`); migration notes; bump to 0.1.0.
 
-Phases 1–4 land together (they are one breaking change); 5 and 6 can follow
+Phases 1–4 land together (they are one breaking change); 5–7 can follow
 incrementally.
+
+## Deferred (good ideas, not v2)
+
+- **Function-call operators via `type.fn`** — user-registered functions
+  (`max(a, b)`) declared with `type.fn(...params, ':', ret)`, whose
+  `.params`/`.returns` the parser introspects to type-check call sites.
+  Pairs with the `many()`/argument-list element from the v1 roadmap.
+- **Literal result types** — number/string literals parsing as arktype unit
+  types (`5` : `"5"`) for constant folding and exact-value comparison.
+- **`type.declare` schema conformance** — letting users pin a schema to an
+  existing TS interface with exact-conformance errors.
+- **JSON Schema import** (`@ark/json-schema`) — bootstrap a stringent
+  schema from an existing JSON Schema document.
 
 ## Migration (v1 → v2)
 
