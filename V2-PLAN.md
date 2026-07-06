@@ -25,7 +25,7 @@ sections get rewritten.
 |---|---|---|
 | D1 | Adopt `arktype` as the type-expression engine (runtime scopes/validators + `type.validate`/`type.infer` at compile time). | Gets union types, refinements, and assignability for free; the archived formeddable repo is a working reference for the integration (and its pitfalls — it did string-equality checks instead of real assignability; we won't). |
 | D2 | Binding names are auto-scoped type aliases. `rhs('acc')` means "assignable to whatever `acc` parsed as"; `resultType: 'then'` means "the type `then` parsed as". | Replaces `sameAs()` and `fromBinding()` with plain type expressions. One vocabulary everywhere. |
-| D3 | `resultType` is **always required**. | Considered inference-from-eval (impossible for dynamic parsing — TS types are erased and the parser needs result types as data mid-parse to backtrack) and conditional optionality (needs a pattern-classification meta-rule mirrored in both engines; "why is it forbidden here?" moments). One rule, one short string per node, self-documenting grammars. |
+| D3 | `resultType` is **always required**, and is any arktype definition — a string expression (`'boolean'`, `'then'`) or an object def (`{x: 'number', y: 'number'}` for a node producing a structured value). Binding aliases resolve inside both forms. | Considered inference-from-eval (impossible for dynamic parsing — TS types are erased and the parser needs result types as data mid-parse to backtrack) and conditional optionality (needs a pattern-classification meta-rule mirrored in both engines; "why is it forbidden here?" moments). One rule, self-documenting grammars. |
 | D4 | `eval` is **verified against** `resultType` at compile time; wrong return type is an error at the `defineNode` call site. Dev-mode runtime assertion via `.allows()` covers plain-JS users. | Inference-grade safety without breaking the semantics-are-data law. |
 | D5 | Correlated eval bindings: the bindings parameter is typed as a **distributed union** (`{acc: string, append: string} \| {acc: number, append: number}`), generated from the pattern's binding links. | Kills the `as any` in polymorphic evals (`__fixtures__/grammar.ts:90`). Narrow through the object (`typeof b.acc === 'string'`), then destructure. |
 | D6 | **Associativity is derived from the tail element's level; the `associativity` property is deleted.** Tail at tighter level (`lhs()`) → left-assoc via fold; tail at current level (`rhs()`) → right-assoc; `expr()` → delimited slots only. | v1 already reinterprets a left level's `rhs()` tail to parse at the next level (`runtime/parser.ts:634`) — the label lies. Deriving from shape makes the pattern the single source of truth. Level coherence check: all nodes at a level must agree on tail shape (replaces the mix-associativity error). |
@@ -99,14 +99,22 @@ Unchanged: `defineNode`/`createParser` shape, `.as()` naming, `lazy`,
   binding names (`node`, `outputSchema`, `__proto__`) stay reserved.
 
 ### Constraint satisfaction = assignability
-- Runtime: compile each distinct type expression once (cached `Map<string,
-  Type>`), check candidate-output ⊆ constraint via arktype's subtype check.
+- Runtime: compile each distinct type definition once (cached), check
+  candidate-output ⊆ constraint.
 - Compile time: TS assignability on `type.infer<candidate> extends
   type.infer<constraint>` as the proxy.
-- **Known divergence:** refinements erase at compile time (`'number > 0'`
-  infers as `number`), so literal-mode `parse()` is more permissive than
-  `safeParse` for refined types. Documented; Phase 0 decides whether to
-  restrict refinements in constraint position instead.
+- **Refinements are validation-only.** Arktype refinements (`'number > 0'`,
+  `'string.email'`) erase to their base TS type at compile time, so if the
+  runtime checked them during parsing, `parse()`'s promise ("if it compiles,
+  it parses") would break: with schema `{age: 'number'}` and a slot
+  constrained `'number >= 0'`, the literal `age!` typechecks (`number
+  extends number`) but runtime assignability rejects it. The fix is
+  principled, not a workaround: expression *typing* runs on erased
+  (TS-exact) types in **both** engines, and refinements apply where they are
+  actually meaningful — validating the `values` object at evaluation time.
+  (Refinement-level typing of expressions is not even well-defined:
+  arithmetic doesn't preserve refinements — the "type" of `a + b` for two
+  `'number > 0'` operands erases after one operation anyway.)
 
 ### Result type resolution
 Per parse, after all bindings resolve: substitute each binding's parsed type
@@ -184,12 +192,19 @@ incrementally.
 1. **TS recursion depth** — arktype's type-level parser inside our
    type-level parse loop may lower the ~14-term literal-mode ceiling.
    Phase 0 measures; hybrid fallback exists. Runtime paths are unaffected.
-2. **Refinement erasure divergence** (see Semantics) — document vs.
-   restrict, decided in Phase 0.
+2. **Refinements-are-validation-only** (see Semantics) — Phase 0 confirms
+   arktype exposes a clean erased projection to compare against.
 3. **Bundle/perf cost of arktype at runtime** — mitigated by compiling each
-   type expression once per parser; benchmark in Phase 6 against v1 numbers.
+   type definition once per parser; benchmark in Phase 6 against v1 numbers.
 4. **Correlated-narrowing ergonomics** — destructuring before narrowing
    severs correlation (TS limitation). Docs must show the `b.x` pattern.
-5. **`expr()` in undelimited tail positions** breaks precedence by design;
-   validation should reject `expr()` tails not followed by a `constVal`
-   closer (new check, Phase 1).
+5. **`expr()` must be followed by a `constVal` in the same pattern** (new
+   Phase 1 check). `expr()` resets to the full grammar, so in an undelimited
+   tail it consumes operators *looser* than the node's own precedence:
+   with `sub: [lhs('number'), '-', expr()]` at precedence 2 and `eq` at
+   precedence 1, `10 - 5 == 2` parses as `10 - (5 == 2)` instead of
+   `(10 - 5) == 2`; `a - b ? x : y` becomes `a - (b ? x : y)`; and
+   `10 - 5 - 2` right-nests to `10 - (5 - 2)` = 7 instead of 3. A closing
+   const (parens' `)`, ternary's `:`) makes the region delimiter-bounded —
+   its extent is decided by tokens, not precedence — which is why `expr()`
+   is safe there and only there. Final operand slots must be `lhs()`/`rhs()`.
