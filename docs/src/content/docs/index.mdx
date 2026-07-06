@@ -1,0 +1,80 @@
+---
+title: Stringent
+description: A type-safe expression parser and evaluator for TypeScript — compile-time validation and inference for string literals, structured errors and evaluation for dynamic strings.
+template: splash
+hero:
+  tagline: One grammar definition, two engines — expressions in string literals are validated and fully typed at compile time, while dynamic strings get structured errors and runtime evaluation.
+  actions:
+    - text: Get started
+      link: /stringent/guides/getting-started/
+      icon: right-arrow
+    - text: Try the playground
+      link: /stringent/playground/
+      icon: rocket
+      variant: secondary
+    - text: View on GitHub
+      link: https://github.com/eralmansouri/stringent
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+```ts twoslash
+import {
+  defineNode, number, string, path, lhs, rhs, expr, constVal,
+  sameAs, fromBinding, createParser,
+} from "stringent";
+
+const numberLit = defineNode({ name: "num", pattern: [number()], precedence: "atom" });
+const stringLit = defineNode({ name: "str", pattern: [string(['"', "'"])], precedence: "atom" });
+const variable = defineNode({ name: "var", pattern: [path()], precedence: "atom" });
+
+const eq = defineNode({
+  name: "eq",
+  pattern: [lhs().as("left"), constVal("=="), rhs(sameAs("left")).as("right")],
+  precedence: 1,
+  resultType: "boolean",
+  eval: ({ left, right }) => left === right,
+});
+
+const parser = createParser([numberLit, stringLit, variable, eq] as const);
+// ---cut---
+const schema = { values: { password: "string", confirmPassword: "string" } } as const;
+const values = { values: { password: "hunter2", confirmPassword: "hunter2" } };
+
+const result = parser.evaluate("values.password == values.confirmPassword", schema, values);
+//    ^?
+```
+
+*Hover the code above — every type is real, produced by the actual library at documentation build time.*
+
+<CardGrid stagger>
+  <Card title="Compile-time validation" icon="approve-check">
+    `parse()` only accepts string literals that fully parse against your
+    grammar. An invalid expression — a syntax error, a type mismatch, even a
+    typo in a schema leaf — is a **compile-time error**, and valid expressions
+    get an exactly inferred AST and result type.
+  </Card>
+  <Card title="Runtime safety" icon="warning">
+    Dynamic strings go through `safeParse()`, which never throws for input.
+    You get structured errors with an error code, a 0-based position, and the
+    tokens that would have been valid there.
+  </Card>
+  <Card title="Polymorphic grammars" icon="puzzle">
+    Union constraints, `sameAs()` and `fromBinding()` give you overloaded
+    operators without per-type node variants — one `add` node handles
+    `number + number → number` and `string + string → string`.
+  </Card>
+  <Card title="Secure by default" icon="seti:lock">
+    Expressions are treated as untrusted input. All identifier and path
+    lookups are own-property only — `__proto__`, `constructor` and friends
+    never resolve to prototype internals, at parse time or eval time.
+  </Card>
+</CardGrid>
+
+:::note[Pre-1.0]
+The API is stabilizing but may still change between minor versions. See the
+[architecture page](/stringent/explanation/architecture/) for the design and
+its rationale.
+:::

@@ -1,0 +1,67 @@
+---
+title: Error Handling
+description: Structured parse errors, error ranking, and which APIs throw.
+sidebar:
+  order: 5
+---
+
+Stringent draws a hard line between **input errors** (bad expressions — never
+throw, returned as data) and **programmer errors** (bad schemas, bypassed
+compile-time checks — always throw).
+
+## `safeParse` never throws for input
+
+Its error object:
+
+```ts
+interface StringentError {
+  code: "PARSE_ERROR" | "TYPE_MISMATCH" | "UNEXPECTED_INPUT";
+  message: string;
+  position: number;              // 0-based offset into the input
+  expected?: readonly string[];  // what would have been valid at position
+  found?: string;                // the next few characters at position
+}
+```
+
+The three codes:
+
+- **`PARSE_ERROR`** — no interpretation matched the input.
+- **`TYPE_MISMATCH`** — an expression parsed, but a constraint rejected it
+  (e.g. a `number`-constrained slot saw a `string`, or an identifier wasn't in
+  the schema).
+- **`UNEXPECTED_INPUT`** — a prefix parsed, but trailing input remains.
+
+Example messages:
+
+```text
+Expected a number expression at position 2, got unknown ('zz' is not in the schema)
+Expected a number (same type as 'left') expression at position 2, got string
+Unexpected input at position 4: found "junk!!" (expected "*", "+" or "==")
+```
+
+## How errors are ranked
+
+Backtracking parsers see many failures per input; most are noise. The parser
+records the **furthest** token failure plus the furthest-reaching constraint
+mismatch *span*. A mismatch wins when its span reaches both the stuck position
+and the furthest token failure — otherwise it is backtracking noise (e.g. a
+ternary probing whether `1` is boolean) and the token story wins.
+
+:::note[Known weakness]
+Unclosed delimiters (`"(1"`, `"(1))"`) can currently report a speculative
+constraint mismatch instead of the missing/stray delimiter, because the
+mismatch span ties the delimiter failure at end-of-input. Until a credibility
+signal on mismatches lands, delimiter errors may read as type errors.
+:::
+
+## What throws
+
+| Error | Thrown by | Meaning |
+|---|---|---|
+| Schema validation error | `safeParse` (and construction) | Unknown type name in a schema — a programmer error, not an input error |
+| `StringentParseError` | `parse()` / `evaluate()` | Their compile-time validation was bypassed with a cast; carries the same fields as `StringentError` |
+| `EvaluationError` | `evaluateAst` / `evaluate` | Undefined identifier or path at evaluation, or a node without `eval` |
+
+Grammar mistakes (duplicate names, invalid precedence, dangling `sameAs`
+references, …) throw at `createParser` time — see
+[construction-time validation](/stringent/guides/defining-a-grammar/#construction-time-validation).

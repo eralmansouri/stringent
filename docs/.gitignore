@@ -1,0 +1,7 @@
+# build output
+dist/
+# generated types
+.astro/
+# generated API reference (starlight-typedoc output)
+src/content/docs/api/
+node_modules/

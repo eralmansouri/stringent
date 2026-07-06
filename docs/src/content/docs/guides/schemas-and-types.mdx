@@ -1,0 +1,103 @@
+---
+title: Schemas & Types
+description: The type vocabulary, schema validation, nested schemas with member access, and polymorphic nodes.
+sidebar:
+  order: 3
+---
+
+Stringent's type names are plain strings — `"number"`, `"string"`, or any name
+your grammar mints — but the set of *valid* names is closed and known at
+parser construction. Types drive *parsing*, not just results: when an operand
+slot constrained to `number` sees a `string` expression, the parser backtracks
+and tries another interpretation, in both engines.
+
+## The type vocabulary
+
+```text
+vocabulary = { static resultTypes of all nodes }
+           ∪ { "number", "string", "boolean", "unknown" }   // built-in elements
+           ∪ createParser options.types                      // schema-only types
+```
+
+Validation happens at three layers:
+
+1. **Construction time** — `createParser` throws for any constraint string
+   outside the vocabulary. A typo'd `lhs("numbr")` is an immediate
+   construction error, not a silently dead grammar rule.
+2. **Compile time** — the `schema` parameter of `parse`/`safeParse`/`evaluate`
+   is bound by `SchemaShapeOf<TVocab>`, so `{ x: "numbr" }` errors at the leaf
+   with the valid names in the message.
+3. **Runtime** — `safeParse` re-checks schema leaves, covering
+   dynamically-built schemas. Schema errors **throw** — they are programmer
+   errors, distinct from input errors, which never throw.
+
+Matching is **exact name equality**: `"number>0"` is not a subtype of
+`"number"` — there is no subtyping. Type names are opaque tags, related only
+by equality.
+
+## Nested schemas & member access
+
+Schemas can nest; the `path()` element matches dotted paths and resolves their
+types by walking the schema — at compile time *and* runtime:
+
+```ts
+const schema = { values: { password: "string", confirmPassword: "string" } } as const;
+
+const [ast] = parser.parse("values.password == values.confirmPassword", schema);
+// left/right are PathNode<["values", "password"], "string">, result is "boolean"
+```
+
+Path syntax is strict: `values.password` is valid, but whitespace around the
+dot (`values . password`) and dangling dots (`values.`) are not. Lookups are
+own-property only — `__proto__`, `constructor` and friends never resolve to
+prototype internals, at parse time or eval time.
+
+## Polymorphic nodes
+
+Three primitives replace per-type node variants:
+
+- **Union constraints** — `lhs(["number", "string"])`: the slot accepts any of
+  the listed types (operator overloading).
+- **`sameAs(binding)`** — `rhs(sameAs("left"))`: this operand must have the
+  same type as an earlier operand, whatever that turned out to be. `sameAs`
+  may only reference a binding that appears *earlier* in the pattern.
+- **`fromBinding(binding)`** — `resultType: fromBinding("left")`: the node's
+  result type is derived per-parse from a named operand.
+
+Together they give polymorphic operators without per-type variants:
+
+```ts
+// number+number → number, string+string → string, number+string → TYPE_MISMATCH
+const add = defineNode({
+  name: "add",
+  pattern: [lhs(["number", "string"]).as("left"), constVal("+"), rhs(sameAs("left")).as("right")],
+  precedence: 2,
+  associativity: "left",
+  resultType: fromBinding("left"),
+  eval: ({ left, right }) => (left as any) + (right as any),
+});
+```
+
+The derived output type is computed per-parse, so `parser.evaluate("'a'+'b'", …)`
+is typed `string` while `parser.evaluate("1+2", …)` is typed `number`.
+
+## The `"unknown"` type
+
+`"unknown"` is the type of unresolved identifiers and paths. Name-constrained
+slots reject it, which is how "identifier not in schema" surfaces as a
+`TYPE_MISMATCH` with the offending name.
+
+Note that `sameAs` compares *parsed* types, so two unknown operands agree:
+`zz == yy` with an empty schema parses (both sides are `"unknown"`) and only
+fails at evaluation. If a grammar wants unresolved identifiers rejected
+structurally, constrain slots with type names rather than relying on `sameAs`
+alone.
+
+## Constraint forms at a glance
+
+| Form | Meaning |
+|---|---|
+| `lhs()` | unconstrained |
+| `lhs("number")` | exact type name |
+| `lhs(["number", "string"])` | any of the listed names (overloading) |
+| `rhs(sameAs("left"))` | same type as an earlier named operand |

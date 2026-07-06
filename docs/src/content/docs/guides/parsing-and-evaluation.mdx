@@ -1,0 +1,88 @@
+---
+title: Parsing & Evaluation
+description: The parse, safeParse, evaluate and evaluateAst entry points, lazy evaluation, and type-level limits.
+sidebar:
+  order: 4
+---
+
+A parser built with `createParser` exposes four entry points. Which one you
+reach for depends on where the expression comes from:
+
+| Entry point | Input | Checked | On failure |
+|---|---|---|---|
+| `parse(literal, schema)` | string **literal** | compile time | compile error |
+| `safeParse(input, schema)` | **dynamic** string | runtime | returns `{ success: false, error }` |
+| `evaluate(literal, schema, values)` | string **literal** | compile time | compile error |
+| `evaluateAst(ast, values)` | a parsed AST | runtime | throws `EvaluationError` |
+
+## Literal inputs: `parse` and `evaluate`
+
+`parse()` only accepts literals that fully parse against the grammar, and the
+AST type is exactly inferred. `evaluate()` parses and evaluates in one step;
+the result type is inferred from the expression — including through
+polymorphic nodes:
+
+```ts
+parser.evaluate("1+2*3", {}, {});                 // 7, typed number
+parser.evaluate("'a'+'b'", {}, {});               // "ab", typed string
+parser.evaluate("1==2 ? 'yes' : 'no'", {}, {});   // "no", typed string
+parser.evaluate("x*2", { x: "number" }, { x: 21 }); // 42
+```
+
+Dynamic strings are rejected by `parse()` **at compile time** — use
+`safeParse()` for anything that isn't a literal.
+
+:::caution[Literal schemas only]
+`parse()`'s compile-time guarantee assumes literal schema types. A schema
+typed as a wide `Record<string, "number">` makes the type engine resolve
+every identifier optimistically, so an invalid literal can compile and then
+throw `StringentParseError` at runtime. Use literal schemas with `parse()`;
+use `safeParse()` otherwise.
+:::
+
+## Dynamic inputs: `safeParse` + `evaluateAst`
+
+`safeParse()` requires full consumption of the input and returns structured
+errors instead of throwing:
+
+```ts
+const parsed = parser.safeParse(userInput, schema);
+if (parsed.success) {
+  const value = parser.evaluateAst(parsed.ast, values);
+} else {
+  console.error(parsed.error.message, parsed.error.position);
+}
+```
+
+See [Error handling](/stringent/guides/error-handling/) for the error shape
+and ranking rules.
+
+## Evaluation model
+
+`evaluate`/`evaluateAst` walk the AST post-order: literals yield their values,
+identifiers and paths look up the values object, named-binding children
+evaluate first, then the node's `eval(bindings, values)` runs. The parsed
+output type types the result, so evaluation is typed end-to-end for literal
+inputs.
+
+Nodes with `lazy: true` receive **memoized thunks** in `eval`, so untaken
+ternary branches (and the right side of a short-circuiting `&&`) are never
+evaluated.
+
+All identifier and path lookups — in the evaluator *and* in parse-time schema
+resolution — use own-property checks (`Object.hasOwn`). `constructor`,
+`__proto__`, `x.constructor` and the like resolve to "not defined", never to
+prototype internals.
+
+## Limits & rules
+
+- **Precedence** must be `"atom"` or a non-negative safe integer.
+- **Whitespace** is skipped between tokens, but not allowed inside paths
+  around `.`.
+- **Type-level input length**: left-associative chains use a tail-recursive
+  fold and comfortably handle 100+ terms. Right-associative chains and
+  `expr()` nesting (parens, ternary branches) pay instantiation depth per
+  precedence level — on a 6-level grammar that's roughly 14 right-associative
+  terms and 3 nesting levels before TypeScript's recursion limit (TS2589);
+  fewer precedence levels stretch these limits. Runtime parsing (`safeParse`)
+  has no such limit.
