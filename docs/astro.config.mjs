@@ -45,6 +45,7 @@ export default defineConfig({
           typeDoc: {
             excludeInternal: true,
             sort: ["source-order"],
+            entryFileName: "index",
           },
         }),
       ],
