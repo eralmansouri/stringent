@@ -167,15 +167,19 @@ Rules the implementation must follow, sourced from arktype's own docs:
 
 ## Phases
 
-**Phase 0 — Spike (go/no-go).** Prove arktype at the type level inside the
-literal-parse loop: wire `type.validate`/`type.infer` into one constraint
-check and one resultType resolution; run the recursion canaries
-(`types.typetest.ts`) and measure how far the TS2589 ceilings move. Decide:
-full arktype at compile time vs. hybrid (arktype at leaves, vocabulary
-matching mid-parse). Verify runtime APIs on real code: `.extends`/
-`.ifExtends` semantics, `.get()` path resolution, scope spread composition,
-`match` dispatch cost in an eval loop. Exit: written decision + measured
-canary floors.
+**Phase 0 — Spike (go/no-go). ✅ DONE — GO.** Results in
+`spike/phase0/RESULTS.md`. Decision: **full arktype at compile time** (no
+hybrid needed) — with a finite grammar def set, TS memoizes assignability
+checks, so marginal per-parse-step cost is ~zero (500-deep recursion with
+per-level checks: +3k instantiations over control, no TS2589); one-time
+cost ~1.2k instantiations per distinct def. All D11–D15 runtime APIs
+verified. Three corrections folded into the design: `match` object cases
+use the fluent `.case()` API (object literals aren't string-embeddable as
+case keys); unsatisfiable constraint intersections **throw at construction**
+(try/catch in `createParser`, re-raise as grammar error); `extends()` isn't
+internally memoized (~0.6µs raw) — backtracking memoizes verdicts per
+(candidate, constraint) pair (~160ns). Constraint checks in the type engine
+must be expressed over literal def strings so TS memoization applies.
 
 **Phase 1 — Schema layer** (`src/schema/index.ts`, `src/createParser.ts`).
 New element factories (drop `sameAs`/`fromBinding`), binding-reference
