@@ -20,10 +20,10 @@ import {
 import { fixtureParser as parser, formSchema } from "./__fixtures__/grammar.js";
 
 describe("DESIGN: validation layers — schema typos", () => {
-  it("a typo'd schema leaf on evaluate() is NOT a compile error, but throws at runtime", () => {
-    // safeParse carries type.validate (leaf typos are compile errors there —
-    // see design-claims.typetest.ts); evaluate cannot (inference poisoning),
-    // so the same typo surfaces at runtime instead:
+  it("a typo'd schema leaf throws at runtime when the compile-time check is bypassed", () => {
+    // every entry point carries type.validate now (leaf typos are compile
+    // errors — see design-claims.typetest.ts); the casts bypass it to
+    // exercise the runtime check that protects plain-JS callers:
     expect(() => {
       parser.evaluate("1+1" as never, { x: "numbr" } as never, { x: 1 } as never);
     }).toThrow(/invalid schema/);

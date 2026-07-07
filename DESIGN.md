@@ -72,15 +72,18 @@ Validation happens at three layers:
    and `.eval()` are chain methods — NOT config siblings — because a
    pattern-dependent sibling property makes tuple inference order-
    sensitive (demonstrated in the same file). Schema leaves are checked
-   via `type.validate` on `safeParse`/`compile`; `parse`/`evaluate`
-   cannot carry that validator, for two demonstrated reasons
-   (design-claims.typetest.ts): (a) a bare `type.infer<TSchema>` values
-   parameter DETERMINISTICALLY poisons inference — which is why
-   `evaluate`'s values are `NoInfer`-wrapped; and (b) with their
-   deferred-conditional input parameter, a `validate`-wrapped schema is
-   METASTABLE: the identical call typechecks or collapses to `never`
-   depending on declaration order elsewhere in the file. Bad leaves
-   there surface through the input check and at runtime.
+   via `type.validate` (in the parser's scope) on EVERY entry point —
+   `safeParse`, `compile`, `parse`, and `evaluate`. History: `parse`/
+   `evaluate` could not carry that validator before the 2026-07 rework
+   (combined with their deferred-conditional input parameter, inference
+   was METASTABLE — declaration-order-dependent); the rework's depth
+   reductions moved the shape off the instantiation edge, re-verified
+   across 8 declaration-order permutations × TS 5.7/5.9/6.0
+   (design-claims.typetest.ts "inference-poisoning history"). One rule
+   survives unchanged: `evaluate`'s values parameter stays
+   `NoInfer`-wrapped — a bare `type.infer<TSchema>` values parameter
+   silently UNIONS the values argument into `TSchema` (pinned, with the
+   validate-masked silent variant).
 2. **Construction time.** `createParser` re-checks everything the builder
    checks (for plain-JS callers) plus the cross-element and cross-node
    rules types cannot see, and throws with a precise message.
@@ -94,11 +97,12 @@ defineNode({ name: "bad", precedence: 1, pattern: (p) => p.operand("nmbr") });
 //                                                                 ~~~~~~
 // ✗ Argument of type '"nmbr"' is not assignable to "'nmbr' is unresolvable"
 
-// the same typo in a schema leaf is a COMPILE error on safeParse:
+// the same typo in a schema leaf is a COMPILE error on EVERY entry point:
 parser.safeParse("1+1", { x: "numbr" });
+parser.evaluate("1+1", { x: "numbr" }, { x: 1 });
 //                            ~~~~~~~ ✗ Type '"numbr"' is not assignable
 //                                      to '"'numbr' is unresolvable"'
-// …but NOT on evaluate (the inference-poisoning limit) — layer 3 catches it:
+// layer 3 remains the authority for plain-JS callers and cast bypasses:
 parser.evaluate("1+1" as never, { x: "numbr" } as never, { x: 1 } as never);
 // ✗ StringentParseError: "invalid schema — 'numbr' is unresolvable…"
 ```

@@ -35,8 +35,9 @@ Validation happens at three layers:
    validates every constraint and result def where it is written, against
    the chain's bindings; a typo'd `operand("nmbr")` is a compile error at
    that call. Schema leaves are checked via arktype's `type.validate` (in
-   the parser's scope) on `safeParse` and `compile`, so `{ x: "numbr" }`
-   errors at the leaf.
+   the parser's scope) on every entry point, so `{ x: "numbr" }` errors
+   at the leaf whether you call `safeParse`, `compile`, `parse`, or
+   `evaluate`.
 2. **Construction time** — `createParser` re-checks everything for
    plain-JS callers, plus the cross-element and cross-node rules types
    cannot see, and throws with a precise message.

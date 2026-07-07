@@ -156,21 +156,21 @@ export type ValidatedInput<
  * Parser interface with type-safe parse methods.
  *
  * Schemas are arktype object defs, validated at compile time by
- * type.validate IN THE PARSER'S SCOPE — a typo'd leaf like { x: "numbr" }
- * errors at the leaf, while an alias leaf like { created: "Timestamp" }
- * resolves when the parser was created with { scope: { Timestamp: … } }.
- * The same scope drives literal-mode parsing (identifier/path types) and
- * runtime compilation.
+ * type.validate IN THE PARSER'S SCOPE on EVERY entry point — a typo'd
+ * leaf like { x: "numbr" } errors at the leaf, while an alias leaf like
+ * { created: "Timestamp" } resolves when the parser was created with
+ * { scope: { Timestamp: … } }. The same scope drives literal-mode
+ * parsing (identifier/path types) and runtime compilation.
  *
- * Schema-leaf validation: safeParse/compile validate leaves eagerly via
- * type.validate. parse/evaluate cannot: with their deferred-conditional
- * input parameter, a validate-wrapped schema sits on TS's instantiation
- * edge and inference becomes METASTABLE — the identical call typechecks
- * or collapses to never depending on declaration order elsewhere in the
- * file (demonstrated; see design-claims.typetest.ts and the V2-PLAN.md
- * gotcha). Bad leaf defs there surface through the input check
- * ("unknown"-typed identifiers fail constrained slots) and at runtime
- * with a precise message.
+ * History note: parse/evaluate could not carry type.validate before the
+ * 2026-07 rework — combined with their deferred-conditional input
+ * parameter, inference was METASTABLE (declaration-order-dependent).
+ * The rework's depth reductions moved the shape off the instantiation
+ * edge; re-tested 2026-07-07 across 8 declaration-order permutations ×
+ * TS 5.7/5.9/6.0, warm and cold (pinned in design-claims.typetest.ts).
+ * evaluate's values stay NoInfer-wrapped — WITHOUT it, TS inverts the
+ * mapped type inside type.infer and silently unions the values argument
+ * into TSchema (also pinned there).
  */
 export interface Parser<
   TGrammar extends Grammar,
@@ -187,7 +187,7 @@ export interface Parser<
    */
   parse<TInput extends string, const TSchema extends SchemaShape>(
     input: ValidatedInput<TGrammar, TInput, Context<TSchema, $>>,
-    schema: TSchema
+    schema: type.validate<TSchema, $>
   ): Parse<TGrammar, TInput, Context<TSchema, $>>;
 
   /**
@@ -212,9 +212,10 @@ export interface Parser<
    */
   evaluate<TInput extends string, const TSchema extends SchemaShape>(
     input: ValidatedInput<TGrammar, TInput, Context<TSchema, $>>,
-    schema: TSchema,
-    // NoInfer: type.infer as a sibling parameter otherwise poisons the
-    // input conditional's generic inference (measured — see V2-PLAN.md)
+    schema: type.validate<TSchema, $>,
+    // NoInfer: without it TS inverts the mapped type inside type.infer
+    // and silently UNIONS the values argument into TSchema (pinned in
+    // design-claims.typetest.ts "inference-poisoning")
     values: NoInfer<type.infer<TSchema, $>>
   ): EvaluateResult<TGrammar, TInput, TSchema, $>;
 

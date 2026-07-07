@@ -520,6 +520,11 @@ check: ~678k instantiations / ~2.7s.
   conditional-input signature is the METASTABLE half — the same call
   passes or collapses to never depending on declaration order in the
   file (it even typechecks project-wide today), so it must never ship.
+  **SUPERSEDED (2026-07-07, post-rework):** the depth reductions moved
+  that shape off the instantiation edge; parse/evaluate now carry
+  type.validate, re-verified across declaration-order permutations and
+  TS 5.7/5.9/6.0 (design-claims.typetest.ts). The NoInfer rule for
+  values is still load-bearing.
 - Deep-equality test assertions see enumerable symbol props → the parsed
   Type rides on a NON-enumerable symbol (`OUTPUT_TYPE`, set via
   `setOutputType`).

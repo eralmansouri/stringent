@@ -30,16 +30,26 @@ type AssertEqual<T, Expected> = [T] extends [Expected]
   : false;
 
 // =============================================================================
-// DESIGN: the inference-poisoning limit — WHY parse/evaluate cannot carry
-// type.validate on their schema parameter while safeParse can. Four
-// variants of evaluate()'s REAL signature, differing only in how schema
-// and values are declared. (These use the actual ValidatedInput/
-// EvaluateResult types from createParser.ts.)
+// DESIGN: the inference-poisoning history — evaluate/parse NOW carry
+// type.validate on their schema parameter. Before the 2026-07 rework
+// they could not: combined with the deferred-conditional input, the
+// validate-wrapped schema made inference METASTABLE (the identical call
+// typechecked or collapsed to never depending on declaration order
+// elsewhere — bisected 2026-07-07 pre-rework). The rework's depth
+// reductions (scope-free def algebra) moved the shape off the
+// instantiation edge; re-tested 2026-07-07 post-rework across 8
+// declaration-order permutations × TS 5.7/5.9/6.0, warm and cold — all
+// exact. The variants below pin what still holds and what changed.
 // =============================================================================
 
 type PG = ComputeGrammar<typeof fixtureNodes>;
 
-// 1 — CONTROL, the shipped shape: schema naked, values NoInfer'd. Works.
+// 1 — the SHIPPED shape (evaluate's real signature): validate-wrapped
+// schema + deferred-conditional input + NoInfer'd values. Exact
+// inference, schema typos error at the leaf, invalid inputs at the
+// input. The permutation canaries: a control signature declared BEFORE
+// (this file) and AFTER (the calls further down) — the pre-rework flip
+// trigger — must not change the outcome.
 declare function evalControl<
   TInput extends string,
   const TSchema extends SchemaShape
@@ -50,25 +60,23 @@ declare function evalControl<
 ): EvaluateResult<PG, TInput, TSchema>;
 const okControl: number = evalControl("x+1", { x: "number" }, { x: 41 });
 
-// 2 — schema routed through type.validate (what safeParse does), with
-// the deferred-conditional input: METASTABLE. This exact call typechecks
-// in THIS file but the byte-identical signature+call collapses to
-// `input: never` in a file whose declarations are ordered differently
-// (bisected 2026-07-07: control declared before/after flips it). An API
-// whose inference depends on unrelated neighbors is unshippable, which
-// is why parse/evaluate do NOT carry validate. No expect-error here —
-// a neighborhood-dependent outcome cannot be pinned; the declaration
-// stays as documentation of the shape:
-declare function evalWithValidate<
+declare function evalShipped<
   TInput extends string,
-  const TSchema extends SchemaShape
+  const TSchema extends SchemaShape,
+  const $ extends {} = {}
 >(
-  input: ValidatedInput<PG, TInput, Context<TSchema>>,
-  schema: type.validate<TSchema>,
-  values: NoInfer<type.infer<TSchema>>
-): EvaluateResult<PG, TInput, TSchema>;
+  input: ValidatedInput<PG, TInput, Context<TSchema, $>>,
+  schema: type.validate<TSchema, $>,
+  values: NoInfer<type.infer<TSchema, $>>
+): EvaluateResult<PG, TInput, TSchema, $>;
+const okShipped = evalShipped("x+1", { x: "number" }, { x: 41 });
+type _shippedExact = AssertTrue<AssertEqual<typeof okShipped, number>>;
+// @ts-expect-error — schema typos now error at the leaf on evaluate too
+evalShipped("x+1", { x: "numbr" }, { x: 41 });
+// @ts-expect-error — invalid input still errors (full consumption)
+evalShipped("x+", { x: "number" }, { x: 41 });
 
-// 3 — values WITHOUT NoInfer (the original bug NoInfer fixed): same death.
+// 2 — values WITHOUT NoInfer: still death, unchanged by the rework.
 declare function evalBareInfer<
   TInput extends string,
   const TSchema extends SchemaShape
@@ -80,7 +88,7 @@ declare function evalBareInfer<
 // @ts-expect-error — input is 'never': the values argument poisoned TSchema
 evalBareInfer("x+1", { x: "number" }, { x: 41 });
 
-// 3' — the SMOKING GUN, mechanism of (3): reveal what TSchema fixes to.
+// 2' — the SMOKING GUN, mechanism of (2): reveal what TSchema fixes to.
 // TS inverts the mapped type inside type.infer and admits the VALUES
 // argument as an inference candidate, then UNIONS the candidates. The
 // 41-leaf is not a def, so Parse<> over that branch fails downstream.
@@ -93,10 +101,28 @@ type _poisonedUnion = AssertTrue<
   AssertEqual<typeof poisoned, { readonly x: "number" } | { readonly x: 41 }>
 >;
 
-// 4 — validate with a PLAIN input parameter (safeParse's shape): inference
-// is exact. The poison is the COMBINATION of validate with the deep
-// deferred-conditional input, not validate itself — which is precisely
-// why safeParse can validate schema leaves and parse/evaluate cannot.
+// 2'' — with validate on schema but values still bare, the poisoning is
+// SILENT: nothing errors (validate supplies the primary candidate), but
+// TSchema is still the union — result types can quietly degrade. This is
+// why values stay NoInfer-wrapped even now.
+declare function revealSilent<
+  TInput extends string,
+  const TSchema extends SchemaShape,
+  const $ extends {} = {}
+>(
+  input: TInput,
+  schema: type.validate<TSchema, $>,
+  values: type.infer<TSchema, $>
+): TSchema;
+const silent = revealSilent("x+1", { x: "number" }, { x: 41 });
+type _silentUnion = AssertTrue<
+  AssertEqual<typeof silent, { readonly x: "number" } | { readonly x: 41 }>
+>;
+
+// 3 — validate with a PLAIN input parameter (safeParse's shape): also
+// exact — but a plain input surrenders parse/evaluate's core guarantee:
+// an invalid literal COMPILES here (it parses a prefix; nothing checks
+// full consumption), typed by whatever prefix parsed.
 declare function validatePlainInput<
   TInput extends string,
   const TSchema extends SchemaShape
@@ -109,21 +135,25 @@ const clean = validatePlainInput("x+1", { x: "number" }, { x: 41 });
 type _cleanExact = AssertTrue<
   AssertEqual<typeof clean, { readonly x: "number" }>
 >;
+const junkCompiles = validatePlainInput("x+", { x: "number" }, { x: 41 });
+type _junkCompiles = AssertTrue<
+  AssertEqual<typeof junkCompiles, { readonly x: "number" }>
+>;
 
 // =============================================================================
-// DESIGN: validation layers — safeParse catches schema-leaf typos at
-// compile time; evaluate cannot (inference poisoning), so the same typo
-// only fails at runtime (design-claims.test.ts has the runtime half)
+// DESIGN: validation layers — EVERY entry point catches schema-leaf
+// typos at compile time (design-claims.test.ts has the runtime half,
+// reached via casts). (Careful: spelling the expect-error directive
+// inside a prose comment ACTIVATES it — tsc matches the text anywhere
+// in a comment. That mistake was made writing this file.)
 // =============================================================================
 
 // @ts-expect-error — "numbr" is not a def; the leaf errors HERE
 parser.safeParse("1+1", { x: "numbr" });
-
-// the identical typo on evaluate() COMPILES — this line carrying no
-// expect-error directive is the demonstration. (Careful: spelling the
-// directive inside a prose comment ACTIVATES it — tsc matches the text
-// anywhere in a comment. That mistake was made writing this file.)
-parser.evaluate("1+1" as never, { x: "numbr" } as never, { x: 1 } as never);
+// @ts-expect-error — same typo, same leaf error on evaluate
+parser.evaluate("1+1", { x: "numbr" }, { x: 1 });
+// @ts-expect-error — and on parse
+parser.parse("1+1", { x: "numbr" });
 
 // =============================================================================
 // DESIGN: 'unknown' identifiers — constrained slots reject at compile
