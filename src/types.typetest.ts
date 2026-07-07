@@ -557,9 +557,12 @@ type _o1 = AssertTrue<AssertEqual<typeof rangeVal, { min: number; max: number }>
 // breaks one of these, literal-mode capacity regressed.
 //
 // Instantiation budget (tsc --extendedDiagnostics, whole project):
-// 1,083,879 before the pattern builder → 1,136,550 with it → 1,274,619
-// with scope threading + the scoped canaries below (2026-07-07). Treat
-// ~1.5M as the alarm threshold when adding type-level features.
+// 1,083,879 before the pattern builder → 1,136,550 with it → 1,233,270
+// with scope threading + the scoped canaries below (2026-07-07; the
+// scope-free def algebra clawed back ~41k). Treat ~1.5M as the alarm
+// threshold when adding type-level features. Canaries must also pass on
+// TS 5.5/5.7/5.8 (less depth headroom than the 5.9 toolchain — check
+// with a scratch install before moving a floor).
 // =============================================================================
 
 // left-assoc chains are folded tail-recursively: 30 terms
@@ -570,31 +573,37 @@ type Chain30 = Parse<
 >;
 type _r1 = AssertTrue<AssertExtends<Chain30, [{ node: "add" }, ""]>>;
 
-// the same 30-term chain under a two-alias parser scope — scope
-// threading must not change the literal-led recursion floor (defs on the
-// hot path resolve unscoped-first; scoped inference engages only for
-// alias-referencing defs, resolved ONCE at the ident/path parse into a
-// "~resolved" carrier)
+// a 25-term chain under a two-alias parser scope. The def algebra is
+// scope-free (constraint checks share one memoization set with unscoped
+// parsers; aliases resolve ONCE at ident/path parse into a "~resolved"
+// carrier), but a scoped CONTEXT still instantiates its own parse tree —
+// capacity floors are TypeScript-version-dependent: 30 terms hold on
+// TS >= 5.9; 25 is the measured floor down to TS 5.5 (the toolchain
+// range this repo declares). Editors on older bundled TS see the lower
+// budget FIRST — keep this canary at the cross-version floor.
 type ScopedCtx = Context<{ x: "Money" }, { Money: number; Tag: string }>;
-type Chain30Scoped = Parse<
+type Chain25Scoped = Parse<
   G,
-  "1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1",
+  "1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1",
   ScopedCtx
 >;
-type _r1s = AssertTrue<AssertExtends<Chain30Scoped, [{ node: "add" }, ""]>>;
+type _r1s = AssertTrue<AssertExtends<Chain25Scoped, [{ node: "add" }, ""]>>;
 
-// an ALIAS-LED chain: 20 terms. Identifier-led chains have a lower
-// pre-existing floor than literal-led ones (~20 vs 30+ — true before
-// scope threading too); the alias resolves once into the carrier and
-// rides the whole fold
-type Chain20Alias = Parse<
+// an ALIAS-LED chain: 12 terms, the measured COLD floor across TS
+// 5.5-6.0 (TS >= 5.9 reaches ~20 cold, more when warm). Identifier-led
+// chains have a lower pre-existing floor than literal-led ones — true
+// before scope threading too. Canaries pin COLD floors: a warm
+// neighboring evaluation can mask a regression that editors (per-file,
+// cold) then hit first. The alias resolves once into the carrier and
+// rides the whole fold.
+type Chain12Alias = Parse<
   G,
-  "x+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1",
+  "x+1+1+1+1+1+1+1+1+1+1+1",
   ScopedCtx
 >;
 type _r1a = AssertTrue<
   AssertExtends<
-    Chain20Alias,
+    Chain12Alias,
     [{ node: "add"; outputSchema: { "~resolved": number } }, ""]
   >
 >;

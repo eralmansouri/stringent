@@ -222,6 +222,14 @@ type ValidateBindingName<
   ? `binding '${TName}' is already used in this pattern`
   : TName extends ReservedBindingName
   ? `binding '${TName}' would collide with AST node structure`
+  : [type.validate<TName>] extends [never]
+  ? // FAIL OPEN on a collapsed validate: under a tight instantiation
+    // budget (editor tsserver, older TS) arktype's validate can degrade
+    // to never, and [never] extends [TName] is true — without this guard
+    // that surfaced as a spurious "shadows a resolvable type" error on
+    // perfectly good names. The construction-time check remains the
+    // authority for real shadowing.
+    TName
   : [type.validate<TName>] extends [TName]
   ? `binding '${TName}' shadows a resolvable type — pick a name that is not a type`
   : TName;

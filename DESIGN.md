@@ -534,7 +534,12 @@ known exception in the other direction:
   operators must be promise-valued outputs handled by the caller.
 - No incremental/streaming parse; inputs are expression-sized strings.
 - ESM-only packaging.
-- Type-level depth limits above apply to literal-mode parsing only.
+- Type-level depth limits above apply to literal-mode parsing only, and
+  are TYPESCRIPT-VERSION-DEPENDENT: the floors pinned in
+  types.typetest.ts hold from TS 5.5 through 6.0 (measured); TS >= 5.9
+  has more headroom (e.g. 30+-term scoped chains vs 25). Editors using
+  an older bundled TypeScript hit the lower budget first — point the
+  editor at the workspace TypeScript version.
 
 ## Roadmap candidates
 

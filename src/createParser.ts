@@ -89,7 +89,7 @@ export type EvaluateResult<
   infer N extends { outputSchema: unknown },
   string
 ]
-  ? InferOfDef<N["outputSchema"], $>
+  ? InferOfDef<N["outputSchema"]>
   : unknown;
 
 /** Options for parser.compile() — predicate-rule error attribution */
@@ -225,7 +225,7 @@ export interface Parser<
   evaluateAst<TAst extends { outputSchema: unknown }>(
     ast: TAst,
     values: EvaluationValues
-  ): InferOfDef<TAst["outputSchema"], $>;
+  ): InferOfDef<TAst["outputSchema"]>;
 
   /**
    * Compile a rule into an arktype Type (D12) — the ecosystem bridge.
