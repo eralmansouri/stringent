@@ -175,7 +175,11 @@ export const div = defineNode({
       .eval(({ left, right }) => left() / right()),
 });
 
-/** rest(...) tail → right-associative: 2^3^2 = 2^(3^2) */
+/** rest(...) tail → right-associative: 2^3^2 = 2^(3^2). Associativity is
+ *  derived from the tail's parse LEVEL — there is no associativity
+ *  property; see "Why there is no associativity property" in
+ *  docs/guides/defining-a-grammar (history + the 3-vs-7 demo, pinned in
+ *  design-claims.test.ts). */
 export const pow = defineNode({
   name: "pow",
   precedence: 4,

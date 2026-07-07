@@ -119,6 +119,42 @@ the full grammar, so it is only sound in delimiter-bounded regions (parens'
 looser than the node's own precedence and break associativity; final operand
 slots must be `operand()`/`rest()`.
 
+### Why there is no `associativity` property (history)
+
+Earlier versions of stringent had both an `associativity` property and
+`lhs()`/`rhs()` element factories. That design had two defects, and the
+current shape-derived rule is the fix for both:
+
+1. **The property could lie.** Associativity is not a free choice — it is a
+   consequence of which grammar *level* the tail slot parses at. A tail
+   that parses at the next tighter level can only fold left; a tail that
+   re-enters the current level can only recurse right. The old runtime
+   quietly *reinterpreted* a left level's `rhs()` tail to parse at the next
+   level regardless of the declared property, so a pattern's label and its
+   actual behavior could disagree, and the property read as configuration
+   while actually being (ignored) documentation.
+2. **`lhs`/`rhs` named the wrong thing.** They read as left/right
+   *position*, but what they encoded was the parse *level* — tighter
+   versus same. `operand()` ("parse a tighter-level operand") and `rest()`
+   ("parse the rest of this level") say what they do, and the level is
+   exactly the property associativity derives from.
+
+Deriving associativity from the tail makes the pattern the single source
+of truth — the same three tokens with a different tail role are different
+math, which is the demonstration (pinned in `design-claims.test.ts`
+"associativity by tail shape"):
+
+```ts
+// sub with an operand() tail folds left:
+leftParser.evaluate("10-5-2", {}, {});  // 3 — (10-5)-2
+// an otherwise-identical sub with a rest() tail recurses right:
+rightParser.evaluate("10-5-2", {}, {}); // 7 — 10-(5-2)
+```
+
+Because the shape now *is* the semantics, a level whose patterns disagree
+on tail shape has no coherent reading — which is why mixing them became a
+construction error.
+
 ## Result types
 
 `resultType` is any arktype definition — or the name of an earlier binding:
