@@ -9,9 +9,6 @@ import {
   EvaluationError,
   createParser,
   defineNode,
-  ident,
-  number,
-  path,
 } from "./index.js";
 import { fixtureParser as parser, formSchema } from "./__fixtures__/grammar.js";
 
@@ -40,8 +37,45 @@ describe("evaluate", () => {
     expect(parser.evaluate("'a'+'b'+'c'", {}, {})).toBe("abc");
   });
 
+  it("rejects mixed pairs that slip through union-typed identifiers", () => {
+    // The one hole in correlated bindings: x parses AS "string | number",
+    // so `x + 1` satisfies both slots, but at runtime x may hold a string
+    // while the right operand is a number. The fixture's match-based eval
+    // uses .default("assert"), turning the mixed pair into a runtime error
+    // instead of silent "hi1"-style coercion.
+    expect(parser.evaluate("x + 1", { x: "string | number" }, { x: 1 })).toBe(2);
+    expect(() => {
+      parser.evaluate("x + 1", { x: "string | number" }, { x: "hi" });
+    }).toThrow();
+  });
+
   it("looks up identifiers in values", () => {
     expect(parser.evaluate("x+1", { x: "number" }, { x: 41 })).toBe(42);
+  });
+
+  it("evaluates keyword literals", () => {
+    expect(parser.evaluate("true ? 'y' : 'n'", {}, {})).toBe("y");
+    expect(parser.evaluate("false ? 'y' : 'n'", {}, {})).toBe("n");
+    expect(parser.evaluate("x == null", { x: "string | null" }, { x: null })).toBe(
+      true
+    );
+    expect(parser.evaluate("x == null", { x: "string | null" }, { x: "hi" })).toBe(
+      false
+    );
+  });
+
+  it("evaluates escaped strings to their unescaped values", () => {
+    // dynamic path (safeParse) — the compile-time engine rejects \x/\u
+    const result = parser.safeParse('"line1\\nline2" == x', { x: "string" });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(parser.evaluateAst(result.ast, { x: "line1\nline2" })).toBe(true);
+    }
+    const hex = parser.safeParse('"\\x41\\u0042"', {});
+    expect(hex.success).toBe(true);
+    if (hex.success) {
+      expect(parser.evaluateAst(hex.ast, {})).toBe("AB");
+    }
   });
 
   it("evaluates the headline use case", () => {
@@ -66,7 +100,7 @@ describe("evaluate", () => {
     expect(parser.evaluate("1==2 ? 1 : 2==2 ? 4 : 5", {}, {})).toBe(4);
   });
 
-  it("short-circuits lazy nodes: untaken branches are never evaluated", () => {
+  it("short-circuits: untaken branches are never evaluated", () => {
     // x is not in values — evaluating the else branch would throw
     const result = parser.safeParse("1==1 ? 2 : x", { x: "number" });
     expect(result.success).toBe(true);
@@ -130,9 +164,8 @@ describe("evaluate", () => {
   it("throws EvaluationError for nodes without eval", () => {
     const noEval = defineNode({
       name: "wrap",
-      pattern: [path().as("inner")],
-      precedence: "atom",
-      resultType: "unknown",
+      precedence: 1,
+      pattern: (p) => p.path().as("inner").result("unknown"),
     });
     const p = createParser([noEval] as const);
     const parsed = p.safeParse("foo", { foo: "number" });
@@ -144,16 +177,57 @@ describe("evaluate", () => {
     }
   });
 
+  describe("uniform laziness", () => {
+    it("memoizes binding thunks: a side-effecting child evaluates once", () => {
+      let evaluations = 0;
+      const nodes = [
+        defineNode({
+          name: "n",
+          precedence: 2,
+          pattern: (p) => p.number(),
+        }),
+        defineNode({
+          name: "tick",
+          precedence: 2,
+          pattern: (p) =>
+            p
+              .constVal("tick(")
+              .expr("number").as("inner")
+              .constVal(")")
+              .result("number")
+              .eval(({ inner }) => {
+            evaluations += 1;
+            return inner();
+          }),
+        }),
+        defineNode({
+          name: "twice",
+          precedence: 1,
+          pattern: (p) =>
+            p
+              .operand("number").as("a")
+              .constVal("&")
+              .rest("number").as("b")
+              .result("number")
+              .eval(({ a, b }) => a() + a() + b() + b()),
+        }),
+      ] as const;
+      const p = createParser(nodes);
+      expect(p.evaluate("tick(3) & tick(4)", {}, {})).toBe(14);
+      expect(evaluations).toBe(2);
+    });
+  });
+
   it("evaluates single-segment ident() elements", () => {
     const numberLit = defineNode({
       name: "n",
-      pattern: [number()],
-      precedence: "atom",
+      precedence: 1,
+      pattern: (p) => p.number(),
     });
     const variable = defineNode({
       name: "v",
-      pattern: [ident()],
-      precedence: "atom",
+      precedence: 1,
+      pattern: (p) => p.ident(),
     });
     const p = createParser([numberLit, variable] as const);
     const parsed = p.safeParse("y", { y: "number" });

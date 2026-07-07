@@ -1,11 +1,11 @@
 ---
 title: Parsing & Evaluation
-description: The parse, safeParse, evaluate and evaluateAst entry points, lazy evaluation, and type-level limits.
+description: The parse, safeParse, evaluate, evaluateAst and compile entry points, the lazy evaluation model, and type-level limits.
 sidebar:
   order: 4
 ---
 
-A parser built with `createParser` exposes four entry points. Which one you
+A parser built with `createParser` exposes five entry points. Which one you
 reach for depends on where the expression comes from:
 
 | Entry point | Input | Checked | On failure |
@@ -14,6 +14,7 @@ reach for depends on where the expression comes from:
 | `safeParse(input, schema)` | **dynamic** string | runtime | returns `{ success: false, error }` |
 | `evaluate(literal, schema, values)` | string **literal** | compile time | compile error |
 | `evaluateAst(ast, values)` | a parsed AST | runtime | throws `EvaluationError` |
+| `compile(input, schema, options?)` | literal **or** dynamic | both | throws `StringentParseError` |
 
 ## Literal inputs: `parse` and `evaluate`
 
@@ -31,6 +32,10 @@ parser.evaluate("x*2", { x: "number" }, { x: 21 }); // 42
 
 Dynamic strings are rejected by `parse()` **at compile time** — use
 `safeParse()` for anything that isn't a literal.
+
+Before evaluating, `evaluate()` validates the values object against the full
+schema — refinements included, so `{ x: "number > 0" }` with `{ x: -5 }`
+fails with `values do not match the schema: x must be positive (was -5)`.
 
 :::caution[Literal schemas only]
 `parse()`'s compile-time guarantee assumes literal schema types. A schema
@@ -57,17 +62,47 @@ if (parsed.success) {
 See [Error handling](/stringent/guides/error-handling/) for the error shape
 and ranking rules.
 
+## Rules as arktype Types: `compile`
+
+`parser.compile(input, schema, { path?, message? })` compiles a rule into a
+real arktype `Type` — and arktype Types are Standard Schemas, so a stringent
+rule drops directly into react-hook-form, tRPC, hono, or oRPC:
+
+```ts
+const rule = parser.compile(
+  "values.password == values.confirmPassword",
+  { values: { password: "string", confirmPassword: "string" } },
+  { path: ["values", "confirmPassword"], message: "passwords to match" }
+);
+rule({ values: { password: "a", confirmPassword: "a" } }); // → the values object
+rule({ values: { password: "a", confirmPassword: "b" } }); // → ArkErrors
+// "values.confirmPassword must be passwords to match"
+```
+
+- A rule whose output type is **boolean** becomes a **predicate** Type: it
+  validates the values object against the (refined) schema, evaluates the
+  rule, and rejects with an `ArkErrors` entry at `options.path` when the rule
+  is false. Values in, values out — exactly what a form resolver wants.
+- Any other rule becomes a **morph** Type: values in, evaluated result out.
+- `rule.in` is the values contract; `rule.in.toJsonSchema()` exports it (for
+  predicate rules pass `{ fallback: { predicate: (ctx) => ctx.base } }` — the
+  predicate node itself is not JSON-Schema-representable).
+
+Unlike `parse`/`evaluate`, `compile` accepts dynamic strings (rules live in
+config); invalid input throws `StringentParseError`. Literal inputs
+additionally get precise compile-time typing.
+
 ## Evaluation model
 
 `evaluate`/`evaluateAst` walk the AST post-order: literals yield their values,
-identifiers and paths look up the values object, named-binding children
-evaluate first, then the node's `eval(bindings, values)` runs. The parsed
-output type types the result, so evaluation is typed end-to-end for literal
-inputs.
+identifiers and paths look up the values object, and the node's
+`eval(bindings)` runs with each binding delivered as a **memoized thunk**.
+The parsed output type types the result, so evaluation is typed end-to-end
+for literal inputs.
 
-Nodes with `lazy: true` receive **memoized thunks** in `eval`, so untaken
-ternary branches (and the right side of a short-circuiting `&&`) are never
-evaluated.
+Evaluation is uniformly lazy: untaken ternary branches (and the right side
+of a short-circuiting `&&`) are never evaluated, and memoization means each
+child evaluates at most once.
 
 All identifier and path lookups — in the evaluator *and* in parse-time schema
 resolution — use own-property checks (`Object.hasOwn`). `constructor`,
@@ -76,13 +111,18 @@ prototype internals.
 
 ## Limits & rules
 
-- **Precedence** must be `"atom"` or a non-negative safe integer.
+- **Precedence** must be a non-negative safe integer; the highest level
+  present is the leaf level.
 - **Whitespace** is skipped between tokens, but not allowed inside paths
   around `.`.
+- **String escapes**: `\xHH`/`\uHHHH` decode at runtime only — literal-mode
+  parsing (`parse`/`evaluate`) rejects them; use `safeParse`.
+- **Evaluation is synchronous** (arktype morphs cannot be async); async
+  operators must be promise-valued outputs handled by the caller.
 - **Type-level input length**: left-associative chains use a tail-recursive
-  fold and comfortably handle 100+ terms. Right-associative chains and
+  fold and comfortably handle 30+ terms. Right-associative chains and
   `expr()` nesting (parens, ternary branches) pay instantiation depth per
-  precedence level — on a 6-level grammar that's roughly 14 right-associative
+  precedence level — on a 6-level grammar that's roughly 8 right-associative
   terms and 3 nesting levels before TypeScript's recursion limit (TS2589);
   fewer precedence levels stretch these limits. Runtime parsing (`safeParse`)
   has no such limit.

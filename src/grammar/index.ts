@@ -1,17 +1,14 @@
 /**
- * Grammar Type Computation
+ * Grammar Type Computation (v2)
  *
- * Computes a grammar TYPE from node schemas. The grammar is a flat tuple
- * of precedence levels, sorted from lowest to highest precedence, with
- * atoms as the final element.
+ * Computes a grammar TYPE from node schemas: a flat tuple of precedence
+ * levels sorted ascending (loosest first). The HIGHEST level is the leaf
+ * level. Mirrors compileGrammar in src/runtime/compile.ts.
  *
- * Example:
- *   [[AddOps], [MulOps], [Atoms]]
- *   // level 0 (lowest prec) → level 1 → atoms (last)
- *
- * Precedence must be a non-negative safe integer (or "atom"). This is
- * enforced at runtime by createParser; at the type level, invalid
- * precedences resolve the grammar to never.
+ * Precedence must be a non-negative safe integer (enforced at runtime by
+ * createParser); at the type level, invalid precedences resolve the
+ * grammar to never. Numbers compare digit-wise, so precedences of any
+ * practical magnitude are fine (no tuple-length limits).
  */
 
 import type { NodeSchema, Precedence } from "../schema/index.js";
@@ -21,21 +18,23 @@ import type { NodeSchema, Precedence } from "../schema/index.js";
 // =============================================================================
 
 /**
- * A grammar is a tuple of levels, where each level is an array of node schemas.
- * Sorted by precedence (lowest first), atoms last.
+ * A grammar is a tuple of levels, where each level is an array of node
+ * schemas. Sorted by precedence (lowest first), the leaf level last.
  */
 export type Grammar = readonly (readonly NodeSchema[])[];
 
 // =============================================================================
-// Numeric comparison (non-negative integers, digit-wise — no tuple-length
-// limits, so precedences of any practical magnitude compare fine)
+// Numeric comparison (non-negative integers, digit-wise)
 // =============================================================================
 
-/** Reject negative, fractional, or exponential-form precedences */
-type IsValidPrecedence<P extends number> = `${P}` extends
-  | `-${string}`
-  | `${string}.${string}`
-  | `${string}e${string}`
+/** Reject non-literal, negative, fractional, or exponential-form
+ *  precedences (a widened `number` would send the digit-wise comparison
+ *  into unbounded recursion) */
+type IsValidPrecedence<P extends number> = [P] extends [never]
+  ? false
+  : number extends P
+  ? false
+  : `${P}` extends `-${string}` | `${string}.${string}` | `${string}e${string}`
   ? false
   : true;
 
@@ -122,10 +121,8 @@ type SortedPrecedences<
   infer H extends NodeSchema,
   ...infer R extends readonly NodeSchema[]
 ]
-  ? H["precedence"] extends "atom"
-    ? SortedPrecedences<R, Acc>
-    : IsValidPrecedence<H["precedence"] & number> extends true
-    ? SortedPrecedences<R, Insert<H["precedence"] & number, Acc>>
+  ? IsValidPrecedence<H["precedence"]> extends true
+    ? SortedPrecedences<R, Insert<H["precedence"], Acc>>
     : never
   : Acc;
 
@@ -165,11 +162,12 @@ type LevelsFor<
  *
  * 1. Collect distinct numeric precedences (insertion sort, ascending)
  * 2. Filter nodes per precedence, preserving definition order
- * 3. Append atoms as the final level
+ *
+ * The last level (highest precedence) is the leaf level.
  */
-export type ComputeGrammar<TNodes extends readonly NodeSchema[]> = [
-  ...LevelsFor<SortedPrecedences<TNodes>, TNodes>,
-  NodesAt<TNodes, "atom">
-] extends infer G extends Grammar
+export type ComputeGrammar<TNodes extends readonly NodeSchema[]> = LevelsFor<
+  SortedPrecedences<TNodes>,
+  TNodes
+> extends infer G extends Grammar
   ? G
   : never;

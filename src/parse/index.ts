@@ -1,30 +1,43 @@
 /**
- * Parse Type - Type-Level Parsing with Grammar Support
+ * Parse Type - Type-Level Parsing with Grammar Support (v2)
  *
  * Parse<Grammar, Input, Context> computes the exact result type of parsing
  * an input string against a grammar.
  *
- * The grammar is a flat tuple of precedence levels:
- *   [[Level0Ops], [Level1Ops], ..., [Atoms]]
+ * The grammar is a flat tuple of precedence levels (see ComputeGrammar):
+ *   [[Level0Ops], [Level1Ops], ..., [LeafNodes]]
  *
  * Parsing proceeds:
  * 1. Try operators at current level (index 0, lowest precedence)
  * 2. Fall back to next level (index 1, higher precedence)
- * 3. Continue until atoms (last element)
+ * 3. Base case: the leaf level (last element, plain alternation)
  *
- * Levels whose nodes declare associativity: "left" are parsed with an
- * iterative fold (see ParseLeftLevel) instead of right-recursion.
+ * v2 semantics, mirroring src/runtime/parser.ts function-for-function:
+ * - Associativity derives from each level's TAIL SHAPE: any rest(...) tail
+ *   → right-associative recursion; otherwise → left-associative fold.
+ * - Constraints are arktype defs; matching is ASSIGNABILITY, computed as
+ *   `type.infer<candidate> extends type.infer<constraint>` over literal
+ *   def strings (so TS memoizes each distinct check — see
+ *   spike/phase0/RESULTS.md). Refinement erasure is automatic here:
+ *   type.infer<"number > 0"> is `number`.
+ * - A constraint string naming an earlier binding resolves to that
+ *   operand's parsed def; overlapping(binding) checks type overlap
+ *   (non-never intersection) instead of assignability.
+ * - Node outputSchema carries the DEF (a string, or an object def for
+ *   object resultTypes / schema records). The runtime displays arktype's
+ *   normalized `expression` string instead — behavioral parity is over
+ *   accept/reject decisions and inferred TS types, not display strings.
  *
- * Constraints resolve against already-parsed siblings (sameAs) and node
- * result types may derive from operands (fromBinding) — both are
- * declarative data interpreted identically here and in the runtime engine.
- *
- * This file MUST stay behaviorally in sync with src/runtime/parser.ts —
- * the parity test suite guards this.
+ * Parser-scope aliases resolve at the type level too, at exactly ONE
+ * point: ident/path leaf defs resolve in the parser's scope when parsed
+ * (ResolveLeafDef → a "~resolved" carrier), so schema leaves like
+ * { created: "Timestamp" } type correctly in literal mode while the def
+ * algebra itself stays scope-free (see InferOfDef).
  */
 
 import type { Token } from "@sinclair/parsebox";
-import type { Context, SchemaShape } from "../context.js";
+import type { type } from "arktype";
+import type { Context } from "../context.js";
 import type { Grammar } from "../grammar/index.js";
 import type {
   NodeSchema,
@@ -36,8 +49,7 @@ import type {
   IdentSchema,
   PathSchema,
   ConstSchema,
-  SameAsRef,
-  FromBindingRef,
+  OverlapsRef,
   NormalizeConstraint,
   ExtractSpecOf,
 } from "../schema/index.js";
@@ -58,7 +70,7 @@ export interface BinaryNode<
   TName extends string = string,
   TLeft = unknown,
   TRight = unknown,
-  TOutputSchema extends string = string
+  TOutputSchema = unknown
 > {
   readonly node: TName;
   readonly outputSchema: TOutputSchema;
@@ -66,27 +78,116 @@ export interface BinaryNode<
   readonly right: TRight;
 }
 
+/** Loose AST node shape (dynamic-string results) */
+export interface LooseAstNode {
+  readonly node: string;
+  readonly outputSchema: string;
+  readonly [key: string]: unknown;
+}
+
+// =============================================================================
+// Def-level type algebra
+// =============================================================================
+
+/**
+ * Resolved-type CARRIER for defs that embed binding references
+ * ("left | null"): a TS type cannot be turned back into a def string, so
+ * the resolved type rides in the outputSchema slot under a reserved key.
+ * The runtime twin displays arktype's normalized expression instead —
+ * display parity is not part of the contract (accept/reject + inferred
+ * types are). The "~resolved" key is reserved in result defs.
+ */
+export interface ResolvedDef<T = unknown> {
+  readonly "~resolved": T;
+}
+
+/** The TS type of a def (string expression, object def, or resolved
+ *  carrier). Refinements erase automatically (type.infer<"number > 0">
+ *  = number).
+ *
+ *  Deliberately UNSCOPED: parser-scope aliases never reach this as raw
+ *  strings — schema leaf defs resolve ONCE at ident/path parse time into
+ *  a ResolvedDef carrier (ResolveLeafDef below), and constraint/result
+ *  defs are builder-validated against the default scope. Keeping every
+ *  def interpretation scope-free means constraint-check instantiations
+ *  are IDENTICAL for scoped and unscoped parsers (one shared memoization
+ *  set), which is what keeps deep chains inside the recursion budget
+ *  across TypeScript versions (5.7 has less headroom than 5.9 —
+ *  canary-pinned in types.typetest.ts). */
+export type InferOfDef<D> = D extends ResolvedDef<infer T>
+  ? T
+  : D extends string
+  ? type.infer<D>
+  : D extends object
+  ? type.infer<D>
+  : never;
+
+/**
+ * Resolve a def against a scope of already-parsed binding types — the
+ * type-level twin of TypeEnv.compileDefIn. Plain defs (whose meaning the
+ * scope cannot change — binding names may not shadow scope types) stay
+ * AS WRITTEN, keeping display and TS memoization; scope-dependent defs
+ * wrap their resolved type in a carrier. Costs ~10 instantiations per
+ * resolution (measured; spike/union-defs).
+ */
+type ResolveDefIn<D, S> = keyof S extends never
+  ? // no bindings in scope — the def cannot be binding-dependent
+    D
+  : type.infer<D, S> extends infer Scoped
+  ? [type.infer<D>] extends [Scoped]
+    ? [Scoped] extends [type.infer<D>]
+      ? D // binding-independent — keep the literal def
+      : { "~resolved": Scoped }
+    : { "~resolved": Scoped }
+  : never;
+
+/** Scope of a bindings object: binding name → inferred parsed type.
+ *  Const bindings carry matched text, not a type — excluded (mirrors
+ *  compile.ts template classification). */
+type ScopeOfBindings<Bindings> = {
+  [K in keyof Bindings as Bindings[K] extends { node: "const" }
+    ? never
+    : K]: Bindings[K] extends { outputSchema: infer O }
+    ? InferOfDef<O>
+    : unknown;
+};
+
+/** Assignability over defs — the type-level twin of TypeEnv.isAssignable.
+ *  Keep arguments as LITERAL defs so TS memoizes each distinct check. */
+type DefAssignable<Candidate, Constraint> = [InferOfDef<Candidate>] extends [
+  InferOfDef<Constraint>
+]
+  ? true
+  : false;
+
+/** Overlap over defs — the type-level twin of TypeEnv.isOverlapping.
+ *  Approximated as non-never intersection of the inferred types. */
+type DefOverlaps<A, B> = [InferOfDef<A> & InferOfDef<B>] extends [never]
+  ? false
+  : true;
+
 // =============================================================================
 // Path Resolution
 // =============================================================================
 
 /**
- * Resolve a dotted path against a (possibly nested) schema.
- * Unknown or partial paths resolve to "unknown".
+ * Resolve a dotted path against a (possibly nested) schema def.
+ * Unknown or partial paths resolve to "unknown". A path ending on a
+ * nested record resolves to the record def itself (its object type).
  */
 export type ResolvePath<TData, TSegs extends readonly string[]> =
   TSegs extends readonly [
     infer H extends string,
     ...infer R extends readonly string[]
   ]
-    ? TData extends SchemaShape // guard: string leaves must not be keyed into
+    ? TData extends object // guard: leaf defs must not be keyed into
       ? H extends keyof TData
         ? ResolvePath<TData[H], R>
         : "unknown"
-      : "unknown" // path continues into a leaf type-name
-    : TData extends string
-    ? TData
-    : "unknown"; // path ended on a nested record
+      : "unknown" // path continues into a leaf def
+    : [TData] extends [undefined]
+    ? "unknown"
+    : TData;
 
 // =============================================================================
 // Primitive Parse Types (from Token API)
@@ -97,15 +198,85 @@ type ParseNumberPrimitive<TInput extends string> =
     ? [NumberNode<V>, R]
     : [];
 
+type WsChar = " " | "\t" | "\n" | "\r";
+
+type TrimLeftWs<S extends string> = S extends `${WsChar}${infer R}`
+  ? TrimLeftWs<R>
+  : S;
+
+/** Single-character escape map — MUST match SIMPLE_ESCAPES in
+ *  src/runtime/parser.ts. Unknown escapes resolve to the escaped char. */
+interface SimpleEscapes {
+  n: "\n";
+  t: "\t";
+  r: "\r";
+  "\\": "\\";
+  '"': '"';
+  "'": "'";
+  "`": "`";
+  "0": "\0";
+  b: "\b";
+  f: "\f";
+  v: "\v";
+}
+
+/**
+ * Escape-aware string scanner, mirroring scanString in
+ * src/runtime/parser.ts. Returns [raw, value, rest] or [] for
+ * unterminated strings. One deliberate divergence: `\xHH` / `\uHHHH`
+ * cannot be hex-decoded at the type level, so literal-mode parsing
+ * REJECTS them (conservative — safeParse handles them at runtime).
+ */
+type ScanString<
+  Q extends string,
+  I extends string,
+  Raw extends string = "",
+  Val extends string = ""
+> = I extends `${Q}${infer R}`
+  ? [Raw, Val, R]
+  : I extends `\\${infer C}${infer R}`
+  ? C extends keyof SimpleEscapes
+    ? ScanString<Q, R, `${Raw}\\${C}`, `${Val}${SimpleEscapes[C]}`>
+    : C extends "x" | "u"
+    ? [] // hex escapes are runtime-only
+    : ScanString<Q, R, `${Raw}\\${C}`, `${Val}${C}`>
+  : I extends `${infer C}${infer R}`
+  ? ScanString<Q, R, `${Raw}${C}`, `${Val}${C}`>
+  : []; // unterminated
+
 type ParseStringPrimitive<
   TQuotes extends readonly string[],
   TInput extends string
-> = Token.TString<[...TQuotes], TInput> extends [
-  infer V extends string,
-  infer R extends string
+> = TQuotes extends readonly [
+  infer Q extends string,
+  ...infer RestQuotes extends readonly string[]
 ]
-  ? [StringNode<V>, R]
+  ? TrimLeftWs<TInput> extends `${Q}${infer Body}`
+    ? ScanString<Q, Body> extends [
+        infer Raw extends string,
+        infer Val extends string,
+        infer R extends string
+      ]
+      ? [StringNode<Raw, Val>, R]
+      : []
+    : ParseStringPrimitive<RestQuotes, TInput>
   : [];
+
+/**
+ * Resolve a schema-leaf def at PARSE TIME: defs the default scope cannot
+ * resolve (parser-scope aliases like "Money") are inferred once in the
+ * parser's scope and carried as a ResolvedDef, so every downstream
+ * constraint check is a shallow carrier extraction instead of a repeated
+ * deep scoped inference (load-bearing: the fold re-checks the left
+ * operand each iteration — the scoped 30-term canary in
+ * types.typetest.ts pins the consequence). Mirrors the runtime, where
+ * ident/path nodes carry their resolved Type.
+ */
+type ResolveLeafDef<D, $> = [D] extends ["unknown"]
+  ? D
+  : [type.infer<D>] extends [never]
+  ? { "~resolved": type.infer<D, $> }
+  : D;
 
 type ParseIdentPrimitive<
   TInput extends string,
@@ -115,9 +286,7 @@ type ParseIdentPrimitive<
   infer R extends string
 ]
   ? V extends keyof TContext["data"]
-    ? TContext["data"][V] extends infer T extends string
-      ? [IdentNode<V, T>, R]
-      : [IdentNode<V, "unknown">, R] // nested record → bare ident is "unknown"
+    ? [IdentNode<V, ResolveLeafDef<TContext["data"][V], TContext["scope"]>>, R]
     : [IdentNode<V, "unknown">, R]
   : [];
 
@@ -160,15 +329,50 @@ type ParsePathSegments<
       ]
     ? ParsePathSegments<R, [...TSegs, Seg], TContext>
     : [] // dangling dot "values." → fail whole element
-  : [PathNode<TSegs, ResolvePath<TContext["data"], TSegs>>, TInput];
+  : [
+      PathNode<
+        TSegs,
+        ResolveLeafDef<ResolvePath<TContext["data"], TSegs>, TContext["scope"]>
+      >,
+      TInput
+    ];
 
+/**
+ * Parse a constant: an ORDERED alternation of values — the first member
+ * that matches wins. IDENTIFIER-LIKE members (the value is one whole
+ * identifier per parsebox's tokenizer) match only as a WHOLE identifier
+ * in the input — `nullable` is one identifier, so it never matches a
+ * `constVal("null")` (word-boundary rule; pinned in parser.test.ts and
+ * design-claims). Other members match as raw text. Mirrors parseConst in
+ * src/runtime/parser.ts.
+ */
 type ParseConstPrimitive<
+  TValues extends readonly string[],
+  TInput extends string
+> = TValues extends readonly [
+  infer V extends string,
+  ...infer Rest extends readonly string[]
+]
+  ? ParseConstMember<V, TInput> extends [
+      infer N extends ConstNode,
+      infer R extends string
+    ]
+    ? [N, R]
+    : ParseConstPrimitive<Rest, TInput>
+  : [];
+
+/** Match one alternation member (word-boundary rule per member). */
+type ParseConstMember<
   TValue extends string,
   TInput extends string
-> = Token.TConst<TValue, TInput> extends [
-  infer _V extends string,
-  infer R extends string
-]
+> = Token.TIdent<TValue> extends [TValue, ""]
+  ? Token.TIdent<TInput> extends [TValue, infer R extends string]
+    ? [ConstNode<TValue>, R]
+    : []
+  : Token.TConst<TValue, TInput> extends [
+      infer _V extends string,
+      infer R extends string
+    ]
   ? [ConstNode<TValue>, R]
   : [];
 
@@ -176,10 +380,14 @@ type ParseConstPrimitive<
 // Constraint Resolution
 // =============================================================================
 
+/** Marker for "the referenced binding was not found in the prefix" */
+interface NotBound {
+  readonly __notBound: true;
+}
+
 /**
- * Resolve a sameAs reference against the already-consumed pattern prefix
- * (TDone) and its parsed children (TAcc). Returns the referenced child's
- * outputSchema, or "unknown" when not found.
+ * Find the outputSchema def of the named element in the already-consumed
+ * pattern prefix (TDone) and its parsed children (TAcc).
  */
 type FindBoundOutput<
   TDone extends readonly PatternSchema[],
@@ -191,38 +399,70 @@ type FindBoundOutput<
 ]
   ? TAcc extends readonly [infer C, ...infer RA extends readonly unknown[]]
     ? F extends { __named: true; name: B }
-      ? C extends { outputSchema: infer O extends string }
+      ? C extends { outputSchema: infer O }
         ? O
         : "unknown"
       : FindBoundOutput<RD, RA, B>
-    : "unknown"
-  : "unknown";
+    : NotBound
+  : NotBound;
 
 /**
- * Resolve an element's constraint to a concrete check:
- * string (exact), readonly string[] (any-of), or undefined (unconstrained).
+ * A resolved constraint: undefined (unconstrained) or a check mode plus
+ * the def to check against.
+ */
+type ResolvedSpec =
+  | undefined
+  | { readonly mode: "extends" | "overlaps"; readonly def: unknown };
+
+/**
+ * Resolve an element's constraint against the already-parsed siblings.
+ * Mirrors resolveConstraint in src/runtime/parser.ts:
+ * - overlapping(b) → overlap check against b's parsed def
+ * - a string naming an earlier binding → assignability to its parsed def
+ * - any other string → assignability to the static def
  */
 type ResolveSpec<
   TElement extends PatternSchema,
   TDone extends readonly PatternSchema[],
   TAcc extends readonly unknown[]
 > = NormalizeConstraint<ExtractSpecOf<TElement>> extends infer N
-  ? N extends SameAsRef<infer B>
-    ? FindBoundOutput<TDone, TAcc, B>
-    : N
+  ? N extends OverlapsRef<infer B>
+    ? FindBoundOutput<TDone, TAcc, B> extends infer D
+      ? D extends NotBound
+        ? { mode: "overlaps"; def: "unknown" }
+        : { mode: "overlaps"; def: D }
+      : never
+    : N extends string
+    ? FindBoundOutput<TDone, TAcc, N> extends infer D
+      ? D extends NotBound
+        ? {
+            mode: "extends";
+            // static def, resolved against the parsed siblings so defs
+            // EMBEDDING binding references ("left | null") work; plain
+            // defs stay literal (ResolveDefIn)
+            def: ResolveDefIn<
+              N,
+              ScopeOfBindings<ExtractBindings<TDone, [...TAcc]>>
+            >;
+          }
+        : { mode: "extends"; def: D } // whole-string binding reference
+      : never
+    : undefined
   : never;
 
-/** Check an outputSchema against a resolved constraint (exact-name semantics) */
-type CheckConstraint<O extends string, RC> = [RC] extends [undefined]
+/**
+ * Check a candidate's outputSchema def against a resolved constraint.
+ * An "unknown" candidate is rejected by every constrained slot — that is
+ * how "identifier not in schema" surfaces as a type mismatch.
+ */
+type CheckConstraint<O, RC extends ResolvedSpec> = [RC] extends [undefined]
   ? true
-  : RC extends readonly string[]
-  ? [O] extends [RC[number]]
-    ? true
-    : false
-  : RC extends string
-  ? [O] extends [RC]
-    ? true
-    : false
+  : RC extends { mode: infer M; def: infer D }
+  ? [O] extends ["unknown"]
+    ? false
+    : M extends "overlaps"
+    ? DefOverlaps<O, D>
+    : DefAssignable<O, D>
   : false;
 
 // =============================================================================
@@ -252,14 +492,14 @@ type ParseElement<
 /**
  * Parse a tuple of pattern elements.
  *
- * TCurrentLevels - grammar from current level onward (for rhs)
- * TNextLevels - grammar from next level onward (for lhs, avoids left-recursion)
+ * TCurrentLevels - grammar from current level onward (for rest)
+ * TNextLevels - grammar from next level onward (for operand, avoids left-recursion)
  * TFullGrammar - complete grammar (for expr role, full reset)
- * TAcc - children parsed so far (also feeds sameAs resolution)
+ * TAcc - children parsed so far (also feeds binding-reference resolution)
  * TDone - pattern elements consumed so far (aligned with TAcc)
  *
  * The left-fold seeds TAcc/TDone with the already-parsed left operand so
- * sameAs("left") resolves inside operator tails.
+ * references like rest("left") resolve inside operator tails.
  *
  * Returns [children, rest] where children INCLUDES any seeded prefix.
  */
@@ -303,9 +543,9 @@ type ParsePatternTuple<
  * Parse an expression element based on its role.
  *
  * Role determines which grammar slice is used:
- * - "lhs": TNextLevels (avoids left-recursion)
- * - "rhs": TCurrentLevels (maintains precedence, enables right-associativity)
- * - "expr": TFullGrammar (full reset for delimited contexts)
+ * - "operand": TNextLevels (a tighter expression; avoids left-recursion)
+ * - "rest": TCurrentLevels (same level → right-associative recursion)
+ * - "expr": TFullGrammar (full reset; only in delimited contexts)
  */
 type ParseElementWithLevel<
   TElement extends PatternSchema,
@@ -317,9 +557,9 @@ type ParseElementWithLevel<
   TDone extends readonly PatternSchema[],
   TAcc extends readonly unknown[]
 > = TElement extends { kind: "expr"; role: infer Role }
-  ? Role extends "lhs"
+  ? Role extends "operand"
     ? ParseExprWithConstraint<TNextLevels, TInput, TContext, ResolveSpec<TElement, TDone, TAcc>, TFullGrammar>
-    : Role extends "rhs"
+    : Role extends "rest"
     ? ParseExprWithConstraint<TCurrentLevels, TInput, TContext, ResolveSpec<TElement, TDone, TAcc>, TFullGrammar>
     : ParseExprWithConstraint<TFullGrammar, TInput, TContext, ResolveSpec<TElement, TDone, TAcc>, TFullGrammar>
   : ParseElement<TElement, TInput, TContext>;
@@ -379,32 +619,40 @@ type ExtractBindings<
   : TAcc;
 
 /**
- * Compute a node's outputSchema: static string, or derived from a named
- * binding via fromBinding.
+ * Compute a node's outputSchema def: a binding name derives from that
+ * operand's parsed def; anything else is the static def itself (string or
+ * object). Mirrors buildNodeResult in src/runtime/parser.ts.
  *
  * resultType is an OPTIONAL property, so undefined must be stripped before
- * matching — `TNode["resultType"] extends string` is never true for
- * `"boolean" | undefined` (same bug class as the constraint extraction fix).
+ * matching.
  */
+/** NOTE: deliberately UNSCOPED — threading the parser scope through the
+ *  fold-accumulated result chain doubles the per-level forcing depth and
+ *  breaks the 30-term canary (measured; see the scoped canary in
+ *  types.typetest.ts). Result defs cannot reference parser aliases (the
+ *  builder validates them against the default scope + bindings), so the
+ *  only conservative corner is a TEMPLATE result over an alias-typed
+ *  operand, which degrades toward unknown; the runtime resolves it
+ *  fully. */
 type ResultSchemaOf<TNode extends NodeSchema, Bindings> = Exclude<
   TNode["resultType"],
   undefined
 > extends infer R
-  ? [R] extends [FromBindingRef<infer B>]
-    ? B extends keyof Bindings
-      ? Bindings[B] extends { outputSchema: infer O extends string }
+  ? [R] extends [string]
+    ? R extends keyof Bindings
+      ? Bindings[R] extends { outputSchema: infer O }
         ? O
         : "unknown"
-      : "unknown"
-    : [R] extends [string]
-    ? R
+      : ResolveDefIn<R, ScopeOfBindings<Bindings>> // static or template def
+    : [R] extends [object]
+    ? ResolveDefIn<R, ScopeOfBindings<Bindings>> // object def (may embed refs)
     : "unknown"
   : never;
 
 /**
  * Build the result node from parsed children.
  *
- * - Single unnamed non-const child: passthrough (atom behavior)
+ * - Single unnamed non-const child: passthrough (leaf alternation entry)
  * - Otherwise: bindings become node fields, outputSchema from ResultSchemaOf
  *   (const-only and multi-unnamed patterns build a plain node — mirroring
  *   the runtime engine, never `never`)
@@ -420,7 +668,7 @@ type BuildNodeResult<
             readonly node: TNode["name"];
             readonly outputSchema: ResultSchemaOf<TNode, {}>;
           }
-        : Only // Single unnamed non-const element - passthrough (atom)
+        : Only // Single unnamed non-const element - passthrough
       : {
           readonly node: TNode["name"];
           readonly outputSchema: ResultSchemaOf<TNode, {}>;
@@ -436,17 +684,17 @@ type BuildNodeResult<
 // =============================================================================
 
 /**
- * Parse an expression with a resolved constraint
- * (string exact-match, string[] any-of, or undefined).
+ * Parse an expression, then check its outputSchema def against the
+ * resolved constraint. Type mismatch → backtrack (empty result).
  */
 type ParseExprWithConstraint<
   TStartLevels extends Grammar,
   TInput extends string,
   TContext extends Context,
-  TConstraint,
+  TConstraint extends ResolvedSpec,
   TFullGrammar extends Grammar
 > = ParseLevels<TStartLevels, TInput, TContext, TFullGrammar> extends [
-  infer Node extends { outputSchema: string },
+  infer Node extends { outputSchema: unknown },
   infer Rest extends string
 ]
   ? CheckConstraint<Node["outputSchema"], TConstraint> extends true
@@ -459,7 +707,7 @@ type ParseExprWithConstraint<
 // =============================================================================
 
 /**
- * Try parsing each node in a level.
+ * Try parsing each node in a level (recursive descent / leaf alternation).
  */
 type ParseNodes<
   TNodes extends readonly NodeSchema[],
@@ -495,55 +743,73 @@ type ParseNodes<
 // Left-Associative Level Parsing
 // =============================================================================
 
-/** A level is left-associative when its nodes declare associativity: "left".
- *  createParser validates that a level never mixes associativities, so
- *  checking the first node suffices. */
-type IsLeftLevel<TNodes extends readonly NodeSchema[]> =
-  TNodes extends readonly [infer First extends NodeSchema, ...readonly NodeSchema[]]
-    ? First["associativity"] extends "left"
-      ? true
-      : false
-    : false;
-
-/** Check TLeft against the constraint of the pattern's leading lhs element.
- *  (sameAs is invalid at position 0 — createParser rejects it.) */
-type LhsConstraintOk<LhsEl extends PatternSchema, TLeft> = LhsEl extends {
-  kind: "expr";
-}
-  ? TLeft extends { outputSchema: infer O extends string }
-    ? CheckConstraint<O, ResolveSpec<LhsEl, [], []>>
+/** Does the pattern's final element parse at the current level (rest)? */
+type TailIsRest<N extends NodeSchema> = N["pattern"] extends readonly [
+  ...infer _Init,
+  infer Last extends PatternSchema
+]
+  ? Last extends { kind: "expr"; role: "rest" }
+    ? true
     : false
   : false;
 
 /**
- * Try one node's tail (pattern minus the leading lhs element) against the
+ * A level is right-associative when ANY of its nodes has an rest(...) tail;
+ * otherwise (operand tails / closed patterns) it folds left-associatively.
+ * createParser validates that a level never mixes operand and rest tails.
+ * Mirrors the mode computation in src/runtime/compile.ts.
+ */
+type HasRestTail<TNodes extends readonly NodeSchema[]> = TNodes extends readonly [
+  infer First extends NodeSchema,
+  ...infer Rest extends readonly NodeSchema[]
+]
+  ? TailIsRest<First> extends true
+    ? true
+    : HasRestTail<Rest>
+  : false;
+
+/** Check TLeft against the constraint of the pattern's leading operand element.
+ *  (Binding references are invalid at position 0 — createParser rejects
+ *  them.) */
+type OperandConstraintOk<OperandEl extends PatternSchema, TLeft> = OperandEl extends {
+  kind: "expr";
+}
+  ? TLeft extends { outputSchema: infer O }
+    ? CheckConstraint<O, ResolveSpec<OperandEl, [], []>>
+    : false
+  : false;
+
+/**
+ * Try one node's tail (pattern minus the leading operand element) against the
  * input, folding TLeft into a new left-nested node on success.
  *
- * TAcc/TDone are seeded with the left operand so sameAs("left") resolves
- * inside the tail. The tail's rhs elements parse at the NEXT level
- * (currentLevels := Next), which is what makes the fold left-associative.
+ * TAcc/TDone are seeded with the left operand so binding references
+ * resolve inside the tail. Tail operands are operand(...) elements, so they
+ * parse at the next level via their role — the fold itself is what makes
+ * the level left-associative.
  */
 type ParseLeftTail<
   N extends NodeSchema,
+  Cur extends Grammar,
   Next extends Grammar,
   TLeft,
   TInput extends string,
   TContext extends Context,
   TFull extends Grammar
 > = N["pattern"] extends readonly [
-  infer LhsEl extends PatternSchema,
+  infer OperandEl extends PatternSchema,
   ...infer Tail extends readonly PatternSchema[]
 ]
-  ? LhsConstraintOk<LhsEl, TLeft> extends true
+  ? OperandConstraintOk<OperandEl, TLeft> extends true
     ? ParsePatternTuple<
         Tail,
         TInput,
         TContext,
-        Next,
+        Cur,
         Next,
         TFull,
         [TLeft],
-        [LhsEl]
+        [OperandEl]
       > extends [infer Children extends unknown[], infer Rest extends string]
       ? [BuildNodeResult<N, Children>, Rest]
       : []
@@ -553,6 +819,7 @@ type ParseLeftTail<
 /** Try each node in the level for one fold step. */
 type ParseLeftStep<
   TNodes extends readonly NodeSchema[],
+  Cur extends Grammar,
   Next extends Grammar,
   TLeft,
   TInput extends string,
@@ -562,12 +829,12 @@ type ParseLeftStep<
   infer N extends NodeSchema,
   ...infer RestNodes extends readonly NodeSchema[]
 ]
-  ? ParseLeftTail<N, Next, TLeft, TInput, TContext, TFull> extends [
+  ? ParseLeftTail<N, Cur, Next, TLeft, TInput, TContext, TFull> extends [
       infer R,
       infer Rest extends string
     ]
     ? [R, Rest]
-    : ParseLeftStep<RestNodes, Next, TLeft, TInput, TContext, TFull>
+    : ParseLeftStep<RestNodes, Cur, Next, TLeft, TInput, TContext, TFull>
   : [];
 
 /**
@@ -578,17 +845,18 @@ type ParseLeftStep<
  * instantiation depth (limit ~50).
  */
 type ParseLeftFold<
-  Cur extends readonly NodeSchema[],
+  CurNodes extends readonly NodeSchema[],
+  Cur extends Grammar,
   Next extends Grammar,
   TLeft,
   TInput extends string,
   TContext extends Context,
   TFull extends Grammar
-> = ParseLeftStep<Cur, Next, TLeft, TInput, TContext, TFull> extends [
+> = ParseLeftStep<CurNodes, Cur, Next, TLeft, TInput, TContext, TFull> extends [
   infer NewLeft,
   infer Rest extends string
 ]
-  ? ParseLeftFold<Cur, Next, NewLeft, Rest, TContext, TFull>
+  ? ParseLeftFold<CurNodes, Cur, Next, NewLeft, Rest, TContext, TFull>
   : [TLeft, TInput];
 
 /**
@@ -597,7 +865,8 @@ type ParseLeftFold<
  * "5-2-1" → sub(sub(5, 2), 1)
  */
 type ParseLeftLevel<
-  Cur extends readonly NodeSchema[],
+  CurNodes extends readonly NodeSchema[],
+  Cur extends Grammar,
   Next extends Grammar,
   TInput extends string,
   TContext extends Context,
@@ -606,29 +875,30 @@ type ParseLeftLevel<
   infer L,
   infer R extends string
 ]
-  ? ParseLeftFold<Cur, Next, L, R, TContext, TFull>
+  ? ParseLeftFold<CurNodes, Cur, Next, L, R, TContext, TFull>
   : [];
 
 /**
  * Parse using grammar levels (flat tuple).
  *
  * TLevels is the remaining levels to try, starting from current.
- * - Left-associative levels use the iterative fold
- * - Otherwise: try nodes at first level; if no match, fall back to rest
- * - Base case: empty grammar - no match
+ * - The single remaining level is the LEAF level: plain alternation
+ * - Levels with an rest(...) tail: recursive descent (right-associative)
+ * - Otherwise: the iterative left fold
  */
 type ParseLevels<
   TLevels extends Grammar,
   TInput extends string,
   TContext extends Context,
   TFullGrammar extends Grammar
-> = TLevels extends readonly [
-  infer CurrentNodes extends readonly NodeSchema[],
-  ...infer NextNodes extends Grammar
-]
-  ? IsLeftLevel<CurrentNodes> extends true
-    ? ParseLeftLevel<CurrentNodes, NextNodes, TInput, TContext, TFullGrammar>
-    : ParseNodes<
+> = TLevels extends readonly [infer OnlyLevel extends readonly NodeSchema[]]
+  ? ParseNodes<OnlyLevel, TInput, TContext, TLevels, [], TFullGrammar>
+  : TLevels extends readonly [
+      infer CurrentNodes extends readonly NodeSchema[],
+      ...infer NextNodes extends Grammar
+    ]
+  ? HasRestTail<CurrentNodes> extends true
+    ? ParseNodes<
         CurrentNodes,
         TInput,
         TContext,
@@ -636,8 +906,16 @@ type ParseLevels<
         NextNodes,
         TFullGrammar
       > extends [infer R, infer Remaining extends string]
-    ? [R, Remaining]
-    : ParseLevels<NextNodes, TInput, TContext, TFullGrammar>
+      ? [R, Remaining]
+      : ParseLevels<NextNodes, TInput, TContext, TFullGrammar>
+    : ParseLeftLevel<
+        CurrentNodes,
+        TLevels,
+        NextNodes,
+        TInput,
+        TContext,
+        TFullGrammar
+      >
   : []; // Empty grammar - no match
 
 // =============================================================================

@@ -1,0 +1,394 @@
+/**
+ * Compile-time demonstrations of every type-level claim in DESIGN.md —
+ * the twin of design-claims.test.ts, checked by `pnpm typecheck`. Each
+ * block names the DESIGN.md section it pins. @ts-expect-error lines are
+ * load-bearing: if the claimed compile error stops happening, typecheck
+ * fails here.
+ */
+
+import type { type } from "arktype";
+import type {
+  InferOfDef,
+  Parse,
+  ComputeGrammar,
+  Context,
+  SchemaShape,
+} from "./index.js";
+import type { ValidatedInput, EvaluateResult } from "./createParser.js";
+import { fixtureParser as parser } from "./__fixtures__/grammar.js";
+import { fixtureNodes, formSchema } from "./__fixtures__/grammar.js";
+
+type G = ComputeGrammar<typeof fixtureNodes>;
+type EmptyCtx = Context<{}>;
+
+type AssertTrue<T extends true> = T;
+type AssertExtends<T, Base> = T extends Base ? true : false;
+type AssertEqual<T, Expected> = [T] extends [Expected]
+  ? [Expected] extends [T]
+    ? true
+    : false
+  : false;
+
+// =============================================================================
+// DESIGN: the inference-poisoning history — evaluate/parse NOW carry
+// type.validate on their schema parameter. Before the 2026-07 rework
+// they could not: combined with the deferred-conditional input, the
+// validate-wrapped schema made inference METASTABLE (the identical call
+// typechecked or collapsed to never depending on declaration order
+// elsewhere — bisected 2026-07-07 pre-rework). The rework's depth
+// reductions (scope-free def algebra) moved the shape off the
+// instantiation edge; re-tested 2026-07-07 post-rework across 8
+// declaration-order permutations × TS 5.7/5.9/6.0, warm and cold — all
+// exact. The variants below pin what still holds and what changed.
+// =============================================================================
+
+type PG = ComputeGrammar<typeof fixtureNodes>;
+
+// 1 — the SHIPPED shape (evaluate's real signature): validate-wrapped
+// schema + deferred-conditional input + NoInfer'd values. Exact
+// inference, schema typos error at the leaf, invalid inputs at the
+// input. The permutation canaries: a control signature declared BEFORE
+// (this file) and AFTER (the calls further down) — the pre-rework flip
+// trigger — must not change the outcome.
+declare function evalControl<
+  TInput extends string,
+  const TSchema extends SchemaShape
+>(
+  input: ValidatedInput<PG, TInput, Context<TSchema>>,
+  schema: TSchema,
+  values: NoInfer<type.infer<TSchema>>
+): EvaluateResult<PG, TInput, TSchema>;
+const okControl: number = evalControl("x+1", { x: "number" }, { x: 41 });
+
+declare function evalShipped<
+  TInput extends string,
+  const TSchema extends SchemaShape,
+  const $ extends {} = {}
+>(
+  input: ValidatedInput<PG, TInput, Context<TSchema, $>>,
+  schema: type.validate<TSchema, $>,
+  values: NoInfer<type.infer<TSchema, $>>
+): EvaluateResult<PG, TInput, TSchema, $>;
+const okShipped = evalShipped("x+1", { x: "number" }, { x: 41 });
+type _shippedExact = AssertTrue<AssertEqual<typeof okShipped, number>>;
+// @ts-expect-error — schema typos now error at the leaf on evaluate too
+evalShipped("x+1", { x: "numbr" }, { x: 41 });
+// @ts-expect-error — invalid input still errors (full consumption)
+evalShipped("x+", { x: "number" }, { x: 41 });
+
+// 2 — values WITHOUT NoInfer: still death, unchanged by the rework.
+declare function evalBareInfer<
+  TInput extends string,
+  const TSchema extends SchemaShape
+>(
+  input: ValidatedInput<PG, TInput, Context<TSchema>>,
+  schema: TSchema,
+  values: type.infer<TSchema>
+): EvaluateResult<PG, TInput, TSchema>;
+// @ts-expect-error — input is 'never': the values argument poisoned TSchema
+evalBareInfer("x+1", { x: "number" }, { x: 41 });
+
+// 2' — the SMOKING GUN, mechanism of (2): reveal what TSchema fixes to.
+// TS inverts the mapped type inside type.infer and admits the VALUES
+// argument as an inference candidate, then UNIONS the candidates. The
+// 41-leaf is not a def, so Parse<> over that branch fails downstream.
+declare function revealBareInfer<
+  TInput extends string,
+  const TSchema extends SchemaShape
+>(input: TInput, schema: TSchema, values: type.infer<TSchema>): TSchema;
+const poisoned = revealBareInfer("x+1", { x: "number" }, { x: 41 });
+type _poisonedUnion = AssertTrue<
+  AssertEqual<typeof poisoned, { readonly x: "number" } | { readonly x: 41 }>
+>;
+
+// 2'' — with validate on schema but values still bare, the poisoning is
+// SILENT: nothing errors (validate supplies the primary candidate), but
+// TSchema is still the union — result types can quietly degrade. This is
+// why values stay NoInfer-wrapped even now.
+declare function revealSilent<
+  TInput extends string,
+  const TSchema extends SchemaShape,
+  const $ extends {} = {}
+>(
+  input: TInput,
+  schema: type.validate<TSchema, $>,
+  values: type.infer<TSchema, $>
+): TSchema;
+const silent = revealSilent("x+1", { x: "number" }, { x: 41 });
+type _silentUnion = AssertTrue<
+  AssertEqual<typeof silent, { readonly x: "number" } | { readonly x: 41 }>
+>;
+
+// 3 — validate with a PLAIN input parameter (safeParse's shape): also
+// exact — but a plain input surrenders parse/evaluate's core guarantee:
+// an invalid literal COMPILES here (it parses a prefix; nothing checks
+// full consumption), typed by whatever prefix parsed.
+declare function validatePlainInput<
+  TInput extends string,
+  const TSchema extends SchemaShape
+>(
+  input: TInput,
+  schema: type.validate<TSchema>,
+  values: NoInfer<type.infer<TSchema>>
+): TSchema;
+const clean = validatePlainInput("x+1", { x: "number" }, { x: 41 });
+type _cleanExact = AssertTrue<
+  AssertEqual<typeof clean, { readonly x: "number" }>
+>;
+const junkCompiles = validatePlainInput("x+", { x: "number" }, { x: 41 });
+type _junkCompiles = AssertTrue<
+  AssertEqual<typeof junkCompiles, { readonly x: "number" }>
+>;
+
+// =============================================================================
+// DESIGN: validation layers — EVERY entry point catches schema-leaf
+// typos at compile time (design-claims.test.ts has the runtime half,
+// reached via casts). (Careful: spelling the expect-error directive
+// inside a prose comment ACTIVATES it — tsc matches the text anywhere
+// in a comment. That mistake was made writing this file.)
+// =============================================================================
+
+// @ts-expect-error — "numbr" is not a def; the leaf errors HERE
+parser.safeParse("1+1", { x: "numbr" });
+// @ts-expect-error — same typo, same leaf error on evaluate
+parser.evaluate("1+1", { x: "numbr" }, { x: 1 });
+// @ts-expect-error — and on parse
+parser.parse("1+1", { x: "numbr" });
+
+// =============================================================================
+// DESIGN: 'unknown' identifiers — constrained slots reject at compile
+// time; unconstrained slots accept (eq's operands), failing only at eval
+// =============================================================================
+
+// @ts-expect-error — zz is not in the (empty) schema; add's slot rejects it
+parser.parse("1 + zz", {});
+
+// eq's unconstrained slots accept two unknowns AT RUNTIME (safeParse
+// succeeds; evaluation throws — design-claims.test.ts). Literal mode is
+// stricter: the type engine rejects "unknown" candidates in EVERY
+// constrained slot, including overlapping() ones — a conservative
+// engine divergence discovered writing this file:
+// @ts-expect-error — literal mode rejects what the runtime parses
+parser.parse("zz == yy", {});
+
+// =============================================================================
+// DESIGN: refinements are validation-only — the refined leaf ERASES for
+// typing, so this parses at compile time (if parsing enforced
+// refinements, this would be a compile error and "if it compiles, it
+// parses" would break the other way for `parse`)
+// =============================================================================
+
+parser.parse("age + 1", { age: "number > 0" });
+
+// =============================================================================
+// DESIGN: template outputSchema carrier — a TS type cannot be turned back
+// into a def string, so the type level carries the resolved type; its
+// INFERRED type matches the runtime's displayed expression
+// =============================================================================
+
+type PMaybeDemo = Parse<G, "x == null", Context<{ x: "string | null" }>>;
+type _carrier = AssertTrue<AssertExtends<PMaybeDemo, [{ node: "eq" }, ""]>>;
+
+// =============================================================================
+// DESIGN: \xHH / \uHHHH escapes are runtime-only — literal mode rejects
+// them (hex is undecodable in the type system); safeParse handles them
+// (design-claims.test.ts has the runtime half)
+// =============================================================================
+
+// @ts-expect-error — hex escape in literal mode
+parser.parse('"\\x41"', {});
+// simple escapes work in BOTH engines:
+parser.parse('"a\\"b"', {});
+
+// =============================================================================
+// DESIGN: the overlap corner is NOT conservative — TS does not reduce
+// { v: string } & { v: number } to never, so the type level accepts an
+// eq the runtime rejects. This line COMPILING is the demonstration; the
+// runtime half (TYPE_MISMATCH + StringentParseError) is in
+// design-claims.test.ts.
+// =============================================================================
+
+const disjointObjects = { a: { v: "string" }, b: { v: "number" } } as const;
+parser.parse("a == b", disjointObjects); // compiles; throws at runtime
+
+// =============================================================================
+// DESIGN: wide schema types disable parse()'s guarantee — every
+// identifier resolves optimistically, so a bogus literal COMPILES (and
+// throws at runtime; see design-claims.test.ts)
+// =============================================================================
+
+declare const wide: Record<string, "number">;
+parser.parse("nope + 1", wide); // compiles; throws at runtime
+
+// =============================================================================
+// DESIGN: scope aliases resolve at COMPILE TIME — the parser's inferred
+// scope is threaded through schema validation and literal-mode parsing,
+// so alias schemas need no casts and get full end-to-end typing
+// =============================================================================
+
+import { createParser } from "./index.js";
+import { fixtureNodes as scopedNodes } from "./__fixtures__/grammar.js";
+
+const scoped = createParser(scopedNodes, { scope: { Money: "number" } });
+// alias schema leaves validate and resolve — no casts:
+scoped.safeParse("x + 1", { x: "Money" });
+// @ts-expect-error — typos in alias names still error at the leaf
+scoped.safeParse("x + 1", { x: "Mony" });
+// literal-mode parsing resolves the alias: x types as number, satisfies
+// add's slot, and the result type flows to the call site
+const scopedSum = scoped.evaluate("x + 1", { x: "Money" }, { x: 41 });
+type _scopedSum = AssertTrue<AssertExtends<typeof scopedSum, number>>;
+
+// =============================================================================
+// DESIGN: evaluation is typed end-to-end for literal inputs — derived
+// result types flow to the call site
+// =============================================================================
+
+const concat = parser.evaluate("'a'+'b'", {}, {});
+const sum = parser.evaluate("1+2", {}, {});
+type _t1 = AssertTrue<AssertExtends<typeof concat, string>>;
+type _t2 = AssertTrue<AssertExtends<typeof sum, number>>;
+
+// witness InferOfDef over a carrier-or-def outputSchema at the API edge
+type EqOut = PMaybeDemo extends [{ outputSchema: infer O }, string]
+  ? InferOfDef<O>
+  : never;
+type _t3 = AssertTrue<AssertExtends<EqOut, boolean>>;
+
+export {};
+
+// =============================================================================
+// DESIGN: the pattern builder validates every def WHERE IT IS WRITTEN —
+// arktype's validate runs in each chained call with the bindings
+// accumulated so far as scope aliases. These pins are the compile-time
+// twins of createParser's construction checks.
+// =============================================================================
+
+import { defineNode, overlapping, type PatternBuilder } from "./index.js";
+
+// a typo'd def errors AT the chained call, with arktype's own message
+defineNode({
+  name: "typo",
+  precedence: 1,
+  pattern: (p) =>
+    // @ts-expect-error — "nmbr" is unresolvable
+    p.operand("nmbr").as("l").constVal("!").rest().as("r").result("boolean"),
+});
+
+// whole-string and EMBEDDED binding references compile (the accumulated
+// bindings are scope aliases), and so do object result defs embedding them
+defineNode({
+  name: "refs",
+  precedence: 1,
+  pattern: (p) =>
+    p
+      .operand("number | string").as("left")
+      .constVal("~")
+      .rest("left | null").as("right")
+      .result({ value: "left | null" })
+      .eval(({ left }) => ({ value: left() })),
+});
+
+// a binding reference at position 0 fails — no earlier operand exists
+defineNode({
+  name: "posZero",
+  precedence: 1,
+  pattern: (p) =>
+    // @ts-expect-error — "left" is not in scope yet
+    p.operand("left").as("l").constVal("!").rest().as("r").result("boolean"),
+});
+
+// a refinement on a reference fails INSIDE arktype: the alias is typed
+// unknown, and bounds require number/string/Array/Date — the compile-time
+// twin of "refinements must live on the referenced operand's own constraint"
+defineNode({
+  name: "refRefine",
+  precedence: 1,
+  pattern: (p) =>
+    // @ts-expect-error — bounded expression on an unknown alias
+    p.operand("number").as("l").constVal("!").rest("l > 5").as("r").result("boolean"),
+});
+
+// overlapping() must reference an earlier non-const binding
+defineNode({
+  name: "badOverlap",
+  precedence: 1,
+  pattern: (p) =>
+    // @ts-expect-error — no earlier binding "nope"
+    p.operand().as("l").constVal("==").rest(overlapping("nope")).as("r").result("boolean"),
+});
+
+// .as() rejects names that shadow resolvable types, collide with AST
+// structure, or repeat within the pattern
+defineNode({
+  name: "shadow",
+  precedence: 1,
+  // @ts-expect-error — "string" is a resolvable type
+  pattern: (p) => p.operand().as("string").constVal("!").result("boolean"),
+});
+defineNode({
+  name: "reserved",
+  precedence: 1,
+  // @ts-expect-error — "node" collides with AST structure
+  pattern: (p) => p.operand().as("node").constVal("!").result("boolean"),
+});
+defineNode({
+  name: "dup",
+  precedence: 1,
+  pattern: (p) =>
+    // @ts-expect-error — "v" is already used in this pattern
+    p.operand().as("v").constVal("#").rest().as("v").result("boolean"),
+});
+
+// const bindings carry matched text, not a type — they never enter the
+// scope, so constraints and result defs cannot reference them
+defineNode({
+  name: "constRef",
+  precedence: 1,
+  pattern: (p) =>
+    // @ts-expect-error — "b" names a const binding
+    p.operand().as("l").constVal("!").as("b").rest("b").as("r").result("boolean"),
+});
+
+// result defs are validated too
+defineNode({
+  name: "badResult",
+  precedence: 1,
+  // @ts-expect-error — "nmbr" is unresolvable
+  pattern: (p) => p.operand("number").as("n").constVal("!").result("nmbr"),
+});
+
+// =============================================================================
+// DESIGN: WHY .result()/.eval() are CHAIN methods, not config siblings —
+// a pattern-dependent sibling property makes TypeScript fix the pattern
+// tuple prematurely (order-sensitive inference, the same class of
+// failure as the metastability above). A config-object shape with a
+// contextually-typed eval sibling infers `readonly PatternSchema[]`
+// instead of the tuple when eval precedes pattern in source order.
+// Demonstrated with a minimal defineNode-like signature:
+// =============================================================================
+
+declare function configStyle<const TPattern extends readonly unknown[]>(config: {
+  pattern: (p: PatternBuilder) => { "~pattern": TPattern };
+  eval?: (b: TPattern) => unknown;
+}): TPattern;
+
+// eval BEFORE pattern: TPattern collapses to the constraint — the tuple
+// is lost (only the length assertion below keeps this honest)
+const collapsed = configStyle({
+  eval: (b) => b,
+  pattern: (p) => p.number(),
+});
+type _collapsed = AssertTrue<
+  AssertEqual<typeof collapsed extends readonly [unknown] ? true : false, false>
+>;
+// pattern BEFORE eval: the tuple survives — same call, different property
+// order. An API whose types depend on property order is unshippable;
+// the chain has no such sibling by construction.
+const survives = configStyle({
+  pattern: (p) => p.number(),
+  eval: (b) => b,
+});
+type _survives = AssertTrue<
+  AssertEqual<typeof survives extends readonly [unknown] ? true : false, true>
+>;

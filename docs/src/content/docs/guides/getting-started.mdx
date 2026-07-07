@@ -34,81 +34,127 @@ grammar definition drives two engines:
   </TabItem>
 </Tabs>
 
-Stringent is ESM-only and ships its own type definitions.
+Stringent is ESM-only, ships its own type definitions, and depends on
+[arktype](https://arktype.io) — constraints, result types, and schemas are
+all arktype definitions.
 
 ## Quickstart
 
 <Steps>
 
 1. **Define your grammar.** Each `defineNode` call declares one grammar rule:
-   a pattern of elements, a precedence, and (optionally) a result type and an
+   a pattern of elements, a precedence, and (usually) a result type and an
    evaluation function.
 
    ```ts twoslash
-   import {
-     defineNode, number, string, path, lhs, rhs, expr, constVal,
-     sameAs, fromBinding, createParser,
-   } from "stringent";
+   import { defineNode, overlapping, createParser } from "stringent";
 
-   // Atoms — single-element passthrough patterns need no resultType
-   const numberLit = defineNode({ name: "num", pattern: [number()], precedence: "atom" });
-   const stringLit = defineNode({ name: "str", pattern: [string(['"', "'"])], precedence: "atom" });
-   const variable  = defineNode({ name: "var", pattern: [path()], precedence: "atom" });
+   // Leaf nodes live at the HIGHEST precedence level.
+   // Single-element passthrough patterns take no resultType.
+   const numberLit = defineNode({
+     name: "num",
+     precedence: 4,
+     pattern: (p) => p.number(),
+   });
+   const stringLit = defineNode({
+     name: "str",
+     precedence: 4,
+     pattern: (p) => p.string(['"', "'"]),
+   });
+   // Keyword literals must come before path() in the level, or `true`
+   // would parse as an identifier.
+   // ONE node for both booleans: const ALTERNATION binds the matched text
+   const booleanLit = defineNode({
+     name: "bool",
+     precedence: 4,
+     pattern: (p) =>
+       p
+         .constVal("true", "false").as("word")
+         .result("boolean")
+         .eval(({ word }) => word() === "true"),
+   });
+   const variable  = defineNode({
+     name: "var",
+     precedence: 4,
+     pattern: (p) => p.path(),
+   });
    // path() matches identifiers and dotted paths: x, values.password
 
    // Polymorphic parens: the result type is whatever is inside
    const parens = defineNode({
      name: "parens",
-     pattern: [constVal("("), expr().as("inner"), constVal(")")],
-     precedence: "atom",
-     resultType: fromBinding("inner"),
-     eval: ({ inner }) => inner,
+     precedence: 4,
+     pattern: (p) =>
+       p
+         .constVal("(")
+         .expr().as("inner")
+         .constVal(")")
+         .result("inner")
+         .eval(({ inner }) => inner()),
    });
 
-   // Same-type equality: 1 == 'a' is a parse-time type error
+   // Overlap-typed equality: 1 == 'a' is a parse-time type error,
+   // but operand order never matters (x == 1 and 1 == x both parse)
    const eq = defineNode({
      name: "eq",
-     pattern: [lhs().as("left"), constVal("=="), rhs(sameAs("left")).as("right")],
      precedence: 1,
-     resultType: "boolean",
-     eval: ({ left, right }) => left === right,
+     pattern: (p) =>
+       p
+         .operand().as("left")
+         .constVal("==")
+         .rest(overlapping("left")).as("right")
+         .result("boolean")
+         .eval(({ left, right }) => left() === right()),
    });
 
-   // ONE overloaded add: number+number → number, string+string → string
+   // ONE overloaded add: number+number → number, string+string → string.
+   // "number | string" is an arktype def; "left" is a binding reference.
+   // The operand() tail makes the level LEFT-associative: 1+2+3 = (1+2)+3.
    const add = defineNode({
      name: "add",
-     pattern: [lhs(["number", "string"]).as("left"), constVal("+"), rhs(sameAs("left")).as("right")],
-     precedence: 2,            // lower = binds looser
-     associativity: "left",    // 1+2+3 parses as (1+2)+3
-     resultType: fromBinding("left"),
-     eval: ({ left, right }) => (left as any) + (right as any),
+     precedence: 2,
+     pattern: (p) =>
+       p
+         .operand("number | string").as("left")
+         .constVal("+")
+         .operand("left").as("right")
+         .result("left")
+         .eval((b) => {
+       const l = b.left(), r = b.right();
+       return typeof l === "string" ? `${l}${String(r)}` : Number(l) + Number(r);
+     }),
    });
 
    const mul = defineNode({
      name: "mul",
-     pattern: [lhs("number").as("left"), constVal("*"), rhs("number").as("right")],
-     precedence: 3,            // higher = binds tighter
-     associativity: "left",
-     resultType: "number",
-     eval: ({ left, right }) => left * right,
+     precedence: 3,
+     pattern: (p) =>
+       p
+         .operand("number").as("left")
+         .constVal("*")
+         .operand("number").as("right")
+         .result("number")
+         .eval(({ left, right }) => left() * right()),
    });
 
-   // A short-circuiting polymorphic ternary
+   // A short-circuiting polymorphic ternary. The rest() tail makes the
+   // level RIGHT-associative.
    const ternary = defineNode({
      name: "ternary",
-     pattern: [
-       lhs("boolean").as("cond"), constVal("?"),
-       expr().as("then"), constVal(":"),
-       rhs(sameAs("then")).as("else"),   // branches must agree
-     ],
      precedence: 0,
-     resultType: fromBinding("then"),    // result = the branches' type
-     lazy: true,                         // eval receives thunks
-     eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
+     pattern: (p) =>
+       p
+         .operand("boolean").as("cond")
+         .constVal("?")
+         .expr().as("then")
+         .constVal(":")
+         .rest("then").as("else")
+         .result("then")
+         .eval(({ cond, then, else: alt }) => (cond() ? then() : alt())),
    });
 
    const parser = createParser(
-     [numberLit, stringLit, variable, parens, ternary, eq, add, mul] as const
+     [numberLit, stringLit, booleanLit, variable, parens, ternary, eq, add, mul] as const
    );
    ```
 
@@ -118,42 +164,74 @@ Stringent is ESM-only and ships its own type definitions.
    below to see it:
 
    ```ts twoslash
-   import {
-     defineNode, number, string, path, lhs, rhs, expr, constVal,
-     sameAs, fromBinding, createParser,
-   } from "stringent";
+   import { defineNode, overlapping, createParser } from "stringent";
 
-   const numberLit = defineNode({ name: "num", pattern: [number()], precedence: "atom" });
-   const stringLit = defineNode({ name: "str", pattern: [string(['"', "'"])], precedence: "atom" });
-   const variable  = defineNode({ name: "var", pattern: [path()], precedence: "atom" });
+   const numberLit = defineNode({
+     name: "num",
+     precedence: 4,
+     pattern: (p) => p.number(),
+   });
+   const stringLit = defineNode({
+     name: "str",
+     precedence: 4,
+     pattern: (p) => p.string(['"', "'"]),
+   });
+   // ONE node for both booleans: const ALTERNATION binds the matched text
+   const booleanLit = defineNode({
+     name: "bool",
+     precedence: 4,
+     pattern: (p) =>
+       p
+         .constVal("true", "false").as("word")
+         .result("boolean")
+         .eval(({ word }) => word() === "true"),
+   });
+   const variable  = defineNode({
+     name: "var",
+     precedence: 4,
+     pattern: (p) => p.path(),
+   });
 
    const eq = defineNode({
      name: "eq",
-     pattern: [lhs().as("left"), constVal("=="), rhs(sameAs("left")).as("right")],
      precedence: 1,
-     resultType: "boolean",
-     eval: ({ left, right }) => left === right,
+     pattern: (p) =>
+       p
+         .operand().as("left")
+         .constVal("==")
+         .rest(overlapping("left")).as("right")
+         .result("boolean")
+         .eval(({ left, right }) => left() === right()),
    });
 
    const add = defineNode({
      name: "add",
-     pattern: [lhs(["number", "string"]).as("left"), constVal("+"), rhs(sameAs("left")).as("right")],
      precedence: 2,
-     associativity: "left",
-     resultType: fromBinding("left"),
-     eval: ({ left, right }) => (left as any) + (right as any),
+     pattern: (p) =>
+       p
+         .operand("number | string").as("left")
+         .constVal("+")
+         .operand("left").as("right")
+         .result("left")
+         .eval((b) => {
+       const l = b.left(), r = b.right();
+       return typeof l === "string" ? `${l}${String(r)}` : Number(l) + Number(r);
+     }),
    });
 
    const mul = defineNode({
      name: "mul",
-     pattern: [lhs("number").as("left"), constVal("*"), rhs("number").as("right")],
      precedence: 3,
-     associativity: "left",
-     resultType: "number",
-     eval: ({ left, right }) => left * right,
+     pattern: (p) =>
+       p
+         .operand("number").as("left")
+         .constVal("*")
+         .operand("number").as("right")
+         .result("number")
+         .eval(({ left, right }) => left() * right()),
    });
 
-   const parser = createParser([numberLit, stringLit, variable, eq, add, mul] as const);
+   const parser = createParser([numberLit, stringLit, booleanLit, variable, eq, add, mul] as const);
    // ---cut---
    const [ast] = parser.parse("1+2*3", {});
    //     ^?
@@ -162,16 +240,17 @@ Stringent is ESM-only and ships its own type definitions.
    Invalid expressions don't compile:
 
    ```ts
-   parser.parse("1+", {});               // ✗ compile error
-   parser.parse("1+'a'", {});            // ✗ compile error: operand types disagree
-   parser.parse("1+x", { x: "number" }); // ✓
-   parser.parse("1+x", { x: "numbr" });  // ✗ compile error AT THE SCHEMA LEAF
+   parser.parse("1+", {});                  // ✗ compile error
+   parser.parse("1+'a'", {});               // ✗ compile error: 'a' ⊄ number (type of 'left')
+   parser.parse("1+x", { x: "number" });    // ✓
+   parser.safeParse("1+x", { x: "numbr" }); // ✗ compile error AT THE SCHEMA LEAF
    ```
 
-   Schema leaves are validated against the grammar's **type vocabulary** (all
-   declared `resultType`s + `number`/`string`/`boolean`/`unknown` + anything
-   in `createParser(nodes, { types: [...] })`), so schema typos fail at the
-   typo, not somewhere downstream.
+   Schema leaves are arktype definitions, validated by `type.validate` — a
+   typo'd `{ x: "numbr" }` errors right at the leaf on `safeParse` (and every
+   entry point rejects bad schemas at runtime). Grammar constraints are
+   validated even earlier: a typo'd `operand("numbr")` throws at
+   `createParser` time.
 
 3. **Parse dynamic strings (runtime checked).** Runtime-provided input goes
    through `safeParse()`, which requires full consumption and returns
@@ -184,8 +263,8 @@ Stringent is ESM-only and ships its own type definitions.
    } else {
      console.error(result.error.message);
      // e.g. Expected a number expression at position 2, got unknown ('zz' is not in the schema)
-     // e.g. Expected a number (same type as 'left') expression at position 2, got string
-     // e.g. Unexpected input at position 4: found "junk!!" (expected "*", "+" or "==")
+     // e.g. Expected a number (type of 'left') expression at position 4, got string
+     // e.g. Unexpected input at position 6: found "junk!!" (expected "*", "+" or "==")
      result.error.position; // 0-based offset
      result.error.expected; // tokens that would have been valid there
    }
@@ -196,42 +275,74 @@ Stringent is ESM-only and ships its own type definitions.
    nodes:
 
    ```ts twoslash
-   import {
-     defineNode, number, string, path, lhs, rhs, expr, constVal,
-     sameAs, fromBinding, createParser,
-   } from "stringent";
+   import { defineNode, overlapping, createParser } from "stringent";
 
-   const numberLit = defineNode({ name: "num", pattern: [number()], precedence: "atom" });
-   const stringLit = defineNode({ name: "str", pattern: [string(['"', "'"])], precedence: "atom" });
-   const variable  = defineNode({ name: "var", pattern: [path()], precedence: "atom" });
+   const numberLit = defineNode({
+     name: "num",
+     precedence: 4,
+     pattern: (p) => p.number(),
+   });
+   const stringLit = defineNode({
+     name: "str",
+     precedence: 4,
+     pattern: (p) => p.string(['"', "'"]),
+   });
+   // ONE node for both booleans: const ALTERNATION binds the matched text
+   const booleanLit = defineNode({
+     name: "bool",
+     precedence: 4,
+     pattern: (p) =>
+       p
+         .constVal("true", "false").as("word")
+         .result("boolean")
+         .eval(({ word }) => word() === "true"),
+   });
+   const variable  = defineNode({
+     name: "var",
+     precedence: 4,
+     pattern: (p) => p.path(),
+   });
 
    const eq = defineNode({
      name: "eq",
-     pattern: [lhs().as("left"), constVal("=="), rhs(sameAs("left")).as("right")],
      precedence: 1,
-     resultType: "boolean",
-     eval: ({ left, right }) => left === right,
+     pattern: (p) =>
+       p
+         .operand().as("left")
+         .constVal("==")
+         .rest(overlapping("left")).as("right")
+         .result("boolean")
+         .eval(({ left, right }) => left() === right()),
    });
 
    const add = defineNode({
      name: "add",
-     pattern: [lhs(["number", "string"]).as("left"), constVal("+"), rhs(sameAs("left")).as("right")],
      precedence: 2,
-     associativity: "left",
-     resultType: fromBinding("left"),
-     eval: ({ left, right }) => (left as any) + (right as any),
+     pattern: (p) =>
+       p
+         .operand("number | string").as("left")
+         .constVal("+")
+         .operand("left").as("right")
+         .result("left")
+         .eval((b) => {
+       const l = b.left(), r = b.right();
+       return typeof l === "string" ? `${l}${String(r)}` : Number(l) + Number(r);
+     }),
    });
 
    const mul = defineNode({
      name: "mul",
-     pattern: [lhs("number").as("left"), constVal("*"), rhs("number").as("right")],
      precedence: 3,
-     associativity: "left",
-     resultType: "number",
-     eval: ({ left, right }) => left * right,
+     pattern: (p) =>
+       p
+         .operand("number").as("left")
+         .constVal("*")
+         .operand("number").as("right")
+         .result("number")
+         .eval(({ left, right }) => left() * right()),
    });
 
-   const parser = createParser([numberLit, stringLit, variable, eq, add, mul] as const);
+   const parser = createParser([numberLit, stringLit, booleanLit, variable, eq, add, mul] as const);
    // ---cut---
    const seven = parser.evaluate("1+2*3", {}, {});
    //    ^?
@@ -257,11 +368,11 @@ Stringent is ESM-only and ships its own type definitions.
 ## Where to next?
 
 - [Defining a grammar](/stringent/guides/defining-a-grammar/) — pattern
-  elements, precedence, associativity, and grammar validation.
-- [Schemas & types](/stringent/guides/schemas-and-types/) — the type
-  vocabulary, nested schemas, and polymorphic nodes.
+  elements, precedence, associativity by tail shape, and grammar validation.
+- [Schemas & types](/stringent/guides/schemas-and-types/) — arktype
+  definitions, binding references, and polymorphic nodes.
 - [Parsing & evaluation](/stringent/guides/parsing-and-evaluation/) — the
-  three entry points and lazy evaluation.
+  entry points, `compile()`, and the lazy evaluation model.
 - [Error handling](/stringent/guides/error-handling/) — structured errors and
   what throws when.
 - [Playground](/stringent/playground/) — try the runtime engine live in your

@@ -1,400 +1,635 @@
 /**
- * Type-Level Tests
+ * Type-Level Tests (v2)
  *
- * Compile-time assertions for the type-level engine. This file is checked
- * by `pnpm typecheck` (tsc --noEmit) and excluded from the build — if it
- * compiles, the tests pass.
+ * Compile-time assertions checked by `pnpm typecheck` (tsc --noEmit) and
+ * excluded from the build — if it compiles, the tests pass.
  *
  * The expected shapes here mirror the runtime assertions in
- * src/parser.test.ts — together they pin both engines to the same behavior.
+ * src/parser.test.ts — together they pin both engines to the same
+ * behavior. Note: type-level outputSchema carries the DEF as written
+ * ("number", a binding's resolved def), while the runtime displays
+ * arktype's normalized expression — parity is over accept/reject and
+ * inferred TS types, not display strings.
  */
 
+import type { type } from "arktype";
 import type {
   ComputeGrammar,
   Context,
+  InferOfDef,
   InferValues,
-  NumberNode,
-  StringNode,
-  PathNode,
+  InferEvaluatedBindings,
   Parse,
-  ResolvePath,
+  Thunked,
 } from "./index.js";
-import { defineNode, lhs, rhs, constVal, sameAs } from "./index.js";
 import {
-  add,
-  div,
-  eq,
-  fixtureNodes,
-  fixtureParser,
-  formSchema,
-  mul,
-  numberLit,
-  parens,
-  pow,
-  stringLit,
-  sub,
-  ternary,
-  variable,
-} from "./__fixtures__/grammar.js";
+  defineNode,
+} from "./index.js";
+import { add, eq, fixtureNodes, fixtureParser, formSchema, sub, ternary } from "./__fixtures__/grammar.js";
 
 // =============================================================================
 // Assertion helpers
 // =============================================================================
 
-type AssertEqual<T, Expected> = T extends Expected
-  ? Expected extends T
+type AssertEqual<T, Expected> = [T] extends [Expected]
+  ? [Expected] extends [T]
     ? true
     : false
   : false;
 
+type AssertTrue<T extends true> = T;
 type AssertExtends<T, Base> = T extends Base ? true : false;
-
-// =============================================================================
-// Fixtures
-// =============================================================================
 
 type G = ComputeGrammar<typeof fixtureNodes>;
 type EmptyCtx = Context<{}>;
 type FormCtx = Context<typeof formSchema>;
 
 // =============================================================================
-// ComputeGrammar (hotscript-free, digit-wise precedence comparison)
+// Literal-mode parsing: shapes
 // =============================================================================
 
-// Levels sorted ascending by precedence, atoms last, definition order kept
-type TG1 = AssertEqual<
-  G,
-  [
-    [typeof ternary],
-    [typeof eq],
-    [typeof add, typeof sub],
-    [typeof mul, typeof div],
-    [typeof pow],
-    [typeof numberLit, typeof stringLit, typeof variable, typeof parens]
-  ]
+type PNum = Parse<G, "1", EmptyCtx>;
+type _p1 = AssertTrue<
+  AssertExtends<PNum, [{ node: "literal"; value: 1; outputSchema: "number" }, ""]>
 >;
-const _tg1: TG1 = true;
 
-// Precedences beyond the old ~999 tuple ceiling compare fine (digit-wise Lte)
-{
-  const n = defineNode({ name: "n", pattern: [], precedence: "atom" });
-  const lo = defineNode({
-    name: "lo",
-    pattern: [lhs().as("l"), constVal("!"), rhs().as("r")],
-    precedence: 100,
-    resultType: "number",
-  });
-  const hi = defineNode({
-    name: "hi",
-    pattern: [lhs().as("l"), constVal("!!"), rhs().as("r")],
-    precedence: 1500,
-    resultType: "number",
-  });
-  type BigG = ComputeGrammar<readonly [typeof n, typeof hi, typeof lo]>;
-  const _big: AssertEqual<
-    BigG,
-    [[typeof lo], [typeof hi], [typeof n]]
-  > = true;
-}
-
-// =============================================================================
-// Atoms
-// =============================================================================
-
-type A1 = AssertEqual<Parse<G, "42", EmptyCtx>, [NumberNode<"42">, ""]>;
-const _a1: A1 = true;
-
-type A2 = AssertEqual<Parse<G, "'hello'", EmptyCtx>, [StringNode<"hello">, ""]>;
-const _a2: A2 = true;
-
-// Identifiers parse as single-segment paths, resolved from the schema
-type A3 = AssertEqual<Parse<G, "x", FormCtx>, [PathNode<["x"], "number">, ""]>;
-const _a3: A3 = true;
-
-type A4 = AssertEqual<Parse<G, "nope", EmptyCtx>, [PathNode<["nope"], "unknown">, ""]>;
-const _a4: A4 = true;
-
-// =============================================================================
-// Precedence
-// =============================================================================
-
-interface Bin<TName extends string, TOut extends string, TLeft, TRight> {
-  readonly node: TName;
-  readonly outputSchema: TOut;
-  left: TLeft;
-  right: TRight;
-}
-
-type P1 = AssertEqual<
-  Parse<G, "1+2*3", EmptyCtx>,
-  [
-    Bin<"add", "number", NumberNode<"1">, Bin<"mul", "number", NumberNode<"2">, NumberNode<"3">>>,
-    ""
-  ]
+type PAdd = Parse<G, "1+2", EmptyCtx>;
+type _p2 = AssertTrue<
+  AssertExtends<
+    PAdd,
+    [
+      {
+        node: "add";
+        outputSchema: "number";
+        left: { value: 1 };
+        right: { value: 2 };
+      },
+      ""
+    ]
+  >
 >;
-const _p1: P1 = true;
 
-type P2 = AssertEqual<
-  Parse<G, "1*3+2", EmptyCtx>,
-  [
-    Bin<"add", "number", Bin<"mul", "number", NumberNode<"1">, NumberNode<"3">>, NumberNode<"2">>,
-    ""
-  ]
+// string overload: same node, derived string type
+type PConcat = Parse<G, "'a'+'b'", EmptyCtx>;
+type _p3 = AssertTrue<
+  AssertExtends<PConcat, [{ node: "add"; outputSchema: "string" }, ""]>
 >;
-const _p2: P2 = true;
 
 // =============================================================================
-// Associativity
+// Keyword literals (const-pattern nodes) & string escapes
 // =============================================================================
 
-// Left: 5-2-1 → sub(sub(5,2),1)
-type S1 = AssertEqual<
-  Parse<G, "5-2-1", EmptyCtx>,
-  [
-    Bin<"sub", "number", Bin<"sub", "number", NumberNode<"5">, NumberNode<"2">>, NumberNode<"1">>,
-    ""
-  ]
+type PTrue = Parse<G, "true", EmptyCtx>;
+type _k1 = AssertTrue<
+  AssertExtends<
+    PTrue,
+    [{ node: "bool"; word: { outputSchema: "true" }; outputSchema: "boolean" }, ""]
+  >
 >;
-const _s1: S1 = true;
-
-// Left, mixed ops at one level: 1-2+3 → add(sub(1,2),3)
-type S2 = AssertEqual<
-  Parse<G, "1-2+3", EmptyCtx>,
-  [
-    Bin<"add", "number", Bin<"sub", "number", NumberNode<"1">, NumberNode<"2">>, NumberNode<"3">>,
-    ""
-  ]
+type PFalse = Parse<G, "false", EmptyCtx>;
+type _k1b = AssertTrue<
+  AssertExtends<
+    PFalse,
+    [{ node: "bool"; word: { outputSchema: "false" }; outputSchema: "boolean" }, ""]
+  >
 >;
-const _s2: S2 = true;
 
-// Right: 2^3^2 → pow(2, pow(3,2))
-type S3 = AssertEqual<
-  Parse<G, "2^3^2", EmptyCtx>,
-  [
-    Bin<"pow", "number", NumberNode<"2">, Bin<"pow", "number", NumberNode<"3">, NumberNode<"2">>>,
-    ""
-  ]
+type PNull = Parse<G, "null", EmptyCtx>;
+type _k2 = AssertTrue<
+  AssertExtends<PNull, [{ node: "null"; outputSchema: "null" }, ""]>
 >;
-const _s3: S3 = true;
 
-// =============================================================================
-// Polymorphic nodes (union + sameAs + fromBinding)
-// =============================================================================
-
-// add derives its output type per parse
-type PM1 = AssertEqual<
-  Parse<G, "1+2", EmptyCtx>,
-  [Bin<"add", "number", NumberNode<"1">, NumberNode<"2">>, ""]
+type PUndef = Parse<G, "undefined", EmptyCtx>;
+type _k3 = AssertTrue<
+  AssertExtends<PUndef, [{ node: "undefined"; outputSchema: "undefined" }, ""]>
 >;
-const _pm1: PM1 = true;
 
-type PM2 = AssertEqual<
-  Parse<G, "'a'+'b'", EmptyCtx>,
-  [Bin<"add", "string", StringNode<"a">, StringNode<"b">>, ""]
+// word-boundary rule: nullable is one identifier, not null + "able"
+type PNullable = Parse<G, "nullable", Context<{ nullable: "number" }>>;
+type _k4 = AssertTrue<
+  AssertExtends<PNullable, [{ node: "path"; path: ["nullable"]; outputSchema: "number" }, ""]>
 >;
-const _pm2: PM2 = true;
 
-// sameAs rejects mixed operands at the type level too
-type PM3 = AssertEqual<Parse<G, "1+'a'", EmptyCtx>, [NumberNode<"1">, "+'a'"]>;
-const _pm3: PM3 = true;
-
-// parens are polymorphic via fromBinding
-type PM4 = Parse<G, "('a')", EmptyCtx>[0];
-const _pm4: PM4 extends { node: "parens"; outputSchema: "string" } ? true : false =
-  true;
-
-// ternary derives its result type from the branches
-type PM5 = Parse<G, "1==2 ? 3 : 4", EmptyCtx>[0];
-const _pm5: PM5 extends { node: "ternary"; outputSchema: "number" } ? true : false =
-  true;
-
-type PM6 = Parse<G, "1==2 ? 'yes' : 'no'", EmptyCtx>[0];
-const _pm6: PM6 extends { node: "ternary"; outputSchema: "string" } ? true : false =
-  true;
-
-// disagreeing ternary branches are rejected (parse stops at the eq)
-type PM7 = Parse<G, "1==1 ? 1 : 'no'", EmptyCtx>;
-const _pm7: PM7 extends [{ node: "eq" }, string] ? true : false = true;
-
-// =============================================================================
-// Member access (paths)
-// =============================================================================
-
-type M1 = AssertEqual<
-  Parse<G, "values.password", FormCtx>,
-  [PathNode<["values", "password"], "string">, ""]
+// boolean literal satisfies ternary's cond constraint
+type PTernKw = Parse<G, "true ? 1 : 2", EmptyCtx>;
+type _k5 = AssertTrue<
+  AssertExtends<PTernKw, [{ node: "ternary"; outputSchema: "number" }, ""]>
 >;
-const _m1: M1 = true;
 
-// The headline use case
-type M2Root = Parse<G, "values.password == values.confirmPassword", FormCtx>[0];
-type M2 = AssertExtends<
-  M2Root,
-  {
-    node: "eq";
-    outputSchema: "boolean";
-    left: PathNode<["values", "password"], "string">;
-    right: PathNode<["values", "confirmPassword"], "string">;
-  }
->;
-const _m2: M2 = true;
-
-// Unknown segment resolves to "unknown"
-type M3 = AssertEqual<
-  Parse<G, "values.nope", FormCtx>,
-  [PathNode<["values", "nope"], "unknown">, ""]
->;
-const _m3: M3 = true;
-
-// Bare identifier for a nested record resolves to "unknown"
-type M4 = AssertEqual<Parse<G, "values", FormCtx>, [PathNode<["values"], "unknown">, ""]>;
-const _m4: M4 = true;
-
-// Whitespace rules (mirror the runtime):
-// space AFTER a dot fails the element → no parse at all
-type M5 = AssertEqual<Parse<G, "values. password", FormCtx>, []>;
-const _m5: M5 = true;
-
-// space BEFORE a dot ends the path (partial parse, trailing input)
-type M6 = AssertEqual<
-  Parse<G, "values .password", FormCtx>,
-  [PathNode<["values"], "unknown">, " .password"]
->;
-const _m6: M6 = true;
-
-// dangling dot fails the element
-type M7 = AssertEqual<Parse<G, "values.", FormCtx>, []>;
-const _m7: M7 = true;
-
-// ResolvePath directly
-type R1 = AssertEqual<ResolvePath<typeof formSchema, ["values", "password"]>, "string">;
-const _r1: R1 = true;
-type R2 = AssertEqual<ResolvePath<typeof formSchema, ["x", "nope"]>, "unknown">;
-const _r2: R2 = true;
-
-// =============================================================================
-// Failure cases
-// =============================================================================
-
-type F1 = AssertEqual<Parse<G, "@invalid", EmptyCtx>, []>;
-const _f1: F1 = true;
-
-// =============================================================================
-// parse() input validation
-// =============================================================================
-
-// @ts-expect-error - invalid literals are rejected at compile time
-fixtureParser.parse("@invalid", {});
-
-// @ts-expect-error - partial parses are rejected at compile time
-fixtureParser.parse("1+2 junk", {});
-
-// @ts-expect-error - dynamic strings must use safeParse
-fixtureParser.parse("1+2" as string, {});
-
-// @ts-expect-error - mixed operand types are rejected at compile time
-fixtureParser.parse("1+'a'", {});
-
-// trailing whitespace is fine (matches safeParse)
-fixtureParser.parse("1+2 ", {});
-
-// =============================================================================
-// Schema vocabulary validation (compile time)
-// =============================================================================
-
-// @ts-expect-error - 'numbr' is not in the grammar's type vocabulary
-fixtureParser.safeParse("x", { x: "numbr" });
-
-// @ts-expect-error - nested leaves are checked too
-fixtureParser.safeParse("x", { a: { b: "numbr" } });
-
-fixtureParser.safeParse("x", { x: "number" }); // ok
-fixtureParser.safeParse("x", { a: { b: "string" } }); // ok
-
-// =============================================================================
-// evaluate() result types
-// =============================================================================
-
-const evalNum = fixtureParser.evaluate("1+2", {}, {});
-const _e1: AssertEqual<typeof evalNum, number> = true;
-
-const evalStr = fixtureParser.evaluate("'a'+'b'", {}, {});
-const _e2: AssertEqual<typeof evalStr, string> = true;
-
-const evalTernary = fixtureParser.evaluate("1==2 ? 'yes' : 'no'", {}, {});
-const _e3: AssertEqual<typeof evalTernary, string> = true;
-
-const evalBool = fixtureParser.evaluate(
-  "values.password == values.confirmPassword",
-  formSchema,
-  { x: 0, values: { password: "a", confirmPassword: "b" } }
-);
-const _e4: AssertEqual<typeof evalBool, boolean> = true;
-
-// InferValues maps schemas to runtime value shapes
-type V1 = AssertEqual<
-  InferValues<typeof formSchema>,
-  {
-    readonly x: number;
-    readonly values: {
-      readonly password: string;
-      readonly confirmPassword: string;
-    };
-  }
->;
-const _v1: V1 = true;
-
-// =============================================================================
-// eval binding types
-// =============================================================================
-
-// Union constraints and resolved sameAs flow into eval's parameter types;
-// lazy nodes receive thunks.
-defineNode({
-  name: "check",
-  pattern: [
-    lhs(["number", "string"]).as("left"),
-    constVal("~"),
-    rhs(sameAs("left")).as("right"),
-  ],
+// word-boundary rule for infix identifier-like consts: `andy` never
+// matches constVal("and") (runtime twin in design-claims.test.ts)
+const _wbNum = defineNode({
+  name: "n",
+  precedence: 2,
+  pattern: (p) => p.number(),
+});
+const _wbConj = defineNode({
+  name: "and",
   precedence: 1,
-  resultType: "boolean",
-  lazy: true,
-  eval: ({ left, right }) => {
-    const _l: () => number | string = left;
-    const _r: () => number | string = right;
-    return left() === right();
-  },
+  pattern: (p) =>
+    p
+      .operand("number").as("l")
+      .constVal("and")
+      .rest("number").as("r")
+      .result("number")
+      .eval(({ l, r }) => l() && r()),
+});
+type WbG = ComputeGrammar<[typeof _wbNum, typeof _wbConj]>;
+type _wb1 = AssertTrue<
+  AssertExtends<Parse<WbG, "1 and 2", EmptyCtx>, [{ node: "and" }, ""]>
+>;
+type _wb2 = AssertTrue<
+  AssertEqual<Parse<WbG, "1 andy 2", EmptyCtx> extends [unknown, ""] ? true : false, false>
+>;
+
+// UNIT keyword resultTypes work end-to-end: a node may declare
+// resultType "true" (arktype unit keyword) and satisfy "boolean" slots
+const _unitTrue = defineNode({
+  name: "yes",
+  precedence: 2,
+  pattern: (p) =>
+    p
+      .constVal("yes")
+      .result("true")
+      .eval(() => true as const),
+});
+type UnitG = ComputeGrammar<[typeof _wbNum, typeof _unitTrue, typeof _wbConj]>;
+type PUnit = Parse<UnitG, "yes", EmptyCtx>;
+type _u1 = AssertTrue<AssertExtends<PUnit, [{ node: "yes"; outputSchema: "true" }, ""]>>;
+type _u2 = AssertTrue<
+  AssertEqual<PUnit extends [{ outputSchema: infer O }, string] ? InferOfDef<O> : never, true>
+>;
+
+// null does not satisfy a boolean slot
+type PTernNull = Parse<G, "null ? 1 : 2", EmptyCtx>;
+type _k6 = AssertTrue<AssertEqual<PTernNull extends [unknown, ""] ? true : false, false>>;
+
+// null overlaps a nullable identifier in eq; disjoint from number
+type PEqNull = Parse<G, "x == null", Context<{ x: "string | null" }>>;
+type _k7 = AssertTrue<AssertExtends<PEqNull, [{ node: "eq"; outputSchema: "boolean" }, ""]>>;
+type PEqNullBad = Parse<G, "1 == null", EmptyCtx>;
+type _k8 = AssertTrue<AssertEqual<PEqNullBad extends [unknown, ""] ? true : false, false>>;
+
+// escaped quote does NOT terminate the string; value is unescaped, raw keeps
+// the source escapes ("'a\\'b'" below is the 7-char source 'a\'b')
+type PEsc = Parse<G, "'a\\'b'", EmptyCtx>;
+type _k9 = AssertTrue<
+  AssertExtends<PEsc, [{ node: "literal"; raw: "a\\'b"; value: "a'b"; outputSchema: "string" }, ""]>
+>;
+
+type PEscNl = Parse<G, "'line1\\nline2'", EmptyCtx>;
+type _k10 = AssertTrue<AssertExtends<PEscNl, [{ value: "line1\nline2" }, ""]>>;
+
+// \xHH / \uHHHH are runtime-only (hex cannot be decoded at the type level):
+// literal-mode parsing conservatively rejects them — use safeParse
+type PEscHex = Parse<G, "'\\x41'", EmptyCtx>;
+type _k11 = AssertTrue<AssertEqual<PEscHex extends [unknown, ""] ? true : false, false>>;
+
+// =============================================================================
+// Precedence & associativity
+// =============================================================================
+
+// left fold: 10-5-2 = (10-5)-2
+type PSub = Parse<G, "10-5-2", EmptyCtx>;
+type _p4 = AssertTrue<
+  AssertExtends<
+    PSub,
+    [
+      {
+        node: "sub";
+        left: { node: "sub"; left: { value: 10 }; right: { value: 5 } };
+        right: { value: 2 };
+      },
+      ""
+    ]
+  >
+>;
+
+// right recursion: 2^3^2 = 2^(3^2)
+type PPow = Parse<G, "2^3^2", EmptyCtx>;
+type _p5 = AssertTrue<
+  AssertExtends<
+    PPow,
+    [
+      {
+        node: "pow";
+        left: { value: 2 };
+        right: { node: "pow"; left: { value: 3 }; right: { value: 2 } };
+      },
+      ""
+    ]
+  >
+>;
+
+// precedence: 1+2*3 = 1+(2*3)
+type PPrec = Parse<G, "1+2*3", EmptyCtx>;
+type _p6 = AssertTrue<
+  AssertExtends<
+    PPrec,
+    [{ node: "add"; left: { value: 1 }; right: { node: "mul" } }, ""]
+  >
+>;
+
+// parens reset precedence: (1+2)*3
+type PParens = Parse<G, "(1+2)*3", EmptyCtx>;
+type _p7 = AssertTrue<
+  AssertExtends<
+    PParens,
+    [{ node: "mul"; left: { node: "parens"; inner: { node: "add" } } }, ""]
+  >
+>;
+
+// =============================================================================
+// Ternary: short-circuiting, polymorphic via binding references
+// =============================================================================
+
+type PTern = Parse<G, "1==1 ? 1 : 2", EmptyCtx>;
+type _t1 = AssertTrue<
+  AssertExtends<PTern, [{ node: "ternary"; outputSchema: "number" }, ""]>
+>;
+
+type PTernStr = Parse<G, "1==1 ? 'a' : 'b'", EmptyCtx>;
+type _t2 = AssertTrue<
+  AssertExtends<PTernStr, [{ node: "ternary"; outputSchema: "string" }, ""]>
+>;
+
+// non-boolean condition rejected
+type PTernBad = Parse<G, "1 ? 1 : 2", EmptyCtx>;
+type _t3 = AssertTrue<AssertEqual<PTernBad extends [unknown, ""] ? true : false, false>>;
+
+// disagreeing branches rejected (string ⊄ number)
+type PTernMix = Parse<G, "1==1 ? 1 : 'a'", EmptyCtx>;
+type _t4 = AssertTrue<AssertEqual<PTernMix extends [unknown, ""] ? true : false, false>>;
+
+// =============================================================================
+// Constraints: assignability & overlap
+// =============================================================================
+
+// mixed add rejected: 'a' ⊄ number (binding reference)
+type PMixed = Parse<G, "1+'a'", EmptyCtx>;
+type _c1 = AssertTrue<AssertEqual<PMixed extends [unknown, ""] ? true : false, false>>;
+
+// overlapping eq: both operand orders parse for a union-typed identifier
+type UnionCtx = Context<{ x: "string | number" }>;
+type PEq1 = Parse<G, "x == 1", UnionCtx>;
+type _c2 = AssertTrue<AssertExtends<PEq1, [{ node: "eq"; outputSchema: "boolean" }, string]>>;
+type PEq2 = Parse<G, "1 == x", UnionCtx>;
+type _c3 = AssertTrue<AssertExtends<PEq2, [{ node: "eq" }, string]>>;
+
+// disjoint eq rejected
+type PEqBad = Parse<G, "1 == 'a'", EmptyCtx>;
+type _c4 = AssertTrue<AssertEqual<PEqBad extends [unknown, ""] ? true : false, false>>;
+
+// refinement erasure: refined schema leaf usable where base is required
+type PRefined = Parse<G, "age + 1", Context<{ age: "number > 0" }>>;
+type _c5 = AssertTrue<AssertExtends<PRefined, [{ node: "add" }, ""]>>;
+
+// unknown identifiers rejected by constrained slots
+type PUnknownIdent = Parse<G, "nope + 1", EmptyCtx>;
+type _c6 = AssertTrue<
+  AssertEqual<PUnknownIdent extends [{ node: "add" }, ""] ? true : false, false>
+>;
+
+// =============================================================================
+// Paths & schemas
+// =============================================================================
+
+type PPath = Parse<G, "values.password == values.confirmPassword", FormCtx>;
+type _s1 = AssertTrue<AssertExtends<PPath, [{ node: "eq"; outputSchema: "boolean" }, ""]>>;
+
+type PPathNode = Parse<G, "values.password", FormCtx>;
+type _s2 = AssertTrue<
+  AssertExtends<PPathNode, [{ node: "path"; path: ["values", "password"]; outputSchema: "string" }, ""]>
+>;
+
+// bare identifier for a nested record resolves to the record def
+type PBare = Parse<G, "values", FormCtx>;
+type _s3 = AssertTrue<
+  AssertExtends<
+    PBare,
+    [{ node: "path"; outputSchema: { password: "string"; confirmPassword: "string" } }, ""]
+  >
+>;
+
+// schema value inference
+type _s4 = AssertTrue<
+  AssertEqual<
+    InferValues<typeof formSchema>,
+    { x: number; values: { password: string; confirmPassword: string } }
+  >
+>;
+
+// =============================================================================
+// parse()/evaluate() call-site typing
+// =============================================================================
+
+const okTuple = fixtureParser.parse("1+2", {});
+type _api1 = AssertTrue<AssertExtends<(typeof okTuple)[0], { node: "add" }>>;
+
+const evalNum = fixtureParser.evaluate("1+2*3", {}, {});
+type _api2 = AssertTrue<AssertEqual<typeof evalNum, number>>;
+
+const evalBool = fixtureParser.evaluate("x == 1", { x: "number" }, { x: 1 });
+type _api3 = AssertTrue<AssertEqual<typeof evalBool, boolean>>;
+
+// invalid literals are compile errors
+// @ts-expect-error — unparseable input
+fixtureParser.parse("1 +", {});
+// @ts-expect-error — trailing junk
+fixtureParser.parse("1+2 junk", {});
+// @ts-expect-error — type mismatch inside the expression
+fixtureParser.parse("1 + 'a'", {});
+// @ts-expect-error — dynamic strings must use safeParse
+fixtureParser.parse("1+2" as string, {});
+// @ts-expect-error — values must match the schema
+fixtureParser.evaluate("x == 1", { x: "number" }, { x: "no" });
+
+// =============================================================================
+// Embedded binding references (scoped defs; spike/union-defs)
+// =============================================================================
+
+const embNum = defineNode({
+  name: "num",
+  precedence: 2,
+  pattern: (p) => p.number(),
+});
+const embStr = defineNode({
+  name: "str",
+  precedence: 2,
+  pattern: (p) => p.string(["'"]),
+});
+const embNull = defineNode({
+  name: "null",
+  precedence: 2,
+  pattern: (p) => p.constVal("null").result("null").eval(() => null),
+});
+const embMaybe = defineNode({
+  name: "maybe",
+  precedence: 1,
+  pattern: (p) =>
+    p
+      .operand("number | string | null").as("v")
+      .constVal("?")
+      .result("v | null")
+      .eval(({ v }) => v as never),
+});
+const embPair = defineNode({
+  name: "pair",
+  precedence: 0,
+  pattern: (p) =>
+    p
+      .operand("number | string").as("l")
+      .constVal("~")
+      .rest("l | null").as("r")
+      .result("boolean")
+      .eval(({ l, r }) => l === r),
+});
+const embNodes = [embNum, embStr, embNull, embMaybe, embPair] as const;
+type EmbG = ComputeGrammar<typeof embNodes>;
+
+// template resultType resolves against the parsed operand; the AST carries
+// a resolved-type CARRIER whose inferred type is exact
+type PMaybe = Parse<EmbG, "1?", EmptyCtx>;
+type _e1 = AssertTrue<AssertExtends<PMaybe, [{ node: "maybe" }, ""]>>;
+type MaybeOut = PMaybe extends [{ outputSchema: infer O }, string]
+  ? InferOfDef<O>
+  : never;
+type _e2 = AssertTrue<AssertEqual<MaybeOut, number | null>>;
+
+// chained templates hit a fixed point (number | null | null normalizes) —
+// the type set stays finite, so deep chains don't blow up (measured)
+type PMaybe2 = Parse<EmbG, "1??", EmptyCtx>;
+type Maybe2Out = PMaybe2 extends [{ outputSchema: infer O }, string]
+  ? InferOfDef<O>
+  : never;
+type _e3 = AssertTrue<AssertEqual<Maybe2Out, number | null>>;
+
+// template CONSTRAINTS: null ⊆ l | null with l: number …
+type PPairNull = Parse<EmbG, "1 ~ null", EmptyCtx>;
+type _e4 = AssertTrue<AssertExtends<PPairNull, [{ node: "pair" }, ""]>>;
+// … but string is rejected
+type PPairBad = Parse<EmbG, "1 ~ 'a'", EmptyCtx>;
+type _e5 = AssertTrue<AssertEqual<PPairBad extends [unknown, ""] ? true : false, false>>;
+
+// template results feed downstream checks: maybe's number | null satisfies
+// pair's template on the right, but not its PLAIN left slot
+type PPairChain = Parse<EmbG, "1 ~ 2?", EmptyCtx>;
+type _e6 = AssertTrue<AssertExtends<PPairChain, [{ node: "pair" }, ""]>>;
+type PPairChainBad = Parse<EmbG, "1? ~ 2", EmptyCtx>;
+type _e7 = AssertTrue<
+  AssertEqual<PPairChainBad extends [unknown, ""] ? true : false, false>
+>;
+
+// =============================================================================
+// compile(): rule-as-Type call-site typing (Phase 6)
+// =============================================================================
+
+// predicate rule (boolean output): values in, values out
+const pwRule = fixtureParser.compile(
+  "values.password == values.confirmPassword",
+  formSchema
+);
+const pwOut = pwRule({} as never);
+type _cp1 = AssertTrue<
+  AssertEqual<
+    Exclude<typeof pwOut, type.errors>,
+    InferValues<typeof formSchema>
+  >
+>;
+
+// morph rule (non-boolean output): values in, evaluated result out
+const morphRule = fixtureParser.compile("x * 2 + 1", { x: "number" });
+const morphOut = morphRule({ x: 1 });
+type _cp2 = AssertTrue<AssertEqual<Exclude<typeof morphOut, type.errors>, number>>;
+
+// =============================================================================
+// Eval binding inference (Phase 1 assertions, still pinned)
+// =============================================================================
+
+// Bindings are a FLAT per-binding map; reference-linked bindings resolve
+// to the referenced operand's constraint type (no distributed union)
+type AddBindings = InferEvaluatedBindings<(typeof add)["pattern"]>;
+type _b1 = AssertTrue<
+  AssertEqual<
+    AddBindings,
+    { left: string | number; right: string | number }
+  >
+>;
+
+type TernaryBindings = Thunked<InferEvaluatedBindings<(typeof ternary)["pattern"]>>;
+type _b2 = AssertTrue<AssertEqual<TernaryBindings["cond"], () => boolean>>;
+
+// unconstrained root: single branch, same as before (eq's overlapping ref)
+type EqBindings = InferEvaluatedBindings<(typeof eq)["pattern"]>;
+type _b3 = AssertTrue<AssertEqual<EqBindings, { left: unknown; right: unknown }>>;
+
+// unlinked patterns keep independent (non-union) bindings
+type SubBindings = InferEvaluatedBindings<(typeof sub)["pattern"]>;
+type _b4 = AssertTrue<AssertEqual<SubBindings, { left: number; right: number }>>;
+
+// reference CHAINS resolve transitively to the root constraint's type:
+// c references b references a, so all three carry a's def type
+const _chain = defineNode({
+  name: "chain3",
+  precedence: 1,
+  pattern: (p) =>
+    p
+      .operand("number | string").as("a")
+      .constVal("~")
+      .operand("a").as("b")
+      .constVal("~")
+      .operand("b").as("c")
+      .result("a")
+      .eval((b) => b.a()),
+});
+type ChainBindings = InferEvaluatedBindings<(typeof _chain)["pattern"]>;
+type _b5 = AssertTrue<
+  AssertEqual<
+    ChainBindings,
+    { a: string | number; b: string | number; c: string | number }
+  >
+>;
+
+// linked bindings on a non-union constraint resolve to that type
+const _iff = defineNode({
+  name: "iff",
+  precedence: 1,
+  pattern: (p) =>
+    p
+      .operand("boolean").as("a")
+      .constVal("<=>")
+      .rest("a").as("b")
+      .result("boolean")
+      .eval((b) => b.a() === b.b()),
+});
+type IffBindings = InferEvaluatedBindings<(typeof _iff)["pattern"]>;
+type _b6 = AssertTrue<AssertEqual<IffBindings, { a: boolean; b: boolean }>>;
+
+// eval return is verified against resultType for reference-linked patterns
+const _badLinked = defineNode({
+  name: "badLinked",
+  precedence: 1,
+  pattern: (p) =>
+    p
+      .operand("number | string").as("l")
+      .constVal("&")
+      .rest("l").as("r")
+      .result("l")
+      // @ts-expect-error — eval must return l's type (string | number), not boolean
+      .eval((b) => b.l() === b.r()),
 });
 
+const _badReturn = defineNode({
+  name: "badReturn",
+  precedence: 1,
+  pattern: (p) =>
+    p
+      .operand("number").as("a")
+      .constVal("!")
+      .rest("number").as("b")
+      .result("boolean")
+      // @ts-expect-error — eval must return boolean, not number
+      .eval(({ a, b }) => a() + b()),
+});
+
+const _refReturn = defineNode({
+  name: "refReturn",
+  precedence: 1,
+  pattern: (p) =>
+    p
+      .constVal("(")
+      .expr("number").as("inner")
+      .constVal(")")
+      .result("inner")
+      // @ts-expect-error — eval must return inner's type (number), not string
+      .eval(({ inner }) => String(inner())),
+});
+
+const _objReturn = defineNode({
+  name: "range",
+  precedence: 1,
+  pattern: (p) =>
+    p
+      .operand("number").as("min")
+      .constVal("..")
+      .rest("number").as("max")
+      .result({ min: "number", max: "number" })
+      .eval(({ min, max }) => ({ min: min(), max: max() })),
+});
+
+// object resultTypes flow through evaluateAst
+declare const rangeAst: { node: "range"; outputSchema: { min: "number"; max: "number" } };
+const rangeVal = fixtureParser.evaluateAst(rangeAst, {});
+type _o1 = AssertTrue<AssertEqual<typeof rangeVal, { min: number; max: number }>>;
+
 // =============================================================================
-// Recursion canary
+// Recursion canaries — pin the measured type-level floors. If a change
+// breaks one of these, literal-mode capacity regressed.
+//
+// Instantiation budget (tsc --extendedDiagnostics, whole project):
+// 1,083,879 before the pattern builder → 1,136,550 with it → 1,233,270
+// with scope threading + the scoped canaries below (2026-07-07; the
+// scope-free def algebra clawed back ~41k). Treat ~1.5M as the alarm
+// threshold when adding type-level features. Canaries must also pass on
+// TS 5.5/5.7/5.8 (less depth headroom than the 5.9 toolchain — check
+// with a scratch install before moving a floor).
 // =============================================================================
 
-// Left-associative chains use a tail-recursive fold: 30 terms must compile.
-// (The pre-rewrite engine hit TS2589 at ~20 terms.)
-type Canary = Parse<
+// left-assoc chains are folded tail-recursively: 30 terms
+type Chain30 = Parse<
   G,
-  "1+2+3+4+5+6+7+8+9+10+11+12+13+14+15+16+17+18+19+20+21+22+23+24+25+26+27+28+29+30",
+  "1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1",
   EmptyCtx
 >;
-type CanaryCheck = Canary extends [{ node: "add"; outputSchema: "number" }, ""]
-  ? true
-  : false;
-const _canary: CanaryCheck = true;
+type _r1 = AssertTrue<AssertExtends<Chain30, [{ node: "add" }, ""]>>;
 
-// Nesting canaries: each expr() reset (parens) costs instantiation depth
-// proportional to the level count, so this 6-level grammar handles ~3
-// nested parens; right-assoc pow chains handle ~10 terms. These pin the
-// measured floor so engine changes that regress depth fail loudly.
-type NestCanary = Parse<G, "(((1)))", EmptyCtx>;
-const _nest: NestCanary extends [{ node: "parens"; outputSchema: "number" }, ""]
-  ? true
-  : false = true;
+// a 25-term chain under a two-alias parser scope. The def algebra is
+// scope-free (constraint checks share one memoization set with unscoped
+// parsers; aliases resolve ONCE at ident/path parse into a "~resolved"
+// carrier), but a scoped CONTEXT still instantiates its own parse tree —
+// capacity floors are TypeScript-version-dependent: 30 terms hold on
+// TS >= 5.9; 25 is the measured floor down to TS 5.5 (the toolchain
+// range this repo declares). Editors on older bundled TS see the lower
+// budget FIRST — keep this canary at the cross-version floor.
+type ScopedCtx = Context<{ x: "Money" }, { Money: number; Tag: string }>;
+type Chain25Scoped = Parse<
+  G,
+  "1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1",
+  ScopedCtx
+>;
+type _r1s = AssertTrue<AssertExtends<Chain25Scoped, [{ node: "add" }, ""]>>;
 
-type PowCanary = Parse<G, "1^2^3^4^5^6^7^8^9^10", EmptyCtx>;
-const _pow: PowCanary extends [{ node: "pow"; outputSchema: "number" }, ""]
-  ? true
-  : false = true;
+// an ALIAS-LED chain: 12 terms, the measured COLD floor across TS
+// 5.5-6.0 (TS >= 5.9 reaches ~20 cold, more when warm). Identifier-led
+// chains have a lower pre-existing floor than literal-led ones — true
+// before scope threading too. Canaries pin COLD floors: a warm
+// neighboring evaluation can mask a regression that editors (per-file,
+// cold) then hit first. The alias resolves once into the carrier and
+// rides the whole fold.
+type Chain12Alias = Parse<
+  G,
+  "x+1+1+1+1+1+1+1+1+1+1+1",
+  ScopedCtx
+>;
+type _r1a = AssertTrue<
+  AssertExtends<
+    Chain12Alias,
+    [{ node: "add"; outputSchema: { "~resolved": number } }, ""]
+  >
+>;
 
-export {};
+// nested parens: 3 deep
+type Nested3 = Parse<G, "(((1)))", EmptyCtx>;
+type _r2 = AssertTrue<AssertExtends<Nested3, [{ node: "parens" }, ""]>>;
+
+// right-assoc pow chain: 8 terms
+type Pow8 = Parse<G, "2^2^2^2^2^2^2^2", EmptyCtx>;
+type _r3 = AssertTrue<AssertExtends<Pow8, [{ node: "pow" }, ""]>>;
+
+// mixed real-world shape
+type Real = Parse<
+  G,
+  "values.password == values.confirmPassword ? 1+2*3 : 10-5-2",
+  FormCtx
+>;
+type _r4 = AssertTrue<AssertExtends<Real, [{ node: "ternary"; outputSchema: "number" }, ""]>>;

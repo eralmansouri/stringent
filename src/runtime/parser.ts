@@ -1,37 +1,30 @@
 /**
- * Runtime Parser
+ * Runtime Parser (v2)
  *
- * Mirrors the type-level Parse<Grammar, Input, Context> at runtime.
- * Uses the same precedence-based parsing strategy:
- *   1. Try operators at current level (lowest precedence first)
- *   2. Fall back to next level (higher precedence)
- *   3. Base case: try atoms (last level)
+ * Precedence-climbing parser over the compiled grammar:
+ *   1. Try operators at the current level (lowest precedence first)
+ *   2. Fall back to the next level (higher precedence)
+ *   3. Base case: the leaf level (highest precedence, plain alternation)
  *
- * Left-associative levels are parsed with an iterative fold, mirroring
- * ParseLeftLevel in src/parse/index.ts. Constraints resolve against
- * already-parsed siblings (sameAs) and result types may derive from
- * operands (fromBinding).
+ * Associativity is derived from each level's tail shape (see compile.ts):
+ * left-associative levels parse with an iterative fold, right-associative
+ * levels with recursive descent. Constraints are arktype Types; matching
+ * is ASSIGNABILITY (memoized `extends`), and binding-reference constraints
+ * resolve against already-parsed siblings.
+ *
+ * Parsed subexpressions carry their arktype Type on a symbol key
+ * (OUTPUT_TYPE) so constraint checks compose without polluting the
+ * serializable AST; `outputSchema` remains a display string.
  *
  * A mutable Diagnostics object is threaded through as a trailing parameter;
  * it records the furthest failure for error reporting and does not affect
  * control flow. This file MUST stay behaviorally in sync with the type-level
- * engine in src/parse/index.ts — the parity test suite guards this.
+ * engine in src/parse/index.ts.
  */
 
 import { Token } from "@sinclair/parsebox";
-import type { Context } from "../context.js";
-import type { ComputeGrammar, Grammar } from "../grammar/index.js";
-import type { Parse } from "../parse/index.js";
-import {
-  type NodeSchema,
-  type PatternSchema,
-  type StringSchema,
-  type ConstSchema,
-  type ExprSchema,
-  isFromBinding,
-  isSameAs,
-} from "../schema/index.js";
-
+import type { Type } from "arktype";
+import type { NodeSchema, PatternSchema, StringSchema, ConstSchema, ExprSchema } from "../schema/index.js";
 import type {
   ASTNode,
   IdentNode,
@@ -39,7 +32,17 @@ import type {
   PathNode,
   StringNode,
 } from "../primitive/index.js";
-
+import {
+  type CompiledConstraint,
+  type CompiledGrammar,
+  type CompiledNode,
+} from "./compile.js";
+import {
+  eraseRefinements,
+  outputTypeOf,
+  resolveSchemaPath,
+  setOutputType,
+} from "./types.js";
 import { type Diagnostics, createDiagnostics, fail, failConstraint } from "./diagnostics.js";
 
 /** Parse result: empty = no match, [node, rest] = matched */
@@ -47,92 +50,145 @@ export type ParseResult<T extends ASTNode<any, any> = ASTNode<any, any>> =
   | []
   | [T & {}, string];
 
+export { OUTPUT_TYPE } from "./types.js";
+
+/** A grammar slice: levels[0] is the current level */
+type Levels = readonly (readonly NodeSchema[])[];
+
+/** Everything the parse needs beyond the input string */
+interface ParseEnv {
+  readonly compiled: CompiledGrammar;
+  /** Compiled schema Type for identifier/path resolution (undefined = empty schema) */
+  readonly schemaType: Type | undefined;
+  readonly diag: Diagnostics;
+}
+
 // =============================================================================
 // Primitive Parsers
 // =============================================================================
 
-function parseNumber(input: string, diag: Diagnostics): ParseResult {
+function parseNumber(input: string, env: ParseEnv): ParseResult {
   const result = Token.Number(input) as [] | [string, string];
   if (result.length === 0) {
-    fail(diag, input, "number");
+    fail(env.diag, input, "number");
     return [];
   }
-  return [
-    {
-      node: "literal",
-      raw: result[0],
-      value: +result[0],
-      outputSchema: "number",
-    } as NumberNode<(typeof result)[0]>,
-    result[1],
-  ];
+  const node = {
+    node: "literal",
+    raw: result[0],
+    value: +result[0],
+    outputSchema: "number",
+  } as NumberNode<(typeof result)[0]>;
+  setOutputType(node, env.compiled.env.compileDef("number"));
+  return [node, result[1]];
+}
+
+/** Single-character escape sequences (JS semantics). Unknown escapes
+ *  resolve to the escaped character itself (`\q` → `q`), like JS. */
+const SIMPLE_ESCAPES: Record<string, string> = {
+  n: "\n",
+  t: "\t",
+  r: "\r",
+  "\\": "\\",
+  '"': '"',
+  "'": "'",
+  "`": "`",
+  "0": "\0",
+  b: "\b",
+  f: "\f",
+  v: "\v",
+};
+
+const WHITESPACE = new Set([" ", "\t", "\n", "\r"]);
+const HEX_RE = /^[0-9a-fA-F]+$/;
+
+/**
+ * Escape-aware string scanner, replacing parsebox's Token.String, which
+ * (verified) terminates AT an escaped quote and never unescapes.
+ *
+ * Returns [raw, value, rest]: raw = source text between the quotes
+ * (escapes intact), value = the unescaped runtime string. No match for a
+ * missing/unterminated quote or a malformed \xHH / \uHHHH escape.
+ * Behavior MUST stay in sync with ScanString in src/parse/index.ts
+ * (which conservatively rejects \x/\u — hex decoding is runtime-only).
+ */
+function scanString(
+  quotes: readonly string[],
+  input: string
+): [] | [string, string, string] {
+  let i = 0;
+  while (i < input.length && WHITESPACE.has(input[i])) i++;
+  const quote = input[i];
+  if (quote === undefined || !quotes.includes(quote)) return [];
+
+  let value = "";
+  let j = i + 1;
+  while (j < input.length) {
+    const c = input[j];
+    if (c === quote) {
+      return [input.slice(i + 1, j), value, input.slice(j + 1)];
+    }
+    if (c === "\\") {
+      const e = input[j + 1];
+      if (e === undefined) return []; // dangling backslash at end of input
+      if (e === "x" || e === "u") {
+        const len = e === "x" ? 2 : 4;
+        const hex = input.slice(j + 2, j + 2 + len);
+        if (hex.length !== len || !HEX_RE.test(hex)) return [];
+        value += String.fromCharCode(parseInt(hex, 16));
+        j += 2 + len;
+        continue;
+      }
+      value += SIMPLE_ESCAPES[e] ?? e;
+      j += 2;
+      continue;
+    }
+    value += c;
+    j++;
+  }
+  return []; // unterminated
 }
 
 function parseString(
   quotes: readonly string[],
   input: string,
-  diag: Diagnostics
+  env: ParseEnv
 ): ParseResult {
-  const result = Token.String([...quotes], input) as [] | [string, string];
+  const result = scanString(quotes, input);
   if (result.length === 0) {
-    fail(diag, input, "string");
+    fail(env.diag, input, "string");
     return [];
   }
-  return [
-    {
-      node: "literal",
-      raw: result[0],
-      value: result[0],
-      outputSchema: "string",
-    } as StringNode<(typeof result)[0]>,
-    result[1],
-  ];
+  const [raw, value, rest] = result;
+  const node = {
+    node: "literal",
+    raw,
+    value,
+    outputSchema: "string",
+  } as StringNode<string, string>;
+  setOutputType(node, env.compiled.env.compileDef("string"));
+  return [node, rest];
 }
 
-/** Resolve an identifier's type from (possibly nested) schema data.
- *  Own properties only — prototype members must not leak into the schema. */
-function resolveIdent(data: Record<string, unknown>, name: string): string {
-  const value = Object.hasOwn(data, name) ? data[name] : undefined;
-  return typeof value === "string" ? value : "unknown";
-}
-
-function parseIdent(
-  input: string,
-  context: Context,
-  diag: Diagnostics
-): ParseResult {
+function parseIdent(input: string, env: ParseEnv): ParseResult {
   const result = Token.Ident(input) as [] | [string, string];
   if (result.length === 0) {
-    fail(diag, input, "identifier");
+    fail(env.diag, input, "identifier");
     return [];
   }
   const name = result[0];
-  const valueType = resolveIdent(context.data, name);
-  return [
-    { node: "identifier", name, outputSchema: valueType } as IdentNode<
-      typeof name,
-      typeof valueType
-    >,
-    result[1],
-  ];
-}
-
-/** Resolve a dotted path against (possibly nested) schema data.
- *  Own properties only — prototype members must not leak into the schema. */
-export function resolvePath(data: unknown, segments: readonly string[]): string {
-  let current: unknown = data;
-  for (const segment of segments) {
-    if (
-      current !== null &&
-      typeof current === "object" &&
-      Object.hasOwn(current, segment)
-    ) {
-      current = (current as Record<string, unknown>)[segment];
-    } else {
-      return "unknown";
-    }
-  }
-  return typeof current === "string" ? current : "unknown";
+  const raw =
+    env.schemaType === undefined
+      ? undefined
+      : resolveSchemaPath(env.schemaType, [name]);
+  const resolved = raw === undefined ? undefined : eraseRefinements(raw);
+  const node = {
+    node: "identifier",
+    name,
+    outputSchema: resolved?.expression ?? "unknown",
+  } as IdentNode<typeof name, string>;
+  if (resolved !== undefined) setOutputType(node, resolved);
+  return [node, result[1]];
 }
 
 /**
@@ -143,14 +199,10 @@ export function resolvePath(data: unknown, segments: readonly string[]): string 
  * - space AFTER a dot fails the whole element ("values. p" → no match)
  * - dangling dot fails the whole element ("values." → no match)
  */
-function parsePath(
-  input: string,
-  context: Context,
-  diag: Diagnostics
-): ParseResult {
+function parsePath(input: string, env: ParseEnv): ParseResult {
   const first = Token.Ident(input) as [] | [string, string];
   if (first.length === 0) {
-    fail(diag, input, "identifier");
+    fail(env.diag, input, "identifier");
     return [];
   }
   const segments: string[] = [first[0]];
@@ -159,81 +211,73 @@ function parsePath(
   while (rest.startsWith(".")) {
     const afterDot = rest.slice(1);
     if (/^\s/.test(afterDot)) {
-      fail(diag, afterDot, "identifier (no whitespace after '.')");
+      fail(env.diag, afterDot, "identifier (no whitespace after '.')");
       return []; // "values. password" → fail whole element
     }
     const seg = Token.Ident(afterDot) as [] | [string, string];
     if (seg.length === 0) {
-      fail(diag, afterDot, "identifier");
+      fail(env.diag, afterDot, "identifier");
       return []; // dangling dot "values." → fail whole element
     }
     segments.push(seg[0]);
     rest = seg[1];
   }
 
-  const valueType = resolvePath(context.data, segments);
-  return [
-    { node: "path", path: segments, outputSchema: valueType } as PathNode<
-      typeof segments,
-      typeof valueType
-    >,
-    rest,
-  ];
+  const raw =
+    env.schemaType === undefined
+      ? undefined
+      : resolveSchemaPath(env.schemaType, segments);
+  const resolved = raw === undefined ? undefined : eraseRefinements(raw);
+  const node = {
+    node: "path",
+    path: segments,
+    outputSchema: resolved?.expression ?? "unknown",
+  } as PathNode<typeof segments, string>;
+  if (resolved !== undefined) setOutputType(node, resolved);
+  return [node, rest];
 }
 
-function parseConst(
-  value: string,
-  input: string,
-  diag: Diagnostics
-): ParseResult {
-  const result = Token.Const(value, input) as [] | [string, string];
-  if (result.length === 0) {
-    fail(diag, input, `"${value}"`);
-    return [];
+/** Is the value one WHOLE identifier per parsebox's tokenizer? Memoized —
+ *  classification depends only on the const's value. */
+const identifierLikeCache = new Map<string, boolean>();
+function isIdentifierLike(value: string): boolean {
+  let known = identifierLikeCache.get(value);
+  if (known === undefined) {
+    const result = Token.Ident(value) as [] | [string, string];
+    known = result.length === 2 && result[0] === value && result[1] === "";
+    identifierLikeCache.set(value, known);
   }
-  return [{ node: "const", outputSchema: value }, result[1]];
+  return known;
 }
-
-// =============================================================================
-// Build Runtime Grammar from Node Schemas
-// =============================================================================
 
 /**
- * Build runtime grammar from node schemas.
- *
- * Returns a flat tuple of levels:
- *   [[ops@prec1], [ops@prec2], ..., [atoms]]
- *
- * Levels are sorted by precedence ascending (lowest first).
- * Atoms are always the last level.
+ * Parse a constant: an ORDERED alternation of values — the first member
+ * that matches wins. IDENTIFIER-LIKE members match only as a WHOLE
+ * identifier in the input — `nullable` is one identifier, so it never
+ * matches a `constVal("null")` (word-boundary rule; pinned in
+ * parser.test.ts and design-claims). Other members match as raw text.
+ * Mirrors ParseConstPrimitive in src/parse/index.ts.
  */
-export function buildGrammar(nodes: readonly NodeSchema[]): Grammar {
-  const atoms: NodeSchema[] = [];
-  const operators: Map<number, NodeSchema[]> = new Map();
-
-  for (const node of nodes) {
-    if (node.precedence === "atom") {
-      atoms.push(node);
-    } else {
-      const prec = node.precedence as number;
-      if (!operators.has(prec)) {
-        operators.set(prec, []);
+function parseConst(
+  values: readonly string[],
+  input: string,
+  env: ParseEnv
+): ParseResult {
+  for (const value of values) {
+    if (isIdentifierLike(value)) {
+      const result = Token.Ident(input) as [] | [string, string];
+      if (result.length === 2 && result[0] === value) {
+        return [{ node: "const", outputSchema: value }, result[1]];
       }
-      operators.get(prec)!.push(node);
+    } else {
+      const result = Token.Const(value, input) as [] | [string, string];
+      if (result.length === 2) {
+        return [{ node: "const", outputSchema: value }, result[1]];
+      }
     }
+    fail(env.diag, input, `"${value}"`);
   }
-
-  // Sort precedences ascending
-  const precedences = [...operators.keys()].sort((a, b) => a - b);
-
-  // Build flat grammar: [[ops@prec1], [ops@prec2], ..., [atoms]]
-  const grammar: (readonly NodeSchema[])[] = [];
-  for (const prec of precedences) {
-    grammar.push(operators.get(prec)!);
-  }
-  grammar.push(atoms);
-
-  return grammar;
+  return [];
 }
 
 // =============================================================================
@@ -241,84 +285,132 @@ export function buildGrammar(nodes: readonly NodeSchema[]): Grammar {
 // =============================================================================
 
 interface ResolvedConstraint {
-  /** undefined = unconstrained; string = exact; string[] = any-of */
-  readonly accepted: string | readonly string[] | undefined;
+  /** undefined = unconstrained */
+  readonly type: Type | undefined;
+  /** "extends" = directional subtype; "overlaps" = symmetric */
+  readonly check: "extends" | "overlaps";
   /** Human description for diagnostics */
   readonly describe: string | undefined;
 }
 
 const UNCONSTRAINED: ResolvedConstraint = {
-  accepted: undefined,
+  type: undefined,
+  check: "extends",
   describe: undefined,
 };
 
-/**
- * Resolve an element's constraint against the already-parsed siblings.
- * Mirrors ResolveSpec in src/parse/index.ts.
- */
-function resolveConstraintSpec(
-  element: PatternSchema,
+/** Collect the parsed Types of the named siblings listed in `bindings`,
+ *  for use as scope aliases. Unresolved operands alias to `unknown`
+ *  (matching how unresolved whole-string refs behave). */
+function bindingAliases(
+  env: ParseEnv,
+  bindings: readonly string[],
   done: readonly PatternSchema[],
   children: readonly ASTNode[]
-): ResolvedConstraint {
-  const spec = (element as ExprSchema).constraint;
-  if (spec === undefined) return UNCONSTRAINED;
-  if (typeof spec === "string") return { accepted: spec, describe: spec };
-  if (isSameAs(spec)) {
-    let resolved = "unknown";
-    for (let i = 0; i < done.length; i++) {
-      const el = done[i] as { __named?: boolean; name?: string };
-      if (el.__named === true && el.name === spec.binding) {
-        const out = (children[i] as { outputSchema?: unknown }).outputSchema;
-        resolved = typeof out === "string" ? out : "unknown";
-        break;
-      }
+): Record<string, Type> {
+  const aliases: Record<string, Type> = {};
+  for (let i = 0; i < done.length; i++) {
+    const el = done[i] as { __named?: boolean; name?: string };
+    if (el.__named === true && el.name !== undefined && bindings.includes(el.name)) {
+      aliases[el.name] =
+        outputTypeOf(children[i]) ?? env.compiled.env.compileDef("unknown");
     }
-    return {
-      accepted: resolved,
-      describe: `${resolved} (same type as '${spec.binding}')`,
-    };
   }
-  // readonly string[]
-  return { accepted: spec, describe: spec.join(" | ") };
+  return aliases;
 }
 
-/** Check an outputSchema against a resolved constraint (exact-name semantics).
- *  Mirrors CheckConstraint in src/parse/index.ts. */
+/**
+ * Resolve an element's compiled constraint against already-parsed siblings.
+ * Mirrors ResolveSpec in src/parse/index.ts.
+ */
+function resolveConstraint(
+  constraint: CompiledConstraint | null,
+  done: readonly PatternSchema[],
+  children: readonly ASTNode[],
+  env: ParseEnv
+): ResolvedConstraint {
+  if (constraint === null || constraint.kind === "none") return UNCONSTRAINED;
+  if (constraint.kind === "static") {
+    return {
+      type: constraint.type,
+      check: "extends",
+      describe: constraint.describe,
+    };
+  }
+  if (constraint.kind === "template") {
+    // Def embedding binding references: compile in a scope extended with
+    // the parsed sibling types (memoized), then erase refinements like
+    // any other constraint
+    const aliases = bindingAliases(env, constraint.bindings, done, children);
+    const type = eraseRefinements(
+      env.compiled.env.compileDefIn(constraint.def, aliases)
+    );
+    return {
+      type,
+      check: "extends",
+      describe: `${type.expression} (${constraint.def})`,
+    };
+  }
+  // Binding reference: find the referenced sibling's parsed Type
+  const verb =
+    constraint.check === "overlaps" ? "overlapping" : "type of";
+  for (let i = 0; i < done.length; i++) {
+    const el = done[i] as { __named?: boolean; name?: string };
+    if (el.__named === true && el.name === constraint.binding) {
+      const type = outputTypeOf(children[i]);
+      return {
+        type,
+        check: constraint.check,
+        describe:
+          type === undefined
+            ? `${verb} '${constraint.binding}' (unknown)`
+            : `${type.expression} (${verb} '${constraint.binding}')`,
+      };
+    }
+  }
+  // Unreachable when compile.ts validated the pattern
+  return {
+    type: undefined,
+    check: constraint.check,
+    describe: `${verb} '${constraint.binding}'`,
+  };
+}
+
+/** Assignability check: a candidate with no resolved Type ("unknown") is
+ *  rejected by every constrained slot — that is how "identifier not in
+ *  schema" surfaces as a TYPE_MISMATCH. */
 function constraintAccepts(
+  env: ParseEnv,
   constraint: ResolvedConstraint,
-  outputSchema: string | undefined
+  candidate: Type | undefined
 ): boolean {
-  const accepted = constraint.accepted;
-  if (accepted === undefined) return true;
-  if (typeof accepted === "string") return outputSchema === accepted;
-  return outputSchema !== undefined && accepted.includes(outputSchema);
+  if (constraint.type === undefined) return true;
+  if (candidate === undefined) return false;
+  return constraint.check === "overlaps"
+    ? env.compiled.env.isOverlapping(candidate, constraint.type)
+    : env.compiled.env.isAssignable(candidate, constraint.type);
 }
 
 // =============================================================================
 // Pattern Element Parsing
 // =============================================================================
 
-/**
- * Parse a single pattern element (non-Expr).
- */
 function parseElement(
   element: PatternSchema,
   input: string,
-  context: Context,
-  diag: Diagnostics
+  env: ParseEnv
 ): ParseResult {
   switch (element.kind) {
     case "number":
-      return parseNumber(input, diag);
+      return parseNumber(input, env);
     case "string":
-      return parseString((element as StringSchema).quotes, input, diag);
+      return parseString((element as StringSchema).quotes, input, env);
     case "ident":
-      return parseIdent(input, context, diag);
+      return parseIdent(input, env);
     case "path":
-      return parsePath(input, context, diag);
+      return parsePath(input, env);
     case "const":
-      return parseConst((element as ConstSchema).value, input, diag);
+      return parseConst((element as ConstSchema).values, input, env);
     default:
       return [];
   }
@@ -328,91 +420,65 @@ function parseElement(
  * Parse an expression element based on its role.
  *
  * Role determines which grammar slice is used:
- * - "lhs": nextLevels (avoids left-recursion)
- * - "rhs": currentLevels (maintains precedence, enables right-associativity)
- * - "expr": fullGrammar (full reset for delimited contexts)
+ * - "operand": nextLevels (a tighter expression; avoids left-recursion)
+ * - "rest": currentLevels (same level → right-associative recursion)
+ * - "expr": fullGrammar (full reset; only in delimited contexts)
  */
 function parseElementWithLevel(
   element: PatternSchema,
+  constraintSpec: CompiledConstraint | null,
   input: string,
-  context: Context,
-  currentLevels: Grammar,
-  nextLevels: Grammar,
-  fullGrammar: Grammar,
+  currentLevels: Levels,
+  nextLevels: Levels,
   done: readonly PatternSchema[],
   children: readonly ASTNode[],
-  diag: Diagnostics
+  env: ParseEnv
 ): ParseResult {
   if (element.kind === "expr") {
-    const constraint = resolveConstraintSpec(element, done, children);
+    const constraint = resolveConstraint(constraintSpec, done, children, env);
     const role = (element as ExprSchema).role;
-
-    if (role === "lhs") {
-      return parseExprWithConstraint(
-        nextLevels,
-        input,
-        context,
-        constraint,
-        fullGrammar,
-        diag
-      );
-    } else if (role === "rhs") {
-      return parseExprWithConstraint(
-        currentLevels,
-        input,
-        context,
-        constraint,
-        fullGrammar,
-        diag
-      );
-    } else {
-      return parseExprWithConstraint(
-        fullGrammar,
-        input,
-        context,
-        constraint,
-        fullGrammar,
-        diag
-      );
-    }
+    const levels =
+      role === "operand" ? nextLevels
+      : role === "rest" ? currentLevels
+      : env.compiled.levels;
+    return parseExprWithConstraint(levels, input, constraint, env);
   }
-  return parseElement(element, input, context, diag);
+  return parseElement(element, input, env);
 }
 
 /**
  * Parse a pattern tuple.
  *
  * seedDone/seedChildren pre-populate the consumed prefix (used by the
- * left-fold to make sameAs("left") resolvable inside operator tails).
- * The returned children INCLUDE the seeded prefix, aligned with the node's
- * full pattern.
+ * left-fold to make binding references like rest("left") resolvable inside
+ * operator tails). The returned children INCLUDE the seeded prefix,
+ * aligned with the node's full pattern.
  */
 function parsePatternTuple(
-  pattern: readonly PatternSchema[],
+  node: NodeSchema,
+  compiledNode: CompiledNode,
+  startIndex: number,
   input: string,
-  context: Context,
-  currentLevels: Grammar,
-  nextLevels: Grammar,
-  fullGrammar: Grammar,
-  diag: Diagnostics,
-  seedDone: readonly PatternSchema[] = [],
+  currentLevels: Levels,
+  nextLevels: Levels,
+  env: ParseEnv,
   seedChildren: readonly ASTNode[] = []
 ): [] | [ASTNode[], string] {
   let remaining = input;
-  const done: PatternSchema[] = [...seedDone];
+  const done: PatternSchema[] = [...node.pattern.slice(0, startIndex)];
   const children: ASTNode[] = [...seedChildren];
 
-  for (const element of pattern) {
+  for (let i = startIndex; i < node.pattern.length; i++) {
+    const element = node.pattern[i];
     const result = parseElementWithLevel(
       element,
+      compiledNode.constraints[i],
       remaining,
-      context,
       currentLevels,
       nextLevels,
-      fullGrammar,
       done,
       children,
-      diag
+      env
     );
     if (result.length === 0) return [];
     done.push(element);
@@ -435,111 +501,110 @@ function extractBindings(
 
   for (let i = 0; i < pattern.length; i++) {
     const element = pattern[i];
-    const child = children[i];
-
-    // Check if element is a NamedSchema (has __named and name properties)
     if ("__named" in element && element.__named === true) {
-      bindings[(element as { name: string }).name] = child;
+      bindings[(element as { name: string }).name] = children[i];
     }
   }
 
   return bindings;
 }
 
-/** Compute a node's outputSchema: static string, or derived via fromBinding.
- *  Mirrors ResultSchemaOf in src/parse/index.ts. */
-function resultSchemaOf(
-  nodeSchema: NodeSchema,
-  bindings: Record<string, ASTNode>
-): string {
-  const spec = nodeSchema.resultType;
-  if (isFromBinding(spec)) {
-    const bound = bindings[spec.binding] as { outputSchema?: unknown } | undefined;
-    return bound !== undefined && typeof bound.outputSchema === "string"
-      ? bound.outputSchema
-      : "unknown";
-  }
-  return typeof spec === "string" ? spec : "unknown";
-}
-
 /**
  * Build AST node from parsed children.
  *
- * - Single unnamed non-const child → passthrough (atom behavior)
- * - Otherwise: bindings become node fields, outputSchema from resultSchemaOf
+ * - Single unnamed non-const child → passthrough (leaf alternation entry)
+ * - Otherwise: bindings become node fields; the output Type comes from the
+ *   compiled resultType (static def, or the referenced binding's parsed
+ *   Type). Mirrors ResultSchemaOf in src/parse/index.ts.
  */
 function buildNodeResult(
-  nodeSchema: NodeSchema,
-  children: readonly ASTNode[]
+  node: NodeSchema,
+  compiledNode: CompiledNode,
+  children: readonly ASTNode[],
+  env: ParseEnv
 ): ASTNode {
-  const bindings = extractBindings(nodeSchema.pattern, children);
+  const result = compiledNode.result;
+  if (result.kind === "passthrough") return children[0];
 
-  // Single unnamed non-const child → passthrough (atom behavior)
-  if (
-    Object.keys(bindings).length === 0 &&
-    children.length === 1 &&
-    children[0].node !== "const"
-  ) {
-    return children[0];
+  const bindings = extractBindings(node.pattern, children);
+
+  let outputType: Type | undefined;
+  let outputSchema: string;
+  if (result.kind === "static") {
+    outputType = result.type;
+    outputSchema = result.type.expression;
+  } else if (result.kind === "template") {
+    // Def embedding binding references: resolve in a scope extended with
+    // the parsed operand types ("left | null" with left parsed as number
+    // → number | null)
+    const aliases = bindingAliases(env, result.bindings, node.pattern, children);
+    outputType = eraseRefinements(
+      env.compiled.env.compileDefIn(result.def, aliases)
+    );
+    outputSchema = outputType.expression;
+  } else {
+    const bound = bindings[result.binding];
+    outputType = bound === undefined ? undefined : outputTypeOf(bound);
+    outputSchema =
+      outputType?.expression ??
+      (bound as { outputSchema?: string } | undefined)?.outputSchema ??
+      "unknown";
   }
 
-  // Build node with bindings as fields
-  return {
-    node: nodeSchema.name,
-    outputSchema: resultSchemaOf(nodeSchema, bindings),
+  const built = {
+    node: node.name,
+    outputSchema,
     ...bindings,
   } as ASTNode;
+  if (outputType !== undefined) setOutputType(built, outputType);
+  return built;
 }
 
 /**
- * Parse a node pattern.
+ * Parse a node pattern from its start.
  */
 function parseNodePattern(
   node: NodeSchema,
   input: string,
-  context: Context,
-  currentLevels: Grammar,
-  nextLevels: Grammar,
-  fullGrammar: Grammar,
-  diag: Diagnostics
+  currentLevels: Levels,
+  nextLevels: Levels,
+  env: ParseEnv
 ): ParseResult {
+  const compiledNode = env.compiled.byNode.get(node)!;
   const result = parsePatternTuple(
-    node.pattern,
+    node,
+    compiledNode,
+    0,
     input,
-    context,
     currentLevels,
     nextLevels,
-    fullGrammar,
-    diag
+    env
   );
   if (result.length === 0) return [];
-  return [buildNodeResult(node, result[0]), result[1]];
+  return [buildNodeResult(node, compiledNode, result[0], env), result[1]];
 }
 
 /**
  * Parse with expression constraint check.
  */
 function parseExprWithConstraint(
-  startLevels: Grammar,
+  startLevels: Levels,
   input: string,
-  context: Context,
   constraint: ResolvedConstraint,
-  fullGrammar: Grammar,
-  diag: Diagnostics
+  env: ParseEnv
 ): ParseResult {
-  const result = parseLevels(startLevels, input, context, fullGrammar, diag);
+  const result = parseLevels(startLevels, input, env);
   if (result.length === 0) return [];
 
   const [node, remaining] = result;
 
-  const outputSchema = (node as { outputSchema?: string }).outputSchema;
-  if (!constraintAccepts(constraint, outputSchema)) {
+  if (!constraintAccepts(env, constraint, outputTypeOf(node))) {
     failConstraint(
-      diag,
+      env.diag,
       input,
       remaining,
       constraint.describe ?? "expression",
-      outputSchema ?? "unknown",
+      (node as { outputSchema?: string }).outputSchema ?? "unknown",
       subjectOf(node)
     );
     return [];
@@ -558,27 +623,17 @@ function subjectOf(node: ASTNode): string | undefined {
 }
 
 /**
- * Try parsing each node in a level.
+ * Try parsing each node in a level (recursive-descent / leaf alternation).
  */
 function parseNodes(
   nodes: readonly NodeSchema[],
   input: string,
-  context: Context,
-  currentLevels: Grammar,
-  nextLevels: Grammar,
-  fullGrammar: Grammar,
-  diag: Diagnostics
+  currentLevels: Levels,
+  nextLevels: Levels,
+  env: ParseEnv
 ): ParseResult {
   for (const node of nodes) {
-    const result = parseNodePattern(
-      node,
-      input,
-      context,
-      currentLevels,
-      nextLevels,
-      fullGrammar,
-      diag
-    );
+    const result = parseNodePattern(node, input, currentLevels, nextLevels, env);
     if (result.length === 2) return result;
   }
   return [];
@@ -593,56 +648,54 @@ function parseNodes(
  * then fold `op operand` repetitions into left-nested nodes.
  * "5-2-1" → sub(sub(5, 2), 1)
  *
+ * Tail operands are operand(...) elements, so they parse at the next level via
+ * their role — the fold itself is what makes the level left-associative.
  * Mirrors ParseLeftLevel/ParseLeftFold in src/parse/index.ts.
  */
-function parseLeftLevel(
-  levels: Grammar,
-  input: string,
-  context: Context,
-  fullGrammar: Grammar,
-  diag: Diagnostics
-): ParseResult {
+function parseLeftLevel(levels: Levels, input: string, env: ParseEnv): ParseResult {
   const nodes = levels[0];
   const nextLevels = levels.slice(1);
 
-  const seed = parseLevels(nextLevels, input, context, fullGrammar, diag);
+  const seed = parseLevels(nextLevels, input, env);
   if (seed.length === 0) return [];
 
   let [left, rest] = seed;
 
   outer: for (;;) {
     for (const node of nodes) {
-      const [lhsEl, ...tail] = node.pattern;
+      const compiledNode = env.compiled.byNode.get(node)!;
 
-      // Check the folded-so-far node against the lhs constraint. Record
+      // Check the folded-so-far node against the operand constraint. Record
       // mismatches so schema typos surface in errors (the seed's start
       // offset is the operand's position).
-      const constraint = resolveConstraintSpec(lhsEl, [], []);
-      const leftOutput = (left as { outputSchema?: string }).outputSchema;
-      if (!constraintAccepts(constraint, leftOutput)) {
+      const constraint = resolveConstraint(
+        compiledNode.constraints[0],
+        [],
+        [],
+        env
+      );
+      if (!constraintAccepts(env, constraint, outputTypeOf(left))) {
         failConstraint(
-          diag,
+          env.diag,
           input,
           rest,
           constraint.describe ?? "expression",
-          leftOutput ?? "unknown",
+          (left as { outputSchema?: string }).outputSchema ?? "unknown",
           subjectOf(left)
         );
         continue;
       }
 
-      // The tail's rhs elements parse at the NEXT level (currentLevels :=
-      // nextLevels), which is what makes the fold left-associative. TAcc/
-      // TDone are seeded with the left operand so sameAs("left") resolves.
+      // Fold the tail; children are seeded with the left operand so
+      // binding references to it resolve.
       const tailResult = parsePatternTuple(
-        tail,
+        node,
+        compiledNode,
+        1,
         rest,
-        context,
+        levels,
         nextLevels,
-        nextLevels,
-        fullGrammar,
-        diag,
-        [lhsEl],
+        env,
         [left]
       );
       if (tailResult.length === 0) continue;
@@ -651,7 +704,7 @@ function parseLeftLevel(
       // validation makes this unreachable)
       if (tailResult[1] === rest) continue;
 
-      left = buildNodeResult(node, tailResult[0]);
+      left = buildNodeResult(node, compiledNode, tailResult[0], env);
       rest = tailResult[1];
       continue outer;
     }
@@ -662,50 +715,26 @@ function parseLeftLevel(
 /**
  * Parse using grammar levels (flat tuple).
  *
- * levels[0] is current level, levels[1:] is next levels.
- * Left-associative levels use the iterative fold.
+ * levels[0] is the current level, levels[1:] are the tighter levels.
+ * The level's mode (from the compiled grammar) picks the strategy.
  */
-function parseLevels(
-  levels: Grammar,
-  input: string,
-  context: Context,
-  fullGrammar: Grammar,
-  diag: Diagnostics
-): ParseResult {
-  if (levels.length === 0) {
-    return [];
-  }
+function parseLevels(levels: Levels, input: string, env: ParseEnv): ParseResult {
+  if (levels.length === 0) return [];
 
-  const currentNodes = levels[0];
+  const modeIndex = env.compiled.levels.length - levels.length;
+  const mode = env.compiled.modes[modeIndex];
 
-  // A level is left-associative when its nodes declare associativity: "left".
-  // createParser validates that a level never mixes associativities.
-  if (currentNodes.length > 0 && currentNodes[0].associativity === "left") {
-    return parseLeftLevel(levels, input, context, fullGrammar, diag);
+  if (mode === "left") {
+    return parseLeftLevel(levels, input, env);
   }
 
   const nextLevels = levels.slice(1);
+  const result = parseNodes(levels[0], input, levels, nextLevels, env);
+  if (result.length === 2) return result;
 
-  // Try nodes at current level
-  const result = parseNodes(
-    currentNodes,
-    input,
-    context,
-    levels,
-    nextLevels,
-    fullGrammar,
-    diag
-  );
-
-  if (result.length === 2) {
-    return result;
-  }
-
-  // Fall through to next levels (if any)
   if (nextLevels.length > 0) {
-    return parseLevels(nextLevels, input, context, fullGrammar, diag);
+    return parseLevels(nextLevels, input, env);
   }
-
   return [];
 }
 
@@ -714,42 +743,19 @@ function parseLevels(
 // =============================================================================
 
 /**
- * Parse input string using node schemas.
+ * Parse input against a compiled grammar.
  *
  * Returns the raw [node, rest] | [] result plus the diagnostics gathered
  * during parsing. Prefer parser.parse() / parser.safeParse() from
  * createParser for a friendlier API.
  */
 export function parseWithDiagnostics(
-  nodes: readonly NodeSchema[],
+  compiled: CompiledGrammar,
   input: string,
-  context: Context
+  schemaType: Type | undefined
 ): { result: ParseResult; diagnostics: Diagnostics } {
-  const grammar = buildGrammar(nodes);
   const diagnostics = createDiagnostics(input);
-  const result = parseLevels(grammar, input, context, grammar, diagnostics);
+  const env: ParseEnv = { compiled, schemaType, diag: diagnostics };
+  const result = parseLevels(compiled.levels, input, env);
   return { result, diagnostics };
-}
-
-/**
- * Parse input string using node schemas.
- *
- * The return type is computed from the input types using the type-level
- * Parse<Grammar, Input, Context> type, ensuring runtime and type-level
- * parsing stay in sync.
- */
-export function parse<
-  const TNodes extends readonly NodeSchema[],
-  const TInput extends string,
-  const TContext extends Context
->(
-  nodes: TNodes,
-  input: TInput,
-  context: TContext
-): Parse<ComputeGrammar<TNodes>, TInput, TContext> {
-  return parseWithDiagnostics(nodes, input, context).result as Parse<
-    ComputeGrammar<TNodes>,
-    TInput,
-    TContext
-  >;
 }

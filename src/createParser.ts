@@ -1,73 +1,41 @@
 /**
- * createParser Entry Point
+ * createParser Entry Point (v2)
  *
  * Creates a type-safe parser from node schemas. The returned parser has:
  *   - parse(): compile-time validated parsing of string literals
  *   - safeParse(): runtime parsing of dynamic strings with rich errors
  *   - evaluate() / evaluateAst(): runtime evaluation via node eval() hooks
  *
- * The parser derives a closed TYPE VOCABULARY from the grammar (every
- * static resultType, the built-in element types, plus createParser's
- * `types` option). Constraint strings are validated against it at
- * construction; schema leaves are validated against it at compile time
- * (via the SchemaShapeOf bound) and at runtime (safeParse walks the
- * schema). This closes the "any string is a type" hole.
+ * v2 type system: schemas, operand constraints, and result types are
+ * ARKTYPE definitions, compiled once per parser in a scope that includes
+ * the user's aliases (createParser options.scope) plus arktype's keyword
+ * library. Schemas are validated at compile time via type.validate and at
+ * runtime by compiling the def; values passed to evaluate() are validated
+ * against the schema Type before evaluation.
  */
 
-import {
-  type NodeSchema,
-  type SchemaToType,
-  type ExprSchema,
-  type PatternSchema,
-  isFromBinding,
-  isSameAs,
-} from "./schema/index.js";
+import type { scope, type, Type, Out } from "arktype";
+import type { NodeSchema } from "./schema/index.js";
+import type { InferDef } from "./schema/index.js";
 import type { ComputeGrammar, Grammar } from "./grammar/index.js";
-import type { Parse } from "./parse/index.js";
+import type { InferOfDef, Parse } from "./parse/index.js";
 import type { Context, SchemaShape } from "./context.js";
+import { compileGrammar, type CompiledGrammar } from "./runtime/compile.js";
+import type { ScopeAliases } from "./runtime/types.js";
+import { isArkErrors, outputTypeOf } from "./runtime/types.js";
 import { parseWithDiagnostics } from "./runtime/parser.js";
 import {
   type StringentError,
   StringentParseError,
+  toInvalidSchemaError,
   toParseError,
   toUnexpectedInputError,
 } from "./runtime/diagnostics.js";
 import {
   type EvaluationValues,
-  RESERVED_NODE_NAMES,
+  EvaluationError,
   evaluateAst,
 } from "./runtime/evaluate.js";
-
-// =============================================================================
-// Type Vocabulary
-// =============================================================================
-
-/** Output types of the built-in pattern elements */
-type BuiltinTypeName = "number" | "string" | "boolean" | "unknown";
-
-const BUILTIN_TYPE_NAMES: readonly BuiltinTypeName[] = [
-  "number",
-  "string",
-  "boolean",
-  "unknown",
-];
-
-/**
- * The closed set of type names a grammar knows about: every static
- * resultType, the built-ins, and any extra `types` passed to createParser.
- */
-export type VocabOf<
-  TNodes extends readonly NodeSchema[],
-  TExtra extends readonly string[]
-> =
-  | Extract<NonNullable<TNodes[number]["resultType"]>, string>
-  | BuiltinTypeName
-  | TExtra[number];
-
-/** A schema whose leaves are restricted to a known type vocabulary */
-export type SchemaShapeOf<TVocab extends string> = {
-  readonly [key: string]: TVocab | SchemaShapeOf<TVocab>;
-};
 
 // =============================================================================
 // Result Types
@@ -84,42 +52,78 @@ export type SafeParseResult<TAst> =
   | { success: false; error: StringentError };
 
 /**
- * Map a schema to the shape of its runtime values object.
+ * The parser's INFERRED scope: alias name → inferred type, computed by
+ * arktype's own scope inferencer (intra-scope references included).
+ */
+export type InferScope<TScope extends ScopeAliases> = scope.infer<TScope>;
+
+/**
+ * Map a schema def to the shape of its runtime values object, resolved
+ * in the parser's inferred scope.
  *
  * @example
  * InferValues<{ x: "number"; values: { password: "string" } }>
  * // { x: number; values: { password: string } }
  */
-export type InferValues<TSchema extends SchemaShape> = {
-  [K in keyof TSchema]: TSchema[K] extends string
-    ? SchemaToType<TSchema[K]>
-    : TSchema[K] extends SchemaShape
-    ? InferValues<TSchema[K]>
-    : never;
-};
+export type InferValues<TSchema, $ = {}> = type.infer<TSchema, $>;
 
 /** The AST type for a literal input, or AnyAstNode for dynamic strings */
 type AstFor<
   TGrammar extends Grammar,
   TInput extends string,
-  TSchema extends SchemaShape
+  TSchema extends SchemaShape,
+  $ extends {} = {}
 > = string extends TInput // dynamic input
   ? AnyAstNode
-  : Parse<TGrammar, TInput, Context<TSchema>> extends [infer N, string]
+  : Parse<TGrammar, TInput, Context<TSchema, $>> extends [infer N, string]
   ? N
   : AnyAstNode;
 
 /** The evaluated result type for a literal input */
-type EvaluateResult<
+export type EvaluateResult<
   TGrammar extends Grammar,
   TInput extends string,
-  TSchema extends SchemaShape
-> = Parse<TGrammar, TInput, Context<TSchema>> extends [
-  infer N extends { outputSchema: string },
+  TSchema extends SchemaShape,
+  $ extends {} = {}
+> = Parse<TGrammar, TInput, Context<TSchema, $>> extends [
+  infer N extends { outputSchema: unknown },
   string
 ]
-  ? SchemaToType<N["outputSchema"]>
+  ? InferOfDef<N["outputSchema"]>
   : unknown;
+
+/** Options for parser.compile() — predicate-rule error attribution */
+export interface CompileRuleOptions {
+  /**
+   * Field path a predicate failure is attributed to (e.g.
+   * ["values", "confirmPassword"]). Defaults to the root path, which
+   * surfaces as a form-level error.
+   */
+  readonly path?: readonly PropertyKey[];
+  /** The "expected ..." phrasing of the failure message */
+  readonly message?: string;
+}
+
+/**
+ * The arktype Type produced by parser.compile():
+ * - a rule with boolean output is a PREDICATE — the Type validates the
+ *   values object and rejects when the rule evaluates false (values in,
+ *   values out)
+ * - any other rule is a MORPH — values in, evaluated result out
+ * - dynamic (non-literal) input: morph to unknown; the runtime decides
+ */
+export type CompiledRule<
+  TGrammar extends Grammar,
+  TInput extends string,
+  TSchema extends SchemaShape,
+  $ extends {} = {}
+> = string extends TInput
+  ? Type<(In: InferValues<TSchema, $>) => Out<unknown>>
+  : EvaluateResult<TGrammar, TInput, TSchema, $> extends infer R
+  ? [R] extends [boolean]
+    ? Type<InferValues<TSchema, $>>
+    : Type<(In: InferValues<TSchema, $>) => Out<R>>
+  : never;
 
 type TrimWs<S extends string> = S extends
   | ` ${infer R}`
@@ -134,11 +138,11 @@ type TrimWs<S extends string> = S extends
  * (trailing whitespace allowed, matching safeParse). Dynamic strings and
  * invalid literals resolve to never — use safeParse for runtime input.
  */
-type ValidatedInput<
+export type ValidatedInput<
   TGrammar extends Grammar,
   TInput extends string,
   $ extends Context
-> = Parse<TGrammar, TInput, $> extends [any, infer R extends string]
+> = Parse<TGrammar, TInput, $> extends [unknown, infer R extends string]
   ? TrimWs<R> extends ""
     ? TInput
     : never
@@ -151,15 +155,27 @@ type ValidatedInput<
 /**
  * Parser interface with type-safe parse methods.
  *
- * TGrammar: The computed grammar type from node schemas
- * TNodes: The tuple of node schemas
- * TVocab: The grammar's closed type-name vocabulary (schema leaves are
- *         checked against it at compile time)
+ * Schemas are arktype object defs, validated at compile time by
+ * type.validate IN THE PARSER'S SCOPE on EVERY entry point — a typo'd
+ * leaf like { x: "numbr" } errors at the leaf, while an alias leaf like
+ * { created: "Timestamp" } resolves when the parser was created with
+ * { scope: { Timestamp: … } }. The same scope drives literal-mode
+ * parsing (identifier/path types) and runtime compilation.
+ *
+ * History note: parse/evaluate could not carry type.validate before the
+ * 2026-07 rework — combined with their deferred-conditional input
+ * parameter, inference was METASTABLE (declaration-order-dependent).
+ * The rework's depth reductions moved the shape off the instantiation
+ * edge; re-tested 2026-07-07 across 8 declaration-order permutations ×
+ * TS 5.7/5.9/6.0, warm and cold (pinned in design-claims.typetest.ts).
+ * evaluate's values stay NoInfer-wrapped — WITHOUT it, TS inverts the
+ * mapped type inside type.infer and silently unions the values argument
+ * into TSchema (also pinned there).
  */
 export interface Parser<
   TGrammar extends Grammar,
   TNodes extends readonly NodeSchema[],
-  TVocab extends string = string
+  $ extends {} = {}
 > {
   /**
    * Parse a string literal, validated at compile time.
@@ -169,273 +185,74 @@ export interface Parser<
    * use safeParse. Throws StringentParseError if the compile-time check
    * was bypassed and the input is invalid.
    */
-  parse<TInput extends string, const TSchema extends SchemaShapeOf<TVocab>>(
-    input: ValidatedInput<TGrammar, TInput, Context<TSchema>>,
-    schema: TSchema
-  ): Parse<TGrammar, TInput, Context<TSchema>>;
+  parse<TInput extends string, const TSchema extends SchemaShape>(
+    input: ValidatedInput<TGrammar, TInput, Context<TSchema, $>>,
+    schema: type.validate<TSchema, $>
+  ): Parse<TGrammar, TInput, Context<TSchema, $>>;
 
   /**
    * Parse any string (including runtime-provided input).
    *
-   * Requires the whole input to be consumed. Never throws for invalid
-   * INPUT (returns a structured error with position/expected/found);
-   * throws for invalid SCHEMAS (unknown type names — a programmer error).
+   * Requires the whole input to be consumed. NEVER throws: invalid input
+   * returns a structured error with position/expected/found; an invalid
+   * schema (a programmer error, normally caught at compile time by
+   * type.validate) returns { success: false, error: { code:
+   * "INVALID_SCHEMA" } }.
    */
-  safeParse<TInput extends string, const TSchema extends SchemaShapeOf<TVocab>>(
+  safeParse<TInput extends string, const TSchema extends SchemaShape>(
     input: TInput,
-    schema: TSchema
-  ): SafeParseResult<AstFor<TGrammar, TInput, TSchema>>;
+    schema: type.validate<TSchema, $>
+  ): SafeParseResult<AstFor<TGrammar, TInput, TSchema, $>>;
 
   /**
    * Parse a string literal and evaluate it against runtime values.
    *
    * Node eval() functions (from defineNode) compute the result. The values
-   * object must match the schema's shape.
+   * object is validated against the schema before evaluation.
    */
-  evaluate<TInput extends string, const TSchema extends SchemaShapeOf<TVocab>>(
-    input: ValidatedInput<TGrammar, TInput, Context<TSchema>>,
-    schema: TSchema,
-    values: InferValues<TSchema>
-  ): EvaluateResult<TGrammar, TInput, TSchema>;
+  evaluate<TInput extends string, const TSchema extends SchemaShape>(
+    input: ValidatedInput<TGrammar, TInput, Context<TSchema, $>>,
+    schema: type.validate<TSchema, $>,
+    // NoInfer: without it TS inverts the mapped type inside type.infer
+    // and silently UNIONS the values argument into TSchema (pinned in
+    // design-claims.typetest.ts "inference-poisoning")
+    values: NoInfer<type.infer<TSchema, $>>
+  ): EvaluateResult<TGrammar, TInput, TSchema, $>;
 
   /**
    * Evaluate an already-parsed AST against runtime values.
    * Use with safeParse for dynamic input.
    */
-  evaluateAst<TAst extends { outputSchema: string }>(
+  evaluateAst<TAst extends { outputSchema: unknown }>(
     ast: TAst,
     values: EvaluationValues
-  ): SchemaToType<TAst["outputSchema"]>;
+  ): InferOfDef<TAst["outputSchema"]>;
+
+  /**
+   * Compile a rule into an arktype Type (D12) — the ecosystem bridge.
+   *
+   * A boolean-output rule becomes a PREDICATE Type: it validates the
+   * values object against the schema (refinements included), evaluates
+   * the rule, and rejects with an ArkErrors entry at `options.path` when
+   * the rule is false. Any other rule becomes a MORPH Type: values in,
+   * evaluated result out. Either way the result is a real arktype Type —
+   * a Standard Schema — so it plugs into react-hook-form, tRPC, hono, …
+   * `.in` is the values contract; predicate rules carry a predicate node,
+   * so JSON Schema export needs the fallback:
+   * `rule.in.toJsonSchema({ fallback: { predicate: (ctx) => ctx.base } })`.
+   *
+   * Unlike parse/evaluate, dynamic strings ARE accepted (rules often live
+   * in config); invalid input throws StringentParseError at compile time
+   * — literal inputs additionally get precise compile-time typing.
+   */
+  compile<TInput extends string, const TSchema extends SchemaShape>(
+    input: TInput,
+    schema: type.validate<TSchema, $>,
+    options?: CompileRuleOptions
+  ): CompiledRule<TGrammar, TInput, TSchema, $>;
 
   /** The node schemas used to create this parser */
   readonly nodes: TNodes;
-
-  /** The grammar's type-name vocabulary (resultTypes + built-ins + extras) */
-  readonly typeNames: ReadonlySet<string>;
-}
-
-// =============================================================================
-// Grammar Validation
-// =============================================================================
-
-const CONSUMING_KINDS = new Set(["number", "string", "ident", "path", "const"]);
-
-function isNamed(element: PatternSchema): element is PatternSchema & {
-  name: string;
-} {
-  return "__named" in element && element.__named === true;
-}
-
-function checkConstraintVocabulary(
-  nodeName: string,
-  element: ExprSchema,
-  vocab: ReadonlySet<string>
-): void {
-  const spec = element.constraint;
-  if (spec === undefined || isSameAs(spec)) return;
-  const names = typeof spec === "string" ? [spec] : spec;
-  if (names.length === 0) {
-    throw new Error(
-      `stringent: node '${nodeName}' has an empty constraint list — the slot could never match anything`
-    );
-  }
-  for (const name of names) {
-    if (!vocab.has(name)) {
-      throw new Error(
-        `stringent: node '${nodeName}' has constraint '${name}' which matches no known type — known types: ${[...vocab].sort().join(", ")}`
-      );
-    }
-  }
-}
-
-/** Binding names that would collide with AST node structure or JS proto
- *  setter semantics */
-const RESERVED_BINDING_NAMES = new Set(["node", "outputSchema", "__proto__"]);
-
-function validateNodes(
-  nodes: readonly NodeSchema[],
-  vocab: ReadonlySet<string>
-): void {
-  const seen = new Set<string>();
-  const associativityByPrecedence = new Map<number, "left" | "right">();
-
-  for (const node of nodes) {
-    if (seen.has(node.name)) {
-      throw new Error(`stringent: duplicate node name '${node.name}'`);
-    }
-    if (RESERVED_NODE_NAMES.has(node.name)) {
-      throw new Error(
-        `stringent: node name '${node.name}' is reserved (used by the parser's primitive nodes)`
-      );
-    }
-    seen.add(node.name);
-
-    if (node.pattern.length === 0) {
-      throw new Error(`stringent: node '${node.name}' has an empty pattern`);
-    }
-
-    // --- Position 0: must consume input or descend strictly ---------------
-    const first = node.pattern[0];
-    if (first.kind === "expr") {
-      const role = (first as ExprSchema).role;
-      if (node.precedence === "atom") {
-        throw new Error(
-          `stringent: atom '${node.name}' cannot start with an expression element — atoms must start with a consuming element (number, string, ident, path, const)`
-        );
-      }
-      if (role !== "lhs") {
-        throw new Error(
-          `stringent: node '${node.name}' starts with ${role}(...), which would recurse into the same level forever — operator patterns must start with lhs(...) or a consuming element`
-        );
-      }
-      const spec = (first as ExprSchema).constraint;
-      if (isSameAs(spec)) {
-        throw new Error(
-          `stringent: node '${node.name}' uses sameAs(...) on its first element — there is no earlier operand to reference`
-        );
-      }
-    }
-
-    // --- Per-element checks -----------------------------------------------
-    const namedSoFar = new Map<string, PatternSchema>();
-    const allNamed = new Map<string, PatternSchema>();
-    for (const element of node.pattern) {
-      if (isNamed(element)) allNamed.set(element.name, element);
-    }
-    let hasNamed = false;
-
-    for (const element of node.pattern) {
-      if (element.kind === "const" && (element as { value: string }).value === "") {
-        throw new Error(
-          `stringent: node '${node.name}' uses constVal("") — empty constants match zero width and cannot terminate`
-        );
-      }
-      if (element.kind === "expr") {
-        checkConstraintVocabulary(node.name, element as ExprSchema, vocab);
-        const spec = (element as ExprSchema).constraint;
-        if (isSameAs(spec)) {
-          const target = namedSoFar.get(spec.binding);
-          if (target === undefined) {
-            throw new Error(
-              `stringent: node '${node.name}' uses sameAs('${spec.binding}') but no earlier element is named '${spec.binding}'`
-            );
-          }
-          if (target.kind === "const") {
-            throw new Error(
-              `stringent: node '${node.name}' uses sameAs('${spec.binding}') on a const element — const bindings carry their matched text as their type, which no expression can produce`
-            );
-          }
-        }
-      }
-      if (isNamed(element)) {
-        if (RESERVED_BINDING_NAMES.has(element.name)) {
-          throw new Error(
-            `stringent: node '${node.name}' uses the binding name '${element.name}', which would collide with the AST node structure`
-          );
-        }
-        if (namedSoFar.has(element.name)) {
-          throw new Error(
-            `stringent: node '${node.name}' binds the name '${element.name}' twice — binding names must be unique within a pattern`
-          );
-        }
-        namedSoFar.set(element.name, element);
-        hasNamed = true;
-      }
-    }
-
-    // --- Result type --------------------------------------------------------
-    const isPassthrough =
-      !hasNamed && node.pattern.length === 1 && node.pattern[0].kind !== "const";
-    const resultSpec = node.resultType;
-    if (isFromBinding(resultSpec)) {
-      const target = allNamed.get(resultSpec.binding);
-      if (target === undefined) {
-        throw new Error(
-          `stringent: node '${node.name}' uses fromBinding('${resultSpec.binding}') but no element is named '${resultSpec.binding}'`
-        );
-      }
-      if (target.kind === "const") {
-        throw new Error(
-          `stringent: node '${node.name}' uses fromBinding('${resultSpec.binding}') on a const element — const bindings carry their matched text as their type, which would escape the type vocabulary`
-        );
-      }
-    }
-    if (!isPassthrough && resultSpec === undefined) {
-      throw new Error(
-        `stringent: node '${node.name}' needs a resultType (a type name or fromBinding(...)) — only single-element passthrough patterns can omit it`
-      );
-    }
-    if (typeof resultSpec === "string" && !vocab.has(resultSpec)) {
-      // Static resultTypes are part of the vocabulary by construction, so
-      // this only triggers for exotic cases (e.g. proxied node objects).
-      throw new Error(
-        `stringent: node '${node.name}' has resultType '${resultSpec}' which is not in the vocabulary`
-      );
-    }
-
-    // --- Precedence & associativity ----------------------------------------
-    if (node.precedence !== "atom") {
-      const prec = node.precedence;
-      if (
-        typeof prec !== "number" ||
-        !Number.isSafeInteger(prec) ||
-        prec < 0
-      ) {
-        throw new Error(
-          `stringent: node '${node.name}' has invalid precedence ${String(
-            prec
-          )} — precedence must be "atom" or a non-negative safe integer`
-        );
-      }
-
-      const assoc = node.associativity ?? "right";
-      const existing = associativityByPrecedence.get(prec);
-      if (existing !== undefined && existing !== assoc) {
-        throw new Error(
-          `stringent: nodes at precedence ${prec} mix left and right associativity — associativity is a property of the whole precedence level`
-        );
-      }
-      associativityByPrecedence.set(prec, assoc);
-
-      if (assoc === "left") {
-        const firstIsLhs =
-          first.kind === "expr" && (first as ExprSchema).role === "lhs";
-        if (!firstIsLhs || node.pattern.length < 2) {
-          throw new Error(
-            `stringent: left-associative node '${node.name}' must have a pattern starting with lhs(...) followed by at least one more element`
-          );
-        }
-      }
-    }
-  }
-}
-
-// =============================================================================
-// Schema Validation (runtime)
-// =============================================================================
-
-function validateSchema(
-  schema: SchemaShape,
-  vocab: ReadonlySet<string>,
-  pathPrefix = ""
-): void {
-  for (const key of Object.keys(schema)) {
-    const value = schema[key];
-    const keyPath = pathPrefix === "" ? key : `${pathPrefix}.${key}`;
-    if (typeof value === "string") {
-      if (!vocab.has(value)) {
-        throw new Error(
-          `stringent: schema key '${keyPath}' has unknown type '${value}' — known types: ${[...vocab].sort().join(", ")}. Add custom type names via createParser(nodes, { types: [...] }).`
-        );
-      }
-    } else if (value !== null && typeof value === "object") {
-      validateSchema(value, vocab, keyPath);
-    } else {
-      throw new Error(
-        `stringent: schema key '${keyPath}' must be a type name or a nested schema, got ${typeof value}`
-      );
-    }
-  }
 }
 
 // =============================================================================
@@ -445,48 +262,50 @@ function validateSchema(
 /**
  * Create a type-safe parser from node schemas.
  *
- * The returned parser has both:
- * - Compile-time type inference via Parse<Grammar, Input, Context>
- * - Runtime parsing that matches the type structure
- *
  * @param nodes - Tuple of node schemas defining the grammar
- * @param options.types - Extra type names to allow in schemas/constraints
- *   beyond the grammar's own resultTypes (e.g. ["date"])
+ * @param options.scope - Extra type aliases available in constraints,
+ *   resultTypes, and schemas (e.g. { Money: "number" })
  *
  * @example
  * ```ts
- * const parser = createParser([numberLit, variable, ternary, add] as const);
- * const [ast] = parser.parse("1+2", {});           // compile-time validated
- * const result = parser.safeParse(dynamic, {});     // runtime strings
- * const sum = parser.evaluate("1+2", {}, {});       // 3
+ * const parser = createParser([ternary, add, atoms] as const);
+ * const result = parser.safeParse(dynamic, { x: "number" });
+ * const sum = parser.evaluate("1+2", {}, {});  // 3
  * ```
  */
 export function createParser<
   const TNodes extends readonly NodeSchema[],
-  const TExtra extends readonly string[] = readonly []
+  const TScope extends ScopeAliases = {}
 >(
   nodes: TNodes,
-  options?: { readonly types?: TExtra }
-): Parser<ComputeGrammar<TNodes>, TNodes, VocabOf<TNodes, TExtra>> {
-  const vocab = new Set<string>(BUILTIN_TYPE_NAMES);
-  for (const node of nodes) {
-    if (typeof node.resultType === "string") vocab.add(node.resultType);
-  }
-  for (const extra of options?.types ?? []) vocab.add(extra);
-
-  validateNodes(nodes, vocab);
+  options?: { readonly scope?: TScope }
+): Parser<ComputeGrammar<TNodes>, TNodes, InferScope<TScope>> {
+  const compiled: CompiledGrammar = compileGrammar(nodes, options?.scope);
 
   const nodesByName = new Map<string, NodeSchema>(
     nodes.map((node) => [node.name, node])
   );
 
-  function safeParseImpl(
-    input: string,
-    schema: SchemaShape
-  ): SafeParseResult<AnyAstNode> & { rest?: string } {
-    validateSchema(schema, vocab);
-    const context: Context = { data: schema };
-    const { result, diagnostics } = parseWithDiagnostics(nodes, input, context);
+  type ImplResult =
+    | { success: true; ast: AnyAstNode; rest: string; schemaType: Type }
+    | { success: false; error: StringentError };
+
+  function safeParseImpl(input: string, schema: object): ImplResult {
+    let schemaType: Type;
+    try {
+      schemaType = compiled.env.compileDef(schema);
+    } catch (e) {
+      // Schema errors are programmer errors, but safeParse still never
+      // throws — they surface as a structured INVALID_SCHEMA result
+      // (parse/evaluate/compile turn it into a StringentParseError throw,
+      // same as invalid input there)
+      return { success: false, error: toInvalidSchemaError(e) };
+    }
+    const { result, diagnostics } = parseWithDiagnostics(
+      compiled,
+      input,
+      schemaType
+    );
     if (result.length === 0) {
       return { success: false, error: toParseError(diagnostics) };
     }
@@ -497,29 +316,37 @@ export function createParser<
         error: toUnexpectedInputError(diagnostics, rest),
       };
     }
-    return { success: true, ast: ast as AnyAstNode, rest };
+    return { success: true, ast: ast as AnyAstNode, rest, schemaType };
   }
 
   return {
-    parse(input: string, schema: SchemaShape) {
+    parse(input: string, schema: object) {
       const result = safeParseImpl(input, schema);
       if (!result.success) {
         throw new StringentParseError(result.error);
       }
       // Mirror the type-level [node, rest] tuple — rest is "" or trailing
-      // whitespace, exactly as Parse<> computes it
+      // whitespace
       return [result.ast, result.rest ?? ""] as never;
     },
 
-    safeParse(input: string, schema: SchemaShape) {
-      const { rest: _rest, ...result } = safeParseImpl(input, schema);
-      return result as never;
+    safeParse(input: string, schema: object) {
+      const result = safeParseImpl(input, schema);
+      return (
+        result.success ? { success: true, ast: result.ast } : result
+      ) as never;
     },
 
-    evaluate(input: string, schema: SchemaShape, values: EvaluationValues) {
+    evaluate(input: string, schema: object, values: EvaluationValues) {
       const result = safeParseImpl(input, schema);
       if (!result.success) {
         throw new StringentParseError(result.error);
+      }
+      const validated = result.schemaType(values);
+      if (isArkErrors(validated)) {
+        throw new EvaluationError(
+          `values do not match the schema: ${validated.summary}`
+        );
       }
       return evaluateAst(result.ast, nodesByName, values) as never;
     },
@@ -528,7 +355,35 @@ export function createParser<
       return evaluateAst(ast, nodesByName, values) as never;
     },
 
+    compile(input: string, schema: object, options?: CompileRuleOptions) {
+      const result = safeParseImpl(input, schema);
+      if (!result.success) {
+        throw new StringentParseError(result.error);
+      }
+      const { ast, schemaType } = result;
+
+      const outType = outputTypeOf(ast);
+      const isPredicate =
+        outType !== undefined &&
+        compiled.env.isAssignable(outType, compiled.env.compileDef("boolean"));
+
+      if (isPredicate) {
+        const expected = options?.message ?? `a value satisfying \`${input}\``;
+        const path = [...(options?.path ?? [])];
+        return schemaType.narrow(
+          (data, ctx) =>
+            evaluateAst(ast, nodesByName, data as EvaluationValues) ===
+              true ||
+            // actual: "" keeps runtime values (possibly secrets) out of messages
+            ctx.reject({ expected, actual: "", path: path as never })
+        ) as never;
+      }
+
+      return schemaType.pipe((data) =>
+        evaluateAst(ast, nodesByName, data as EvaluationValues)
+      ) as never;
+    },
+
     nodes,
-    typeNames: vocab,
-  } as Parser<ComputeGrammar<TNodes>, TNodes, VocabOf<TNodes, TExtra>>;
+  } as Parser<ComputeGrammar<TNodes>, TNodes, InferScope<TScope>>;
 }

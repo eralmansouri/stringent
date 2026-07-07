@@ -14,9 +14,9 @@
 // =============================================================================
 
 /**
- * The shape of a schema: leaf values are type-name strings ("number",
- * "string", ...), and nested records describe objects addressable with
- * dotted paths.
+ * The shape of a schema: an ARKTYPE OBJECT DEF. Leaf values are arktype
+ * defs ("number", "string.email", "number > 0", nested objects…),
+ * addressable with dotted paths via the path() pattern element.
  *
  * @example
  * ```ts
@@ -26,16 +26,20 @@
  * } satisfies SchemaShape;
  * ```
  */
-export type SchemaShape = { readonly [key: string]: string | SchemaShape };
+export type SchemaShape = { readonly [key: string]: unknown };
 
 // =============================================================================
 // Context Interface
 // =============================================================================
 
 /**
- * Parse context with schema data.
+ * Parse context with schema data and the parser's scope.
  *
  * @typeParam TData - Schema mapping variable names to their types
+ * @typeParam TScope - The parser's INFERRED scope aliases
+ *   (`createParser(nodes, { scope })` → alias name → inferred type),
+ *   threaded through the def algebra so schema leaves like
+ *   `{ created: "Timestamp" }` resolve at compile time
  *
  * @example
  * ```ts
@@ -43,9 +47,14 @@ export type SchemaShape = { readonly [key: string]: string | SchemaShape };
  * // x resolves to type "number", y resolves to type "string"
  * ```
  */
-export interface Context<TData extends SchemaShape = SchemaShape> {
+export interface Context<
+  TData extends SchemaShape = SchemaShape,
+  TScope = {}
+> {
   /** Schema types for identifier resolution */
   readonly data: TData;
+  /** Inferred scope aliases for def resolution */
+  readonly scope: TScope;
 }
 
 // =============================================================================
@@ -53,7 +62,7 @@ export interface Context<TData extends SchemaShape = SchemaShape> {
 // =============================================================================
 
 /** Empty context (no schema variables) */
-export const emptyContext: Context<{}> = { data: {} };
+export const emptyContext: Context<{}> = { data: {}, scope: {} };
 
 /** Type alias for empty context */
 export type EmptyContext = Context<{}>;
