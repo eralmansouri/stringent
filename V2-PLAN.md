@@ -307,7 +307,9 @@ incrementally.
 ## Session handoff (2026-07-07)
 
 State for whoever picks this up. Everything below is committed on
-`claude/formeddable-stringent-review-suiwqu` in eralmansouri/stringent.
+`claude/formeddable-stringent-review-suiwqu` in eralmansouri/stringent,
+tracked by **PR #5** (https://github.com/eralmansouri/stringent/pull/5) —
+push to this branch to update it; do not open a new PR.
 At handoff: `pnpm typecheck`, `pnpm test` (90 tests, 3 files),
 `pnpm build`, and `pnpm check:package` are all green. Whole-project
 check: ~510k instantiations / ~2.8s.
