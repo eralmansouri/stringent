@@ -472,10 +472,8 @@ export type InferEvaluatedType<TSchema extends PatternSchemaBase> =
  * Evaluated type of an element WITH one-hop binding-reference resolution
  * against the rest of the pattern: a constraint that names an earlier
  * binding takes that element's type; otherwise the constraint is an
- * arktype def.
- *
- * TODO(Phase 4): correlate linked bindings via distributed unions so
- * narrowing one binding narrows the others.
+ * arktype def. (Used for bindings outside correlation groups — linked
+ * bindings go through CorrelatedGroups below instead.)
  */
 type InferEvaluatedTypeInPattern<
   TPattern extends readonly PatternSchema[],
@@ -522,11 +520,186 @@ export type InferBindings<TPattern extends readonly PatternSchema[]> = {
   [K in ExtractNamedSchemas<TPattern> as K["name"]]: InferNodeType<K["schema"]>;
 };
 
+// =============================================================================
+// Correlated bindings (Phase 4)
+// =============================================================================
+//
+// When a pattern links operands via binding references (rhs("left"),
+// overlapping("left")), the evaluated bindings are typed as a DISTRIBUTED
+// UNION over the root operand's constraint members: "number | string"
+// yields { left: string; right: string } | { left: number; right: number }
+// instead of two independent unions.
+//
+// TypeScript does NOT narrow sibling properties through a typeof check on
+// one property (`typeof b.left === "string"` narrows b.left, never b.right
+// — verified against TS 5.9; discriminant narrowing needs unit types). The
+// union's payoff is arktype's `match` (D14): its cases cover exactly the
+// union's branches, handlers are typed per branch, and `.default("assert")`
+// guards the unreachable rest. Plain functions must check each property
+// they use, or cast.
+//
+// Correlation granularity is DEF-level: "string | number" splits into
+// members "string" and "number"; "boolean" stays ONE branch (TS-level
+// distribution would split it into true | false — a value-level correlation
+// the parser never enforces; parse-time types are whole defs).
+//
+// Soundness caveat (documented in V2-PLAN.md): when the root operand
+// itself parses AS the union (a union-typed schema identifier), values may
+// straddle branches at runtime — same pragmatic hole TS accepts for
+// correlated unions. `.default("assert")` turns it into a runtime error.
+
+/** The binding name an element's constraint references, or never. */
+type RefTargetOf<
+  TPattern extends readonly PatternSchema[],
+  TSchema
+> = TSchema extends { kind: "expr" }
+  ? NormalizeConstraint<ExtractSpecOf<TSchema>> extends infer N
+    ? N extends OverlapsRef<infer B>
+      ? [FindNamedElement<TPattern, B>] extends [never]
+        ? never
+        : B
+      : N extends string
+      ? [FindNamedElement<TPattern, N>] extends [never]
+        ? never
+        : N
+      : never
+    : never
+  : never;
+
+/** Follow reference chains to their root binding (a ← b ← c ⇒ a for all).
+ *  TSeen guards malformed cyclic inputs (createParser rejects them). */
+type RootOf<
+  TPattern extends readonly PatternSchema[],
+  N extends string,
+  TSeen extends string = never
+> = N extends TSeen
+  ? N
+  : RefTargetOf<TPattern, FindNamedElement<TPattern, N>> extends infer T
+  ? [T] extends [never]
+    ? N
+    : T extends string
+    ? RootOf<TPattern, T, TSeen | N>
+    : N
+  : never;
+
+/** Names of bindings whose constraints (transitively) reference TRoot. */
+type ReferencersOf<
+  TPattern extends readonly PatternSchema[],
+  TRoot extends string
+> = ExtractNamedSchemas<TPattern> extends infer K
+  ? K extends { name: infer N extends string }
+    ? N extends TRoot
+      ? never
+      : RootOf<TPattern, N> extends TRoot
+      ? N
+      : never
+    : never
+  : never;
+
+/** Correlation roots, in pattern order: named non-reference elements that
+ *  at least one other binding references. */
+type CorrelationRoots<
+  TPattern extends readonly PatternSchema[],
+  TRest extends readonly PatternSchema[] = TPattern
+> = TRest extends readonly [
+  infer F extends PatternSchema,
+  ...infer R extends readonly PatternSchema[]
+]
+  ? F extends NamedSchema<PatternSchemaBase, infer N extends string>
+    ? [RefTargetOf<TPattern, F>] extends [never]
+      ? [ReferencersOf<TPattern, N>] extends [never]
+        ? CorrelationRoots<TPattern, R>
+        : [N, ...CorrelationRoots<TPattern, R>]
+      : CorrelationRoots<TPattern, R>
+    : CorrelationRoots<TPattern, R>
+  : [];
+
+type TrimDef<S extends string> = S extends ` ${infer R}`
+  ? TrimDef<R>
+  : S extends `${infer R} `
+  ? TrimDef<R>
+  : S;
+
+/** Split a def on "|" into member defs. Approximate: "|" nested inside
+ *  parens/literals produces invalid members, detected below → the whole
+ *  def stays one branch. */
+type SplitDefUnion<S extends string> = S extends `${infer A}|${infer B}`
+  ? TrimDef<A> | SplitDefUnion<B>
+  : TrimDef<S>;
+
+/** Did the split produce a fragment that is not a resolvable def? */
+type HasInvalidMember<M extends string> = true extends (
+  M extends string ? ([type.infer<M>] extends [never] ? true : never) : never
+)
+  ? true
+  : false;
+
+/** What a root distributes over: a union of member DEF strings, or a
+ *  single TS type wrapped in a no-distribution marker. */
+type RootBranches<
+  TPattern extends readonly PatternSchema[],
+  TRoot extends string
+> = FindNamedElement<TPattern, TRoot> extends infer El
+  ? El extends { kind: "expr" }
+    ? NormalizeConstraint<ExtractSpecOf<El>> extends infer N
+      ? N extends string
+        ? SplitDefUnion<N> extends infer M extends string
+          ? HasInvalidMember<M> extends true
+            ? { __single: InferDef<N> }
+            : M
+          : { __single: unknown }
+        : { __single: unknown } // unconstrained root
+      : never
+    : El extends PatternSchemaBase
+    ? { __single: InferEvaluatedType<El> } // e.g. number().as("n")
+    : { __single: unknown }
+  : never;
+
+/** Merge an intersection of object types into one flat object type. */
+type MergeShape<T> = { [K in keyof T]: T[K] };
+
+/** Cross product of correlation groups: one union branch per combination
+ *  of member defs across roots; each branch assigns the member's type to
+ *  the root and all its referencers. */
+type CorrelatedGroups<
+  TPattern extends readonly PatternSchema[],
+  TRoots extends readonly string[]
+> = TRoots extends readonly [
+  infer R extends string,
+  ...infer Rest extends readonly string[]
+]
+  ? RootBranches<TPattern, R> extends infer M
+    ? M extends string
+      ? GroupBranch<TPattern, R, InferDef<M>, Rest>
+      : M extends { __single: infer T }
+      ? GroupBranch<TPattern, R, T, Rest>
+      : never
+    : never
+  : {};
+
+type GroupBranch<
+  TPattern extends readonly PatternSchema[],
+  R extends string,
+  T,
+  TRest extends readonly string[]
+> = CorrelatedGroups<TPattern, TRest> extends infer Tail
+  ? Tail extends object
+    ? MergeShape<Record<R | ReferencersOf<TPattern, R>, T> & Tail>
+    : never
+  : never;
+
+/** All binding names covered by some correlation group. */
+type CorrelatedNames<
+  TPattern extends readonly PatternSchema[],
+  TRoots extends readonly string[]
+> = TRoots[number] | ReferencersOf<TPattern, TRoots[number]>;
+
 /**
  * Infer evaluated bindings from a pattern (runtime values).
  * Used for eval() — receives already-evaluated values (or thunks of these
  * types when lazy: true). Binding-reference constraints resolve to the
- * referenced operand's type.
+ * referenced operand's type; reference-linked bindings are correlated as a
+ * distributed union over the root's constraint members (see above).
  *
  * @example
  * ```ts
@@ -536,12 +709,30 @@ export type InferBindings<TPattern extends readonly PatternSchema[]> = {
  *   NamedSchema<ExprSchema<"left", "rhs">, "right">
  * ];
  * type EvalBindings = InferEvaluatedBindings<Pattern>;
- * // { left: number | string; right: number | string }
+ * // { left: number; right: number } | { left: string; right: string }
  * ```
  */
-export type InferEvaluatedBindings<TPattern extends readonly PatternSchema[]> = {
-  [K in ExtractNamedSchemas<TPattern> as K["name"]]: InferEvaluatedTypeInPattern<
-    TPattern,
-    K["schema"]
-  >;
-};
+export type InferEvaluatedBindings<TPattern extends readonly PatternSchema[]> =
+  CorrelationRoots<TPattern> extends infer TRoots extends readonly string[]
+    ? TRoots extends readonly []
+      ? {
+          [K in ExtractNamedSchemas<TPattern> as K["name"]]: InferEvaluatedTypeInPattern<
+            TPattern,
+            K["schema"]
+          >;
+        }
+      : CorrelatedGroups<TPattern, TRoots> extends infer G
+      ? G extends object
+        ? MergeShape<
+            {
+              [K in ExtractNamedSchemas<TPattern> as K["name"] extends CorrelatedNames<
+                TPattern,
+                TRoots
+              >
+                ? never
+                : K["name"]]: InferEvaluatedTypeInPattern<TPattern, K["schema"]>;
+            } & G
+          >
+        : never
+      : never
+    : never;

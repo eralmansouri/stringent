@@ -22,7 +22,7 @@ import type {
   Thunked,
 } from "./index.js";
 import { defineNode, lhs, rhs, expr, constVal } from "./index.js";
-import { add, fixtureNodes, fixtureParser, formSchema, ternary } from "./__fixtures__/grammar.js";
+import { add, eq, fixtureNodes, fixtureParser, formSchema, sub, ternary } from "./__fixtures__/grammar.js";
 
 // =============================================================================
 // Assertion helpers
@@ -235,13 +235,71 @@ fixtureParser.evaluate("x == 1", { x: "number" }, { x: "no" });
 // Eval binding inference (Phase 1 assertions, still pinned)
 // =============================================================================
 
+// Phase 4: reference-linked bindings are a DISTRIBUTED union over the
+// root's constraint members (def-level granularity)
 type AddBindings = InferEvaluatedBindings<(typeof add)["pattern"]>;
 type _b1 = AssertTrue<
-  AssertEqual<AddBindings, { left: string | number; right: string | number }>
+  AssertEqual<
+    AddBindings,
+    { left: number; right: number } | { left: string; right: string }
+  >
 >;
 
 type TernaryBindings = Thunked<InferEvaluatedBindings<(typeof ternary)["pattern"]>>;
 type _b2 = AssertTrue<AssertEqual<TernaryBindings["cond"], () => boolean>>;
+
+// unconstrained root: single branch, same as before (eq's overlapping ref)
+type EqBindings = InferEvaluatedBindings<(typeof eq)["pattern"]>;
+type _b3 = AssertTrue<AssertEqual<EqBindings, { left: unknown; right: unknown }>>;
+
+// unlinked patterns keep independent (non-union) bindings
+type SubBindings = InferEvaluatedBindings<(typeof sub)["pattern"]>;
+type _b4 = AssertTrue<AssertEqual<SubBindings, { left: number; right: number }>>;
+
+// reference CHAINS correlate to the root: a ← b ← c ⇒ one group
+const _chain = defineNode({
+  name: "chain3",
+  pattern: [
+    lhs("number | string").as("a"),
+    constVal("~"),
+    lhs("a").as("b"),
+    constVal("~"),
+    lhs("b").as("c"),
+  ],
+  precedence: 1,
+  resultType: "a",
+  eval: (b) => b.a,
+});
+type ChainBindings = InferEvaluatedBindings<(typeof _chain)["pattern"]>;
+type _b5 = AssertTrue<
+  AssertEqual<
+    ChainBindings,
+    | { a: number; b: number; c: number }
+    | { a: string; b: string; c: string }
+  >
+>;
+
+// a non-union root stays ONE branch — "boolean" must NOT distribute into
+// true | false (the parser never enforces value-level correlation)
+const _iff = defineNode({
+  name: "iff",
+  pattern: [lhs("boolean").as("a"), constVal("<=>"), rhs("a").as("b")],
+  precedence: 1,
+  resultType: "boolean",
+  eval: (b) => b.a === b.b,
+});
+type IffBindings = InferEvaluatedBindings<(typeof _iff)["pattern"]>;
+type _b6 = AssertTrue<AssertEqual<IffBindings, { a: boolean; b: boolean }>>;
+
+// eval return is still verified against resultType for correlated patterns
+const _badCorrelated = defineNode({
+  name: "badCorrelated",
+  pattern: [lhs("number | string").as("l"), constVal("&"), rhs("l").as("r")],
+  precedence: 1,
+  resultType: "l",
+  // @ts-expect-error — eval must return l's type (string | number), not boolean
+  eval: (b) => b.l === b.r,
+});
 
 const _badReturn = defineNode({
   name: "badReturn",

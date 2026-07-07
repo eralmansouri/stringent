@@ -14,6 +14,7 @@
  */
 
 import type { NodeSchema } from "../schema/index.js";
+import { outputTypeOf } from "./types.js";
 
 /** Error thrown when an AST cannot be evaluated */
 export class EvaluationError extends Error {
@@ -25,6 +26,18 @@ export class EvaluationError extends Error {
 
 /** Values object: maps identifier names (possibly nested) to runtime values */
 export type EvaluationValues = Record<string, unknown>;
+
+/** Evaluation behavior switches (threaded through the recursive walk) */
+export interface EvaluateOptions {
+  /**
+   * Assert each user node's eval output against the node's resolved result
+   * type (via the parsed Type riding on the AST). Catches evals that return
+   * the wrong shape — the runtime complement of the compile-time EvalReturn
+   * check, for plain-JS users. Skipped for ASTs without attached Types
+   * (e.g. deserialized ones). Enabled by createParser's dev mode.
+   */
+  readonly assertResults?: boolean;
+}
 
 /**
  * Node names produced directly by the parser's primitive elements. User
@@ -82,12 +95,14 @@ function once<T>(compute: () => T): () => T {
  * @param ast - The parsed AST node (from parse/safeParse)
  * @param nodesByName - Node schemas indexed by name (for eval lookup)
  * @param values - Runtime values for identifiers/paths in the expression
+ * @param options - Behavior switches (dev-mode result assertions)
  * @returns The evaluated value
  */
 export function evaluateAst(
   ast: unknown,
   nodesByName: ReadonlyMap<string, NodeSchema>,
-  values: EvaluationValues
+  values: EvaluationValues,
+  options?: EvaluateOptions
 ): unknown {
   if (!isAstNode(ast)) {
     throw new EvaluationError(`Cannot evaluate non-AST value: ${JSON.stringify(ast)}`);
@@ -134,16 +149,37 @@ export function evaluateAst(
         if (key === "node" || key === "outputSchema") continue;
         if (schema.lazy === true) {
           evaluated[key] = once(() =>
-            isAstNode(value) ? evaluateAst(value, nodesByName, values) : value
+            isAstNode(value)
+              ? evaluateAst(value, nodesByName, values, options)
+              : value
           );
         } else {
           evaluated[key] = isAstNode(value)
-            ? evaluateAst(value, nodesByName, values)
+            ? evaluateAst(value, nodesByName, values, options)
             : value;
         }
       }
 
-      return schema.eval(evaluated, values);
+      const result = schema.eval(evaluated, values);
+
+      if (options?.assertResults === true) {
+        const expected = outputTypeOf(node);
+        if (expected !== undefined && !expected.allows(result)) {
+          // describe the actual by SHAPE only — evaluated values may be
+          // secrets and must not leak into error messages
+          const actual =
+            result === null
+              ? "null"
+              : Array.isArray(result)
+              ? "an array"
+              : `a ${typeof result}`;
+          throw new EvaluationError(
+            `eval for node '${node.node}' returned ${actual}, which does not satisfy the node's result type '${expected.expression}'`
+          );
+        }
+      }
+
+      return result;
     }
   }
 }

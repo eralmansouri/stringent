@@ -31,6 +31,7 @@ import {
   toUnexpectedInputError,
 } from "./runtime/diagnostics.js";
 import {
+  type EvaluateOptions,
   type EvaluationValues,
   EvaluationError,
   evaluateAst,
@@ -194,6 +195,10 @@ export interface Parser<
  * @param nodes - Tuple of node schemas defining the grammar
  * @param options.scope - Extra type aliases available in constraints,
  *   resultTypes, and schemas (e.g. { Money: "number" })
+ * @param options.dev - Assert each node's eval output against its resolved
+ *   result type during evaluation (~16ns/node via precompiled allows()) —
+ *   the runtime complement of the compile-time eval-return check, for
+ *   plain-JS users. Defaults to true outside NODE_ENV=production.
  *
  * @example
  * ```ts
@@ -204,9 +209,17 @@ export interface Parser<
  */
 export function createParser<const TNodes extends readonly NodeSchema[]>(
   nodes: TNodes,
-  options?: { readonly scope?: ScopeAliases }
+  options?: { readonly scope?: ScopeAliases; readonly dev?: boolean }
 ): Parser<ComputeGrammar<TNodes>, TNodes> {
   const compiled: CompiledGrammar = compileGrammar(nodes, options?.scope);
+
+  const evalOptions: EvaluateOptions = {
+    assertResults:
+      options?.dev ??
+      (typeof process !== "undefined" &&
+        process.env !== undefined &&
+        process.env.NODE_ENV !== "production"),
+  };
 
   const nodesByName = new Map<string, NodeSchema>(
     nodes.map((node) => [node.name, node])
@@ -276,11 +289,11 @@ export function createParser<const TNodes extends readonly NodeSchema[]>(
           `values do not match the schema: ${validated.summary}`
         );
       }
-      return evaluateAst(result.ast, nodesByName, values) as never;
+      return evaluateAst(result.ast, nodesByName, values, evalOptions) as never;
     },
 
     evaluateAst(ast: unknown, values: EvaluationValues) {
-      return evaluateAst(ast, nodesByName, values) as never;
+      return evaluateAst(ast, nodesByName, values, evalOptions) as never;
     },
 
     nodes,

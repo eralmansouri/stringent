@@ -37,7 +37,12 @@ import {
   type CompiledGrammar,
   type CompiledNode,
 } from "./compile.js";
-import { eraseRefinements, resolveSchemaPath } from "./types.js";
+import {
+  eraseRefinements,
+  outputTypeOf,
+  resolveSchemaPath,
+  setOutputType,
+} from "./types.js";
 import { type Diagnostics, createDiagnostics, fail, failConstraint } from "./diagnostics.js";
 
 /** Parse result: empty = no match, [node, rest] = matched */
@@ -45,28 +50,7 @@ export type ParseResult<T extends ASTNode<any, any> = ASTNode<any, any>> =
   | []
   | [T & {}, string];
 
-/**
- * Symbol key carrying a parsed subexpression's arktype Type. Symbol-keyed
- * so JSON serialization and Object.entries (the evaluator) never see it.
- */
-export const OUTPUT_TYPE: unique symbol = Symbol("stringent.outputType");
-
-type WithOutputType = { [OUTPUT_TYPE]?: Type };
-
-function outputTypeOf(node: ASTNode): Type | undefined {
-  return (node as WithOutputType)[OUTPUT_TYPE];
-}
-
-/** Attach the parsed Type non-enumerably: invisible to JSON serialization,
- *  Object.entries (the evaluator), and deep-equality assertions. */
-function setOutputType(node: ASTNode, type: Type): void {
-  Object.defineProperty(node, OUTPUT_TYPE, {
-    value: type,
-    enumerable: false,
-    configurable: true,
-    writable: true,
-  });
-}
+export { OUTPUT_TYPE } from "./types.js";
 
 /** A grammar slice: levels[0] is the current level */
 type Levels = readonly (readonly NodeSchema[])[];

@@ -7,11 +7,15 @@
 import { describe, expect, it } from "vitest";
 import {
   EvaluationError,
+  constVal,
   createParser,
   defineNode,
+  expr,
   ident,
+  lhs,
   number,
   path,
+  rhs,
 } from "./index.js";
 import { fixtureParser as parser, formSchema } from "./__fixtures__/grammar.js";
 
@@ -38,6 +42,18 @@ describe("evaluate", () => {
   it("evaluates the overloaded add for both types", () => {
     expect(parser.evaluate("1+2", {}, {})).toBe(3);
     expect(parser.evaluate("'a'+'b'+'c'", {}, {})).toBe("abc");
+  });
+
+  it("rejects mixed pairs that slip through union-typed identifiers", () => {
+    // The one hole in correlated bindings: x parses AS "string | number",
+    // so `x + 1` satisfies both slots, but at runtime x may hold a string
+    // while the right operand is a number. The fixture's match-based eval
+    // uses .default("assert"), turning the mixed pair into a runtime error
+    // instead of silent "hi1"-style coercion.
+    expect(parser.evaluate("x + 1", { x: "string | number" }, { x: 1 })).toBe(2);
+    expect(() => {
+      parser.evaluate("x + 1", { x: "string | number" }, { x: "hi" });
+    }).toThrow();
   });
 
   it("looks up identifiers in values", () => {
@@ -142,6 +158,59 @@ describe("evaluate", () => {
         /has no eval function/
       );
     }
+  });
+
+  describe("dev-mode result assertions", () => {
+    const badNodes = [
+      defineNode({ name: "n", pattern: [number()], precedence: 2 }),
+      defineNode({
+        name: "cat",
+        pattern: [lhs("number").as("a"), constVal("&"), rhs("number").as("b")],
+        precedence: 1,
+        resultType: "number",
+        // deliberately returns the WRONG shape (a string)
+        eval: ({ a, b }) => String(a + b) as never,
+      }),
+    ] as const;
+
+    it("throws when an eval output does not satisfy the node's result type", () => {
+      const p = createParser(badNodes, { dev: true });
+      expect(() => {
+        p.evaluate("1 & 2", {}, {});
+      }).toThrow(/eval for node 'cat' returned a string, which does not satisfy the node's result type 'number'/);
+    });
+
+    it("skips the assertion when dev is off", () => {
+      const p = createParser(badNodes, { dev: false });
+      expect(p.evaluate("1 & 2", {}, {})).toBe("3");
+    });
+
+    it("checks binding-reference result types against the per-parse resolved type", () => {
+      const nodes = [
+        defineNode({ name: "n", pattern: [number()], precedence: 2 }),
+        defineNode({
+          name: "wrap",
+          pattern: [constVal("["), expr().as("inner"), constVal("]")],
+          precedence: 2,
+          resultType: "inner",
+          eval: ({ inner }) => String(inner) as never,
+        }),
+      ] as const;
+      const p = createParser(nodes, { dev: true });
+      expect(() => {
+        p.evaluate("[1]", {}, {});
+      }).toThrow(/does not satisfy the node's result type 'number'/);
+    });
+
+    it("skips ASTs without attached parse Types (e.g. deserialized)", () => {
+      const p = createParser(badNodes, { dev: true });
+      const parsed = p.safeParse("1 & 2", {});
+      expect(parsed.success).toBe(true);
+      if (parsed.success) {
+        const roundTripped = JSON.parse(JSON.stringify(parsed.ast));
+        expect(p.evaluateAst(roundTripped, {})).toBe("3");
+      }
+    });
   });
 
   it("evaluates single-segment ident() elements", () => {

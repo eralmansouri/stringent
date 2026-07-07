@@ -1,11 +1,13 @@
 # Stringent v2 — API Redesign Plan
 
-Status: **Phases 0–3 implemented and green** on branch
-`claude/formeddable-stringent-review-suiwqu` (see the Session Handoff
-section at the bottom for exact state). Decisions below came out of a
-design review comparing this repo against the archived
-formeddable/stringent (Jan 2026, arktype-based) and a discussion of v1's
-ergonomics. DESIGN.md still describes v1 and needs its rewrite in Phase 7.
+Status: **Phases 0–4 implemented and green**. Phases 0–3 landed on
+`claude/formeddable-stringent-review-suiwqu` (PR #5); Phase 4 and a plan
+review continue on `claude/v2-plan-review-e13a11`, which contains the
+suiwqu history (see the Session Handoff section at the bottom for exact
+state). Decisions below came out of a design review comparing this repo
+against the archived formeddable/stringent (Jan 2026, arktype-based) and a
+discussion of v1's ergonomics. DESIGN.md still describes v1 and needs its
+rewrite in Phase 7.
 
 ## Goals
 
@@ -26,9 +28,9 @@ ergonomics. DESIGN.md still describes v1 and needs its rewrite in Phase 7.
 |---|---|---|
 | D1 | Adopt `arktype` as the type-expression engine (runtime scopes/validators + `type.validate`/`type.infer` at compile time). | Gets union types, refinements, and assignability for free; the archived formeddable repo is a working reference for the integration (and its pitfalls — it did string-equality checks instead of real assignability; we won't). |
 | D2 | Binding names are auto-scoped type aliases. `rhs('acc')` means "assignable to whatever `acc` parsed as"; `resultType: 'then'` means "the type `then` parsed as". | Replaces `sameAs()` and `fromBinding()` with plain type expressions. One vocabulary everywhere. |
-| D3 | `resultType` is **always required**, and is any arktype definition — a string expression (`'boolean'`, `'then'`) or an object def (`{x: 'number', y: 'number'}` for a node producing a structured value). Binding aliases resolve inside both forms. | Considered inference-from-eval (impossible for dynamic parsing — TS types are erased and the parser needs result types as data mid-parse to backtrack) and conditional optionality (needs a pattern-classification meta-rule mirrored in both engines; "why is it forbidden here?" moments). One rule, self-documenting grammars. |
+| D3 | `resultType` is **always required** (one exception, found in Phase 1: single-element unnamed passthrough patterns *forbid* it — they forward a child, constructing nothing), and is any arktype definition — a string expression (`'boolean'`, `'then'`) or an object def (`{x: 'number', y: 'number'}` for a node producing a structured value). Binding aliases resolve inside both forms. | Considered inference-from-eval (impossible for dynamic parsing — TS types are erased and the parser needs result types as data mid-parse to backtrack) and conditional optionality (needs a pattern-classification meta-rule mirrored in both engines; "why is it forbidden here?" moments). One rule, self-documenting grammars. |
 | D4 | `eval` is **verified against** `resultType` at compile time; wrong return type is an error at the `defineNode` call site. Dev-mode runtime assertion via `.allows()` covers plain-JS users. | Inference-grade safety without breaking the semantics-are-data law. |
-| D5 | Correlated eval bindings: the bindings parameter is typed as a **distributed union** (`{acc: string, append: string} \| {acc: number, append: number}`), generated from the pattern's binding links. | Kills the `as any` in polymorphic evals (`__fixtures__/grammar.ts:90`). Narrow through the object (`typeof b.acc === 'string'`), then destructure. |
+| D5 | Correlated eval bindings: the bindings parameter is typed as a **distributed union** (`{acc: string, append: string} \| {acc: number, append: number}`), generated from the pattern's binding links at DEF granularity (`'string \| number'` splits; `'boolean'` stays one branch). | Kills the `as any` in polymorphic evals. **Mechanism correction (Phase 4, verified against TS 5.9):** TS does NOT narrow sibling properties through `typeof b.acc` — discriminant narrowing needs unit types — so the union's payoff is arktype `match` (D14): one case per branch, handlers typed per branch, `.default('assert')` guards the rest. Plain functions must check each property they use, or cast. |
 | D6 | **Associativity is derived from the tail element's level; the `associativity` property is deleted.** Tail at tighter level (`lhs()`) → left-assoc via fold; tail at current level (`rhs()`) → right-assoc; `expr()` → delimited slots only. | v1 already reinterprets a left level's `rhs()` tail to parse at the next level (`runtime/parser.ts:634`) — the label lies. Deriving from shape makes the pattern the single source of truth. Level coherence check: all nodes at a level must agree on tail shape (replaces the mix-associativity error). |
 | D7 | `precedence` is a plain number; the `"atom"` sentinel is removed. The **highest** precedence level is the leaf level; built-in literals live there implicitly. | "Atom" is jargon; the only thing it encoded (recursion base, no leading expression element) is enforceable by validating the max level. |
 | D8 | Built-in literals gain `true`/`false`/`null`/`undefined` alongside number/string. | Biggest functional gap vs. the archive. Port the keyword-prefix-guard approach (so `nullable` ≠ `null` + `able`) in both engines. |
@@ -53,21 +55,34 @@ const parens = defineNode({
 
 const eq = defineNode({
   name: 'eq',
-  pattern: [lhs().as('left'), constVal('=='), rhs('left').as('right')],
+  pattern: [lhs().as('left'), constVal('=='), rhs(overlapping('left')).as('right')],
+  //        overlapping(): symmetric — operand types must OVERLAP, so
+  //        `x == 1` and `1 == x` both parse for x: 'string | number'
   precedence: 1,
   resultType: 'boolean',
   eval: (b) => b.left === b.right,
 })
 
+const addPattern = [
+  lhs('string | number').as('acc'), constVal('+'), lhs('acc').as('append'),
+  //  tail is lhs() → left-associative fold, no property needed
+] as const
+
+// correlated bindings ({acc: string, append: string} | {acc: number,
+// append: number}) + arktype match: one case per branch, no casts
+const addImpl = match
+  .in<InferEvaluatedBindings<typeof addPattern>>()
+  .case({ acc: 'number', append: 'number' }, (b) => b.acc + b.append)
+  .case({ acc: 'string', append: 'string' }, (b) => b.acc + b.append)
+  .default('assert')
+
 const add = defineNode({
   name: 'add',
-  pattern: [lhs('string | number').as('acc'), constVal('+'), lhs('acc').as('append')],
-  //        tail is lhs() → left-associative fold, no property needed
+  pattern: addPattern,
   precedence: 2,
   resultType: 'acc',
-  eval: (b) => typeof b.acc === 'string' ? b.acc + b.append : b.acc + b.append,
-  //           ^ correlated bindings: both string or both number, no casts
-})
+  eval: (b) => addImpl(b),  // wrapped: a bare matcher would read eval's
+})                          // second arg as its traversal context
 
 const pow = defineNode({
   name: 'pow',
@@ -109,6 +124,12 @@ Unchanged: `defineNode`/`createParser` shape, `.as()` naming, `lazy`,
   candidate-output ⊆ constraint.
 - Compile time: TS assignability on `type.infer<candidate> extends
   type.infer<constraint>` as the proxy.
+- Binding references (`rhs('left')`) are DIRECTIONAL: candidate ⊆ the
+  referenced binding's parsed type. For equality-style operators, where
+  operand order must not matter, `overlapping('left')` is the symmetric
+  form: the types must overlap (some value could inhabit both), not nest.
+  v1's exact-equality `sameAs` maps to `overlapping`, not to a directional
+  reference.
 - **Refinements are validation-only.** Arktype refinements (`'number > 0'`,
   `'string.email'`) erase to their base TS type at compile time, so if the
   runtime checked them during parsing, `parse()`'s promise ("if it compiles,
@@ -127,6 +148,25 @@ Per parse, after all bindings resolve: substitute each binding's parsed type
 into the node's `resultType` expression and normalize. The AST's
 `outputSchema` remains a string (display + data), with the compiled Type
 cached alongside.
+
+### Correlated eval bindings (Phase 4)
+- Reference-linked bindings form a **group** rooted at the referenced
+  (non-reference) binding; chains (`a ← b ← c`) resolve to one group.
+  `InferEvaluatedBindings` types each group as a distributed union over
+  the root's constraint members, cross-producted across groups, merged
+  with the ungrouped bindings.
+- Granularity is **def-level**: the constraint string splits on top-level
+  `|` (`'string | number'` → two branches); a def whose split parts don't
+  all resolve (e.g. `'(a | b)[]'`) — and any non-union def, including
+  `'boolean'` — stays one branch. TS-level distribution would fabricate
+  value correlations (true/false) the parser never enforces.
+- **Known hole:** when the root operand parses AS the union itself (a
+  union-typed schema identifier), runtime values can straddle branches
+  (`x + 1` with `x: 'string \| number'` holding a string). Same pragmatic
+  unsoundness TS accepts for correlated unions; a match-based eval with
+  `.default('assert')` turns it into a runtime error.
+- This is typing only — runtime parsing semantics are unchanged, so the
+  dual-engine law is untouched.
 
 ### Associativity by shape
 - Level's tail shape: `lhs()`-tail levels use the iterative fold
@@ -228,12 +268,22 @@ wraps values in `NoInfer`, and eager schema-leaf validation lives only on
 runtime). Scope-aware compile-time validation remains deferred
 (scope-blind `type.validate`; aliases need a cast at compile time).
 
-**Phase 4 — Eval typing** (`src/schema/index.ts`). Distributed-union
-correlated bindings (the `as any` in the fixture's polymorphic add still
-stands until then). ~~Eval-return verification against resultType~~ —
-landed early in Phase 1 (`EvalReturn` + `NoInfer`), including
-binding-reference and object resultTypes. Dev-mode `.allows()` assertion
-on node outputs still pending.
+**Phase 4 — Eval typing. ✅ DONE** (`src/schema/index.ts`,
+`src/runtime/evaluate.ts`, `src/createParser.ts`). Distributed-union
+correlated bindings per the Semantics section (the fixture's polymorphic
+add is now cast-free via `match`). ~~Eval-return verification against
+resultType~~ — landed early in Phase 1 (`EvalReturn` + `NoInfer`),
+including binding-reference and object resultTypes. Dev-mode result
+assertion: `createParser(nodes, { dev })` (default: on outside
+`NODE_ENV=production`) checks each user node's eval output against the
+node's per-parse resolved Type via precompiled `allows()` (~16ns);
+deserialized ASTs (no attached Type) skip the check. Discoveries recorded
+during implementation:
+- TS 5.9 does NOT narrow sibling properties through `typeof b.x` (D5
+  mechanism corrected; `match` is the documented idiom).
+- A bare arktype matcher/Type cannot BE the eval function — eval is
+  called `(bindings, runtimeValues)` and arktype reads a second argument
+  as its internal traversal context. Wrap it: `eval: (b) => impl(b)`.
 
 **Phase 5 — Built-in literals & escapes.** `true`/`false`/`null`/`undefined`
 leaf nodes with keyword-prefix guards in both engines; escape processing in
@@ -273,7 +323,8 @@ incrementally.
 
 | v1 | v2 |
 |---|---|
-| `rhs(sameAs('left'))` | `rhs('left')` |
+| `rhs(sameAs('left'))` (operand slot) | `rhs('left')` — directional, candidate ⊆ left |
+| `rhs(sameAs('left'))` (equality operator) | `rhs(overlapping('left'))` — symmetric, order-independent |
 | `resultType: fromBinding('left')` | `resultType: 'left'` |
 | `associativity: 'left'` + `rhs()` tail | `lhs()` tail |
 | `associativity: 'right'` / default + `rhs()` tail | `rhs()` tail (unchanged) |
@@ -284,15 +335,20 @@ incrementally.
 
 ## Risks & open questions
 
-1. **TS recursion depth** — arktype's type-level parser inside our
-   type-level parse loop may lower the ~14-term literal-mode ceiling.
-   Phase 0 measures; hybrid fallback exists. Runtime paths are unaffected.
-2. **Refinements-are-validation-only** (see Semantics) — Phase 0 confirms
-   arktype exposes a clean erased projection to compare against.
+1. ~~**TS recursion depth**~~ — RESOLVED by Phases 0/3: measured floors
+   pinned as typetest canaries (30-term left chains, 8-term pow chains,
+   3-deep parens); TS memoization keeps marginal per-step cost ~zero.
+2. ~~**Refinements-are-validation-only**~~ — RESOLVED: erasure implemented
+   (runtime `eraseRefinements`; automatic via `type.infer` at compile
+   time) and pinned by tests in both engines.
 3. **Bundle/perf cost of arktype at runtime** — mitigated by compiling each
    type definition once per parser; benchmark in Phase 6 against v1 numbers.
-4. **Correlated-narrowing ergonomics** — destructuring before narrowing
-   severs correlation (TS limitation). Docs must show the `b.x` pattern.
+4. ~~**Correlated-narrowing ergonomics**~~ — RESOLVED (Phase 4), but not as
+   originally written: TS never correlated `typeof b.x` narrowing across
+   sibling properties in the first place (destructuring was never the
+   culprit). The documented idiom is arktype `match` over the distributed
+   union; docs (Phase 7) must show it, including the wrapping rule
+   (`eval: (b) => impl(b)`).
 5. **`expr()` must be followed by a `constVal` in the same pattern** (new
    Phase 1 check). `expr()` resets to the full grammar, so in an undelimited
    tail it consumes operators *looser* than the node's own precedence:
@@ -304,15 +360,17 @@ incrementally.
    its extent is decided by tokens, not precedence — which is why `expr()`
    is safe there and only there. Final operand slots must be `lhs()`/`rhs()`.
 
-## Session handoff (2026-07-07)
+## Session handoff (2026-07-07, updated same day after Phase 4)
 
-State for whoever picks this up. Everything below is committed on
+State for whoever picks this up. Phases 0–3 were committed on
 `claude/formeddable-stringent-review-suiwqu` in eralmansouri/stringent,
-tracked by **PR #5** (https://github.com/eralmansouri/stringent/pull/5) —
-push to this branch to update it; do not open a new PR.
-At handoff: `pnpm typecheck`, `pnpm test` (90 tests, 3 files),
+tracked by **PR #5** (https://github.com/eralmansouri/stringent/pull/5).
+Phase 4 + the plan-review corrections continue on
+`claude/v2-plan-review-e13a11` (a superset of the suiwqu history) — the
+owner decides whether to point PR #5 at it or open a fresh PR.
+At handoff: `pnpm typecheck`, `pnpm test` (95 tests, 3 files),
 `pnpm build`, and `pnpm check:package` are all green. Whole-project
-check: ~510k instantiations / ~2.8s.
+check: ~520k instantiations / ~2.2s.
 
 ### Done (this branch, in commit order)
 
@@ -333,6 +391,15 @@ check: ~510k instantiations / ~2.8s.
 4. `8c9cbaf`+ — Phase 3: type-level engine rebuilt
    (`src/parse/index.ts`, `src/grammar/index.ts`), full typetest suite
    restored (`src/types.typetest.ts`) with canaries.
+5. (on `claude/v2-plan-review-e13a11`) — Phase 4: correlated
+   distributed-union eval bindings (`src/schema/index.ts`:
+   `CorrelationRoots`/`CorrelatedGroups`/def-level `SplitDefUnion`),
+   match-based fixture add (cast-free), dev-mode result assertion
+   (`createParser(nodes, { dev })` → `allows()` in
+   `src/runtime/evaluate.ts`; `OUTPUT_TYPE` moved to
+   `src/runtime/types.ts` so the evaluator can read it without an import
+   cycle). Plus plan-review corrections (D5 mechanism, eq sketch,
+   resolved risks, versioning slip).
 
 ### The four load-bearing design rules
 
@@ -380,6 +447,20 @@ check: ~510k instantiations / ~2.8s.
   operators need whitespace or a different spelling in tests.
 - Python heredoc file edits corrupted a UTF-8 file once; prefer the Edit
   tool or io.open(encoding='utf-8').
+- TS does NOT narrow sibling properties through `typeof b.x` on a union
+  of object types (needs unit-type discriminants; verified against TS
+  5.9 before building Phase 4 on it — the D5 sketch had assumed
+  otherwise). Correlated evals go through arktype `match`.
+- `src/runtime/types.ts` used to contain a RAW NUL byte as the
+  assignability-cache key separator (git flagged the whole file binary),
+  while the overlap cache used a space — which collides, since arktype
+  expressions contain spaces ("a b"+"c d" vs "a"+"b c d"). Both now use
+  the ESCAPED `"\0"`. When writing cache keys from expressions, never
+  use a printable separator, and never a literal control byte.
+- A bare arktype matcher/Type as `eval` crashes inside arktype
+  ("Cannot read properties of undefined (reading 'push')"): eval's
+  second argument (runtimeValues) lands in arktype's internal traversal-
+  context slot. Always wrap: `eval: (b) => impl(b)`.
 
 ### Deliberate divergences (documented, not bugs)
 
@@ -403,12 +484,6 @@ check: ~510k instantiations / ~2.8s.
 
 ### Next up (in plan order)
 
-- **Phase 4**: correlated distributed-union eval bindings (kills the
-  `as any` in fixture `add`; see D5 and the earlier design discussion —
-  generate `{l: string, r: string} | {l: number, r: number}` from
-  binding links; narrowing must go through the object, destructuring
-  severs correlation). Also dev-mode `.allows()` assertion of eval
-  outputs against resultType.
 - **Phase 5**: built-in true/false/null/undefined literals with
   keyword-prefix guards in BOTH engines + string escape processing.
   Escapes are NOT redundant with parsebox — verified empirically
@@ -423,11 +498,14 @@ check: ~510k instantiations / ~2.8s.
 - **Phase 6**: rule-as-arktype-Type (`parser.compile`) → Standard Schema
   ecosystem (react-hook-form/tRPC/hono), ArkErrors with field paths.
 - Toolbox reminder (owner): arktype's `Type.distribute(mapper)` maps
-  over union branches — useful for Phase 4 (enumerating a union
-  constraint's members for correlated-binding generation / dev
-  assertions) and for diagnostics that list every accepted operand form.
+  over union branches — useful for diagnostics that list every accepted
+  operand form. (Phase 4 ended up NOT needing it: correlation runs at
+  the type level over def strings, and the dev assertion checks the
+  already-resolved per-parse Type.)
 - **Phase 7**: DESIGN.md rewrite, Starlight docs + playground update,
-  benchmarks (port shapes from archive), migration notes, version 0.1.0.
+  benchmarks (port shapes from archive), migration notes, release as
+  the next **0.0.x** patch (D10 — never 0.1/0.x; an earlier revision of
+  this bullet said "0.1.0", which was a drafting error).
 
 ### Context that lives outside this repo
 

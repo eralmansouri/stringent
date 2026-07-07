@@ -11,6 +11,7 @@
  * Levels: ternary(0) < eq(1) < add,sub(2) < mul,div(3) < pow(4) < leaf(5)
  */
 
+import { match } from "arktype";
 import {
   defineNode,
   number,
@@ -22,6 +23,7 @@ import {
   constVal,
   overlapping,
   createParser,
+  type InferEvaluatedBindings,
 } from "../index.js";
 
 export const numberLit = defineNode({
@@ -79,17 +81,33 @@ export const eq = defineNode({
 
 /** Overloaded add: number+number → number, string+string → string.
  *  lhs(...) tail → the level folds left-associatively.
- *  TODO(Phase 4): correlated bindings remove the casts. */
+ *
+ *  The binding reference correlates the operands, so eval's parameter is
+ *  the distributed union { left: number; right: number } | { left: string;
+ *  right: string }. TS can't narrow sibling properties through a typeof
+ *  check, so the idiomatic polymorphic eval is arktype's match: one case
+ *  per union branch, no casts. */
+const addPattern = [
+  lhs("number | string").as("left"),
+  constVal("+"),
+  lhs("left").as("right"),
+] as const;
+
+const addImpl = match
+  .in<InferEvaluatedBindings<typeof addPattern>>()
+  .case({ left: "number", right: "number" }, (b) => b.left + b.right)
+  .case({ left: "string", right: "string" }, (b) => b.left + b.right)
+  .default("assert");
+
 export const add = defineNode({
   name: "add",
-  pattern: [
-    lhs("number | string").as("left"),
-    constVal("+"),
-    lhs("left").as("right"),
-  ],
+  pattern: addPattern,
   precedence: 2,
   resultType: "left",
-  eval: ({ left, right }) => (left as any) + (right as any),
+  // wrap the matcher: eval is CALLED as (bindings, runtimeValues), and a
+  // bare arktype matcher would treat the second argument as its internal
+  // traversal context and crash
+  eval: (b) => addImpl(b),
 });
 
 export const sub = defineNode({
