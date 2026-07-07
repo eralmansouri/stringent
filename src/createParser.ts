@@ -72,7 +72,7 @@ type AstFor<
   : AnyAstNode;
 
 /** The evaluated result type for a literal input */
-type EvaluateResult<
+export type EvaluateResult<
   TGrammar extends Grammar,
   TInput extends string,
   TSchema extends SchemaShape
@@ -128,7 +128,7 @@ type TrimWs<S extends string> = S extends
  * (trailing whitespace allowed, matching safeParse). Dynamic strings and
  * invalid literals resolve to never — use safeParse for runtime input.
  */
-type ValidatedInput<
+export type ValidatedInput<
   TGrammar extends Grammar,
   TInput extends string,
   $ extends Context
@@ -155,11 +155,14 @@ type ValidatedInput<
  * fully checked at runtime instead.
  *
  * Schema-leaf validation: safeParse validates leaves eagerly via
- * type.validate. parse/evaluate cannot (arktype's validate in a sibling
- * parameter breaks the input conditional's generic inference — measured,
- * not theoretical), so bad leaf defs there surface through the input
- * check ("unknown"-typed identifiers fail constrained slots) and at
- * runtime with a precise message.
+ * type.validate. parse/evaluate cannot: with their deferred-conditional
+ * input parameter, a validate-wrapped schema sits on TS's instantiation
+ * edge and inference becomes METASTABLE — the identical call typechecks
+ * or collapses to never depending on declaration order elsewhere in the
+ * file (demonstrated; see design-claims.typetest.ts and the V2-PLAN.md
+ * gotcha). Bad leaf defs there surface through the input check
+ * ("unknown"-typed identifiers fail constrained slots) and at runtime
+ * with a precise message.
  */
 export interface Parser<
   TGrammar extends Grammar,

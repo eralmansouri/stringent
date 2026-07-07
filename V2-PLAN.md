@@ -514,7 +514,12 @@ check: ~678k instantiations / ~2.7s.
   conditional like Parse<> (a shallow replica infers fine). Hence:
   `evaluate()` wraps values in `NoInfer` (removes the candidate), and
   eager leaf validation lives on `safeParse` only. Don't "fix" by
-  intersecting — probed exhaustively.
+  intersecting — probed exhaustively. REFINED (2026-07-07, bisected in
+  design-claims.typetest.ts): the values-candidate leak is the
+  DETERMINISTIC half; `type.validate` on the schema of a
+  conditional-input signature is the METASTABLE half — the same call
+  passes or collapses to never depending on declaration order in the
+  file (it even typechecks project-wide today), so it must never ship.
 - Deep-equality test assertions see enumerable symbol props → the parsed
   Type rides on a NON-enumerable symbol (`OUTPUT_TYPE`, set via
   `setOutputType`).

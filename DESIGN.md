@@ -66,10 +66,16 @@ Validation happens at three layers:
    silently dead grammar rule).
 2. Schema leaves are checked at **compile time** via `type.validate` on
    `safeParse` (a typo'd `{ x: "numbr" }` errors at the leaf).
-   `parse`/`evaluate` cannot carry that validator — arktype's `validate` as
-   a sibling of the conditionally-typed input parameter poisons generic
-   inference (measured; see V2-PLAN.md) — so bad leaves there surface
-   through the input check and at runtime.
+   `parse`/`evaluate` cannot carry that validator, for two demonstrated
+   reasons (design-claims.typetest.ts): (a) a bare `type.infer<TSchema>`
+   values parameter DETERMINISTICALLY poisons inference — TS admits the
+   values argument as a candidate and unions it in (`TSchema` fixes to
+   `{x: "number"} | {x: 41}`, whose `41` leaf is not a def) — which is
+   why `evaluate`'s values are `NoInfer`-wrapped; and (b) with their
+   deferred-conditional input parameter, a `validate`-wrapped schema is
+   METASTABLE: the identical call typechecks or collapses to `never`
+   depending on declaration order elsewhere in the file. So bad leaves
+   there surface through the input check and at runtime.
 3. Schemas are compiled at **runtime** in the parser's scope, covering
    dynamically-built schemas. Schema errors throw — they are programmer
    errors, distinct from input errors, which never throw.
