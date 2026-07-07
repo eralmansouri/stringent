@@ -38,9 +38,10 @@ build — hover them to see the actual inferred types.
   `"number > 0"`, `"string.email"`), and constraint matching is
   **assignability**, not name equality. Binding names are automatically in
   scope: `rest("left")` means "assignable to whatever `left` parsed as".
-- **Structured runtime errors** — `safeParse()` never throws for input. You
-  get an error code (`PARSE_ERROR` / `TYPE_MISMATCH` / `UNEXPECTED_INPUT`), a
-  0-based position, and the tokens that would have been valid there.
+- **Structured runtime errors** — `safeParse()` never throws. You get an
+  error code (`PARSE_ERROR` / `TYPE_MISMATCH` / `UNEXPECTED_INPUT` /
+  `INVALID_SCHEMA`), a 0-based position, and the tokens that would have been
+  valid there.
 - **Rules as Standard Schemas** — `parser.compile()` turns a rule into a real
   arktype `Type`: cross-field predicate rules validate a values object with
   field-attributed `ArkErrors`, so a rule drops straight into
@@ -61,41 +62,62 @@ ESM-only. Depends on [arktype](https://arktype.io) (the type engine) and
 
 ## Quickstart
 
-Each `defineNode` call declares one grammar rule: a pattern of elements, a
-precedence, and (usually) a result type and evaluation function. Two element
-roles place subexpressions: `operand()` parses at the next tighter precedence
-level, `rest()` parses at the current level — and the *tail* element's role
-is what makes a level left- or right-associative (an `operand()` tail folds
-left; a `rest()` tail recurses right).
+Each `defineNode` call declares one grammar rule, authored as a fluent
+builder chain: elements left to right, `.as(name)` naming bindings,
+`.result(def)` declaring the result type, `.eval(fn)` attaching evaluation.
+Every arktype def is validated where it is written — a typo like
+`operand("nmbr")` is a compile error at that call. Two element roles place
+subexpressions: `operand()` parses at the next tighter precedence level,
+`rest()` parses at the current level — and the *tail* element's role is what
+makes a level left- or right-associative (an `operand()` tail folds left; a
+`rest()` tail recurses right).
 
 ```typescript
-import {
-  defineNode, number, path, operand, rest, constVal, createParser,
-} from "stringent";
+import { defineNode, createParser } from "stringent";
 
 // Leaf nodes live at the HIGHEST precedence level.
 // Single-element passthrough patterns take no resultType.
-const numberLit = defineNode({ name: "num", pattern: [number()], precedence: 4 });
-const variable  = defineNode({ name: "var", pattern: [path()], precedence: 4 });
+const numberLit = defineNode({
+  name: "num",
+  precedence: 4,
+  pattern: (p) => p.number(),
+});
+const variable  = defineNode({
+  name: "var",
+  precedence: 4,
+  pattern: (p) => p.path(),
+});
 
 // ONE overloaded add: number+number → number, string+string → string.
 // "number | string" is an arktype def; "left" is a binding reference.
 // The operand() tail makes the level LEFT-associative: 1+2+3 = (1+2)+3.
 const add = defineNode({
   name: "add",
-  pattern: [operand("number | string").as("left"), constVal("+"), operand("left").as("right")],
-  precedence: 2,            // lower = binds looser
-  resultType: "left",       // derived: whatever `left` parsed as
-  eval: (b) => (typeof b.left === "string" ? `${b.left}${b.right}` : Number(b.left) + Number(b.right)),
+  precedence: 2,
+  pattern: (p) =>
+    p
+      .operand("number | string").as("left")
+      .constVal("+")
+      .operand("left").as("right")
+      .result("left")
+      .eval((b) => {
+        const l = b.left(); // bindings arrive as memoized thunks
+        const r = b.right();
+        return typeof l === "string" ? `${l}${String(r)}` : Number(l) + Number(r);
+      }),
 });
 
 // A rest() tail makes a level RIGHT-associative: 2^3^2 = 2^(3^2)
 const pow = defineNode({
   name: "pow",
-  pattern: [operand("number").as("left"), constVal("^"), rest("number").as("right")],
-  precedence: 3,            // higher = binds tighter
-  resultType: "number",
-  eval: ({ left, right }) => left ** right,
+  precedence: 3,
+  pattern: (p) =>
+    p
+      .operand("number").as("left")
+      .constVal("^")
+      .rest("number").as("right")
+      .result("number")
+      .eval(({ left, right }) => left() ** right()),
 });
 
 const parser = createParser([numberLit, variable, add, pow] as const);
@@ -142,10 +164,11 @@ rule({ values: { password: "a", confirmPassword: "b" } }); // → ArkErrors, fla
 // rule is a Standard Schema — pass it to react-hook-form, tRPC, hono, …
 ```
 
-There's more — quoted strings with escapes, `true`/`false`/`null`/`undefined`
-literals, parentheses, lazy short-circuiting ternaries, polymorphic evals via
-arktype `match` over correlated bindings, nested schemas with dotted-path
-member access (`values.password`), and construction-time grammar validation:
+There's more — quoted strings with escapes, keyword literals as plain const
+nodes, parentheses, short-circuiting ternaries (evaluation is uniformly
+lazy), polymorphic evals via arktype `match`, nested schemas with dotted-path
+member access (`values.password`), and compile-time + construction-time
+grammar validation:
 
 - [Getting started](https://eralmansouri.github.io/stringent/guides/getting-started/)
   — the full quickstart with hover-able types

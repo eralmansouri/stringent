@@ -21,21 +21,34 @@ hero:
 import { Card, CardGrid, LinkCard, Tabs, TabItem } from "@astrojs/starlight/components";
 
 ```ts twoslash
-import {
-  defineNode, number, string, path, operand, rest, constVal,
-  overlapping, createParser,
-} from "stringent";
+import { defineNode, overlapping, createParser } from "stringent";
 
-const numberLit = defineNode({ name: "num", pattern: [number()], precedence: 2 });
-const stringLit = defineNode({ name: "str", pattern: [string(['"', "'"])], precedence: 2 });
-const variable = defineNode({ name: "var", pattern: [path()], precedence: 2 });
+const numberLit = defineNode({
+  name: "num",
+  precedence: 2,
+  pattern: (p) => p.number(),
+});
+const stringLit = defineNode({
+  name: "str",
+  precedence: 2,
+  pattern: (p) => p.string(['"', "'"]),
+});
+const variable = defineNode({
+  name: "var",
+  precedence: 2,
+  pattern: (p) => p.path(),
+});
 
 const eq = defineNode({
   name: "eq",
-  pattern: [operand().as("left"), constVal("=="), rest(overlapping("left")).as("right")],
   precedence: 1,
-  resultType: "boolean",
-  eval: ({ left, right }) => left() === right(),
+  pattern: (p) =>
+    p
+      .operand().as("left")
+      .constVal("==")
+      .rest(overlapping("left")).as("right")
+      .result("boolean")
+      .eval(({ left, right }) => left() === right()),
 });
 
 const parser = createParser([numberLit, stringLit, variable, eq] as const);
@@ -64,55 +77,94 @@ You declare each rule once — as data. The same declaration drives a
 
     ```ts twoslash
     // @errors: 2345
-    import {
-      defineNode, number, string, path, operand, rest, expr,
-      constVal, overlapping, createParser,
-    } from "stringent";
+    import { defineNode, overlapping, createParser } from "stringent";
 
     // Leaf nodes live at the HIGHEST precedence level
-    const numberLit = defineNode({ name: "num", pattern: [number()], precedence: 4 });
-    const stringLit = defineNode({ name: "str", pattern: [string(['"', "'"])], precedence: 4 });
-    const trueLit   = defineNode({ name: "true",  pattern: [constVal("true")],  precedence: 4, resultType: "boolean", eval: () => true });
-   const falseLit  = defineNode({ name: "false", pattern: [constVal("false")], precedence: 4, resultType: "boolean", eval: () => false });
-    const variable  = defineNode({ name: "var", pattern: [path()], precedence: 4 });
+    const numberLit = defineNode({
+      name: "num",
+      precedence: 4,
+      pattern: (p) => p.number(),
+    });
+    const stringLit = defineNode({
+      name: "str",
+      precedence: 4,
+      pattern: (p) => p.string(['"', "'"]),
+    });
+    const trueLit   = defineNode({
+      name: "true",
+      precedence: 4,
+      pattern: (p) =>
+        p
+          .constVal("true")
+          .result("boolean")
+          .eval(() => true),
+    });
+   const falseLit  = defineNode({
+     name: "false",
+     precedence: 4,
+     pattern: (p) =>
+       p
+         .constVal("false")
+         .result("boolean")
+         .eval(() => false),
+   });
+    const variable  = defineNode({
+      name: "var",
+      precedence: 4,
+      pattern: (p) => p.path(),
+    });
 
     const eq = defineNode({
       name: "eq",
-      pattern: [operand().as("left"), constVal("=="), rest(overlapping("left")).as("right")],
       precedence: 1,
-      resultType: "boolean",
-      eval: ({ left, right }) => left() === right(),
+      pattern: (p) =>
+        p
+          .operand().as("left")
+          .constVal("==")
+          .rest(overlapping("left")).as("right")
+          .result("boolean")
+          .eval(({ left, right }) => left() === right()),
     });
 
     const add = defineNode({
       name: "add",
-      pattern: [operand("number | string").as("left"), constVal("+"), operand("left").as("right")],
       precedence: 2,
-      resultType: "left",
-      eval: (b) => {
+      pattern: (p) =>
+        p
+          .operand("number | string").as("left")
+          .constVal("+")
+          .operand("left").as("right")
+          .result("left")
+          .eval((b) => {
         const l = b.left(), r = b.right();
         return typeof l === "string" ? `${l}${String(r)}` : Number(l) + Number(r);
-      },
+      }),
     });
 
     const mul = defineNode({
       name: "mul",
-      pattern: [operand("number").as("left"), constVal("*"), operand("number").as("right")],
       precedence: 3,
-      resultType: "number",
-      eval: ({ left, right }) => left() * right(),
+      pattern: (p) =>
+        p
+          .operand("number").as("left")
+          .constVal("*")
+          .operand("number").as("right")
+          .result("number")
+          .eval(({ left, right }) => left() * right()),
     });
 
     const ternary = defineNode({
       name: "ternary",
-      pattern: [
-        operand("boolean").as("cond"), constVal("?"),
-        expr().as("then"), constVal(":"),
-        rest("then").as("else"),
-      ],
       precedence: 0,
-      resultType: "then",
-      eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
+      pattern: (p) =>
+        p
+          .operand("boolean").as("cond")
+          .constVal("?")
+          .expr().as("then")
+          .constVal(":")
+          .rest("then").as("else")
+          .result("then")
+          .eval(({ cond, then, else: alt }) => (cond() ? then() : alt())),
     });
 
     const parser = createParser(

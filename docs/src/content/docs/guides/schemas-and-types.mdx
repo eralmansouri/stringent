@@ -96,14 +96,18 @@ Together they give polymorphic operators without per-type variants:
 // number+number → number, string+string → string, number+string → TYPE_MISMATCH
 const add = defineNode({
   name: "add",
-  pattern: [operand("number | string").as("left"), constVal("+"), operand("left").as("right")],
   precedence: 2,
-  resultType: "left",
-  eval: (b) => {
+  pattern: (p) =>
+    p
+      .operand("number | string").as("left")
+      .constVal("+")
+      .operand("left").as("right")
+      .result("left")
+      .eval((b) => {
     const left = b.left();
     const right = b.right();
     return typeof left === "string" ? `${left}${String(right)}` : Number(left) + Number(right);
-  },
+  }),
 });
 ```
 

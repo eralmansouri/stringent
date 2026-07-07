@@ -216,3 +216,139 @@ type EqOut = PMaybeDemo extends [{ outputSchema: infer O }, string]
 type _t3 = AssertTrue<AssertExtends<EqOut, boolean>>;
 
 export {};
+
+// =============================================================================
+// DESIGN: the pattern builder validates every def WHERE IT IS WRITTEN —
+// arktype's validate runs in each chained call with the bindings
+// accumulated so far as scope aliases. These pins are the compile-time
+// twins of createParser's construction checks.
+// =============================================================================
+
+import { defineNode, overlapping, type PatternBuilder } from "./index.js";
+
+// a typo'd def errors AT the chained call, with arktype's own message
+defineNode({
+  name: "typo",
+  precedence: 1,
+  pattern: (p) =>
+    // @ts-expect-error — "nmbr" is unresolvable
+    p.operand("nmbr").as("l").constVal("!").rest().as("r").result("boolean"),
+});
+
+// whole-string and EMBEDDED binding references compile (the accumulated
+// bindings are scope aliases), and so do object result defs embedding them
+defineNode({
+  name: "refs",
+  precedence: 1,
+  pattern: (p) =>
+    p
+      .operand("number | string").as("left")
+      .constVal("~")
+      .rest("left | null").as("right")
+      .result({ value: "left | null" })
+      .eval(({ left }) => ({ value: left() })),
+});
+
+// a binding reference at position 0 fails — no earlier operand exists
+defineNode({
+  name: "posZero",
+  precedence: 1,
+  pattern: (p) =>
+    // @ts-expect-error — "left" is not in scope yet
+    p.operand("left").as("l").constVal("!").rest().as("r").result("boolean"),
+});
+
+// a refinement on a reference fails INSIDE arktype: the alias is typed
+// unknown, and bounds require number/string/Array/Date — the compile-time
+// twin of "refinements must live on the referenced operand's own constraint"
+defineNode({
+  name: "refRefine",
+  precedence: 1,
+  pattern: (p) =>
+    // @ts-expect-error — bounded expression on an unknown alias
+    p.operand("number").as("l").constVal("!").rest("l > 5").as("r").result("boolean"),
+});
+
+// overlapping() must reference an earlier non-const binding
+defineNode({
+  name: "badOverlap",
+  precedence: 1,
+  pattern: (p) =>
+    // @ts-expect-error — no earlier binding "nope"
+    p.operand().as("l").constVal("==").rest(overlapping("nope")).as("r").result("boolean"),
+});
+
+// .as() rejects names that shadow resolvable types, collide with AST
+// structure, or repeat within the pattern
+defineNode({
+  name: "shadow",
+  precedence: 1,
+  // @ts-expect-error — "string" is a resolvable type
+  pattern: (p) => p.operand().as("string").constVal("!").result("boolean"),
+});
+defineNode({
+  name: "reserved",
+  precedence: 1,
+  // @ts-expect-error — "node" collides with AST structure
+  pattern: (p) => p.operand().as("node").constVal("!").result("boolean"),
+});
+defineNode({
+  name: "dup",
+  precedence: 1,
+  pattern: (p) =>
+    // @ts-expect-error — "v" is already used in this pattern
+    p.operand().as("v").constVal("#").rest().as("v").result("boolean"),
+});
+
+// const bindings carry matched text, not a type — they never enter the
+// scope, so constraints and result defs cannot reference them
+defineNode({
+  name: "constRef",
+  precedence: 1,
+  pattern: (p) =>
+    // @ts-expect-error — "b" names a const binding
+    p.operand().as("l").constVal("!").as("b").rest("b").as("r").result("boolean"),
+});
+
+// result defs are validated too
+defineNode({
+  name: "badResult",
+  precedence: 1,
+  // @ts-expect-error — "nmbr" is unresolvable
+  pattern: (p) => p.operand("number").as("n").constVal("!").result("nmbr"),
+});
+
+// =============================================================================
+// DESIGN: WHY .result()/.eval() are CHAIN methods, not config siblings —
+// a pattern-dependent sibling property makes TypeScript fix the pattern
+// tuple prematurely (order-sensitive inference, the same class of
+// failure as the metastability above). A config-object shape with a
+// contextually-typed eval sibling infers `readonly PatternSchema[]`
+// instead of the tuple when eval precedes pattern in source order.
+// Demonstrated with a minimal defineNode-like signature:
+// =============================================================================
+
+declare function configStyle<const TPattern extends readonly unknown[]>(config: {
+  pattern: (p: PatternBuilder) => { "~pattern": TPattern };
+  eval?: (b: TPattern) => unknown;
+}): TPattern;
+
+// eval BEFORE pattern: TPattern collapses to the constraint — the tuple
+// is lost (only the length assertion below keeps this honest)
+const collapsed = configStyle({
+  eval: (b) => b,
+  pattern: (p) => p.number(),
+});
+type _collapsed = AssertTrue<
+  AssertEqual<typeof collapsed extends readonly [unknown] ? true : false, false>
+>;
+// pattern BEFORE eval: the tuple survives — same call, different property
+// order. An API whose types depend on property order is unshippable;
+// the chain has no such sibling by construction.
+const survives = configStyle({
+  pattern: (p) => p.number(),
+  eval: (b) => b,
+});
+type _survives = AssertTrue<
+  AssertEqual<typeof survives extends readonly [unknown] ? true : false, true>
+>;

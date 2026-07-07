@@ -126,7 +126,7 @@ export type ExprRole = "operand" | "rest" | "expr";
 
 /** Recursive expression pattern element with optional constraint and role */
 export interface ExprSchema<
-  TConstraint extends ConstraintSpec = ConstraintSpec,
+  TConstraint extends ConstraintSpec | undefined = ConstraintSpec | undefined,
   TRole extends ExprRole = ExprRole
 > extends Schema<"expr"> {
   readonly constraint?: TConstraint;
@@ -140,7 +140,7 @@ export type PatternSchemaBase =
   | IdentSchema
   | PathSchema
   | ConstSchema<string>
-  | ExprSchema<ConstraintSpec, ExprRole>;
+  | ExprSchema;
 
 // =============================================================================
 // Named Schema (for .as() bindings)
@@ -166,125 +166,296 @@ export type NamedSchema<
 /** Union of all pattern element schemas (including named) */
 export type PatternSchema = PatternSchemaBase | NamedSchema;
 
-/**
- * Schema wrapper with .as() method for naming bindings.
- * All pattern factories return this type.
- */
-export type SchemaWithAs<TSchema extends PatternSchemaBase> = TSchema & {
-  /** Add a binding name to this pattern element */
-  as<TName extends string>(name: TName): NamedSchema<TSchema, TName>;
-};
+// =============================================================================
+// Pattern Builder
+// =============================================================================
+//
+// Patterns are authored through a FLUENT BUILDER so every arktype def the
+// user writes is validated where it is written, against the bindings
+// accumulated so far in the chain (the same idiom as arktype's own
+// fluent APIs). `operand("nmbr")` is a compile error AT that call;
+// `operand("left")` and `rest("left | null")` compile because `left` is
+// in the chain's scope. `.result()` and `.eval()` live IN the chain too:
+// a pattern-dependent sibling property in the defineNode config makes
+// TypeScript's tuple inference order-sensitive (measured — pinned in
+// design-claims.typetest.ts "builder inference"), while chain methods
+// see the pattern's types locally and are order-robust by construction.
+//
+// The builder is a construction-and-validation device ONLY: what it
+// produces — and what NodeSchema stores — is the same declarative
+// pattern tuple both engines interpret (semantics stay data).
 
-/** Create a schema wrapper with .as() method */
-function withAs<TSchema extends PatternSchemaBase>(
-  schema: TSchema
-): TSchema & { as<TName extends string>(name: TName): NamedSchema<TSchema, TName> } {
-  return Object.assign(schema, {
-    as<TName extends string>(name: TName): NamedSchema<TSchema, TName> {
-      return { ...schema, __named: true as const, name };
-    },
-  });
+/** Binding names that would collide with AST node structure or JS proto
+ *  setter semantics (compile-time twin of the createParser check). */
+type ReservedBindingName = "node" | "outputSchema" | "__proto__";
+
+/** The chain's accumulated binding scope: binding name → `unknown`
+ *  (references validate structurally; their concrete types are resolved
+ *  per parse). Const bindings are EXCLUDED — they carry matched text,
+ *  not a type, so constraints and result defs may not reference them
+ *  (mirrors the runtime's template classification). */
+type BindingScope = Record<string, unknown>;
+
+/** Binding names already used anywhere in the pattern (const bindings
+ *  included) — for duplicate detection in `.as()`. */
+type UsedNames<TPattern extends readonly PatternSchema[]> =
+  ExtractNamedSchemas<TPattern>["name"];
+
+/** Validate an overlapping() target: it must name an earlier non-const
+ *  binding in the chain. */
+type ValidateOverlapsTarget<
+  B extends string,
+  $ extends BindingScope
+> = B extends keyof $
+  ? B
+  : `overlapping('${B}') must reference an earlier non-const binding`;
+
+/**
+ * Validate a binding name: not a duplicate, not reserved, and not itself
+ * a resolvable type (a binding name that is also a def would be
+ * ambiguous — the compile-time twin of the construction-time rule).
+ */
+type ValidateBindingName<
+  TName extends string,
+  TPattern extends readonly PatternSchema[]
+> = TName extends UsedNames<TPattern>
+  ? `binding '${TName}' is already used in this pattern`
+  : TName extends ReservedBindingName
+  ? `binding '${TName}' would collide with AST node structure`
+  : [type.validate<TName>] extends [TName]
+  ? `binding '${TName}' shadows a resolvable type — pick a name that is not a type`
+  : TName;
+
+/** How a named element extends the constraint scope: const bindings
+ *  carry text, not a type — they never enter the scope. */
+type ScopeAdd<
+  TElement extends PatternSchemaBase,
+  TName extends string,
+  $ extends BindingScope
+> = TElement extends ConstSchema ? $ : $ & { [K in TName]: unknown };
+
+/**
+ * The pattern builder. Each element method appends one element and
+ * returns a builder whose LAST element can be named with `.as()`;
+ * `.result()` (trailing) declares the node's result type, after which
+ * `.eval()` attaches an evaluation function checked against it.
+ *
+ * The `"~"`-prefixed properties carry the accumulated state for
+ * defineNode's inference — they are internal.
+ */
+export interface PatternBuilder<
+  TPattern extends readonly PatternSchema[] = readonly [],
+  $ extends BindingScope = {}
+> {
+  readonly "~pattern": TPattern;
+  readonly "~resultType": undefined;
+  readonly "~eval": undefined;
+
+  /** Append a number literal element */
+  number(): NameableBuilder<TPattern, $, NumberSchema>;
+
+  /** Append a string literal element, e.g. `p.string(['"', "'"])` —
+   *  escapes are processed */
+  string<const TQuotes extends readonly string[]>(
+    quotes: TQuotes
+  ): NameableBuilder<TPattern, $, StringSchema<TQuotes>>;
+
+  /** Append an identifier element (single segment, no dots) */
+  ident(): NameableBuilder<TPattern, $, IdentSchema>;
+
+  /** Append a member-access path element: matches `ident(.ident)*`
+   *  (e.g. `values.password`), type resolved by walking the schema.
+   *  Whitespace around the dots is not allowed. */
+  path(): NameableBuilder<TPattern, $, PathSchema>;
+
+  /**
+   * Append a constant element. IDENTIFIER-LIKE values
+   * (`constVal("null")`, `constVal("and")`) match only as a WHOLE
+   * identifier — `nullable` or `andy` never match (word-boundary rule;
+   * pinned in design-claims). Other values (`"+"`, `"=="`) match as raw
+   * text. Keyword literals are ordinary const-pattern nodes:
+   *
+   * @example
+   * const nullLit = defineNode({
+   *   name: "null",
+   *   precedence: 5,
+   *   pattern: (p) => p.constVal("null").result("null").eval(() => null),
+   * });
+   */
+  constVal<const TValue extends string>(
+    value: TValue
+  ): NameableBuilder<TPattern, $, ConstSchema<TValue>>;
+
+  /**
+   * Append a TIGHTER-LEVEL expression element.
+   *
+   * Parses at the next-higher grammar level, avoiding left-recursion.
+   * A pattern whose final operand is operand() makes its level
+   * LEFT-associative (the engine folds repetitions: `a-b-c` → `(a-b)-c`).
+   *
+   * Constraint forms: operand("number"), operand("string | number"),
+   * operand("left") (a binding reference — not valid at position 0,
+   * where no earlier operand exists), operand().
+   */
+  operand(): NameableBuilder<TPattern, $, ExprSchema<undefined, "operand">>;
+  operand<const C extends string>(
+    constraint: type.validate<C, $>
+  ): NameableBuilder<TPattern, $, ExprSchema<C, "operand">>;
+  operand<const B extends string>(
+    constraint: OverlapsRef<ValidateOverlapsTarget<B, $>>
+  ): NameableBuilder<TPattern, $, ExprSchema<OverlapsRef<B>, "operand">>;
+
+  /**
+   * Append a CURRENT-LEVEL expression element.
+   *
+   * Parses at the same level. A pattern whose final operand is rest()
+   * makes its level RIGHT-associative (`a ^ b ^ c` → `a ^ (b ^ c)`).
+   *
+   * Constraint forms: rest("number"), rest("left"), rest("left | null"),
+   * rest(overlapping("left")), rest().
+   */
+  rest(): NameableBuilder<TPattern, $, ExprSchema<undefined, "rest">>;
+  rest<const C extends string>(
+    constraint: type.validate<C, $>
+  ): NameableBuilder<TPattern, $, ExprSchema<C, "rest">>;
+  rest<const B extends string>(
+    constraint: OverlapsRef<ValidateOverlapsTarget<B, $>>
+  ): NameableBuilder<TPattern, $, ExprSchema<OverlapsRef<B>, "rest">>;
+
+  /**
+   * Append a FULL expression element.
+   *
+   * Resets to the full grammar (precedence 0). Only for DELIMITED
+   * contexts — every expr() must be followed by at least one constVal in
+   * the same pattern (parentheses' ")", ternary's ":"), otherwise it
+   * would swallow looser operators and break precedence.
+   */
+  expr(): NameableBuilder<TPattern, $, ExprSchema<undefined, "expr">>;
+  expr<const C extends string>(
+    constraint: type.validate<C, $>
+  ): NameableBuilder<TPattern, $, ExprSchema<C, "expr">>;
+  expr<const B extends string>(
+    constraint: OverlapsRef<ValidateOverlapsTarget<B, $>>
+  ): NameableBuilder<TPattern, $, ExprSchema<OverlapsRef<B>, "expr">>;
+
+  /**
+   * Declare the node's result type (trailing — after the last element):
+   * - a binding name ("then") — derived per-parse from that operand
+   * - an arktype def ("boolean", { min: "number", max: "number" }) —
+   *   the node mints a type; defs may EMBED binding references
+   *   ("then | null"), resolved per-parse
+   *
+   * Validated by arktype with the chain's bindings in scope. Required
+   * for every node that CONSTRUCTS a result; only a single-element
+   * passthrough pattern omits it. (The "~resolved" key is reserved —
+   * enforced at construction.)
+   */
+  result<const R extends ResultSpec>(
+    def: type.validate<R, $>
+  ): ResultedBuilder<TPattern, R>;
 }
 
-// =============================================================================
-// Pattern Element Factories
-// =============================================================================
+/** Builder state right after appending an element: chain the next
+ *  element directly, or name this one with `.as()` first. */
+export interface NameableBuilder<
+  TPattern extends readonly PatternSchema[],
+  $ extends BindingScope,
+  TElement extends PatternSchemaBase
+> extends PatternBuilder<readonly [...TPattern, TElement], $> {
+  /** Name the element just appended: it becomes a binding — a field on
+   *  the AST node, a typed thunk in eval's parameter, and (for non-const
+   *  elements) a scope alias for later constraints and the result def. */
+  as<const TName extends string>(
+    name: ValidateBindingName<TName, TPattern>
+  ): PatternBuilder<
+    readonly [...TPattern, NamedSchema<TElement, TName>],
+    ScopeAdd<TElement, TName, $>
+  >;
+}
 
-/** Create a number literal pattern element */
-export const number = () => withAs<NumberSchema>({ kind: "number" });
+/** Builder state after `.result()`: optionally attach `.eval()` —
+ *  its return type is checked against the declared result. */
+export interface ResultedBuilder<
+  TPattern extends readonly PatternSchema[],
+  TResultType extends ResultSpec
+> {
+  readonly "~pattern": TPattern;
+  readonly "~resultType": TResultType;
+  readonly "~eval": undefined;
 
-/** Create a string literal pattern element */
-export const string = <const TQuotes extends readonly string[]>(
-  quotes: TQuotes
-) => withAs<StringSchema<TQuotes>>({ kind: "string", quotes });
+  /**
+   * Attach the node's evaluation function. Bindings arrive as MEMOIZED
+   * THUNKS (evaluation is uniformly lazy — call a binding to evaluate
+   * it; untaken branches never run). The return type is checked against
+   * the declared result.
+   */
+  eval(
+    fn: (
+      bindings: Thunked<InferEvaluatedBindings<TPattern>>
+    ) => EvalReturn<TResultType, TPattern>
+  ): EvaledBuilder<TPattern, TResultType>;
+}
 
-/** Create an identifier pattern element (single segment, no dots) */
-export const ident = () => withAs<IdentSchema>({ kind: "ident" });
+/** Terminal builder state: pattern + result + eval. */
+export interface EvaledBuilder<
+  TPattern extends readonly PatternSchema[],
+  TResultType extends ResultSpec
+> {
+  readonly "~pattern": TPattern;
+  readonly "~resultType": TResultType;
+  readonly "~eval": EvalFn;
+}
 
-/**
- * Create a member-access path pattern element.
- *
- * Matches `ident(.ident)*` — e.g. `values.password` — and resolves the
- * type by walking the schema. Whitespace around the dots is not allowed:
- * `values . password` parses as just `values`.
- */
-export const path = () => withAs<PathSchema>({ kind: "path" });
+/** Any completed chain state defineNode accepts. */
+export type BuiltPattern<
+  TPattern extends readonly PatternSchema[],
+  TResultType extends ResultSpec | undefined
+> = {
+  readonly "~pattern": TPattern;
+  readonly "~resultType": TResultType;
+  readonly "~eval": EvalFn | undefined;
+};
 
-/**
- * Create a constant pattern element.
- *
- * IDENTIFIER-LIKE values (`constVal("null")`, `constVal("and")`) match
- * only as a WHOLE identifier — `nullable` or `andy` never match (word-
- * boundary rule; pinned in design-claims). Other values (`"+"`, `"=="`)
- * match as raw text. Keyword literals are therefore ordinary const-
- * pattern nodes:
- *
- * @example
- * const nullLit = defineNode({
- *   name: "null",
- *   pattern: [constVal("null")],
- *   precedence: 5,
- *   resultType: "null",
- *   eval: () => null,
- * });
- */
-export const constVal = <const TValue extends string>(value: TValue) =>
-  withAs<ConstSchema<TValue>>({ kind: "const", value });
-
-/**
- * Create a TIGHTER-LEVEL expression element.
- *
- * Parses at the next-higher grammar level, avoiding left-recursion.
- * A pattern whose final operand is operand() makes its level LEFT-associative
- * (the engine folds repetitions: `a-b-c` → `(a-b)-c`).
- *
- * Constraint forms: operand("number"), operand("string | number"), operand("left")
- * (a binding reference — not valid at position 0, where no earlier
- * operand exists), operand().
- */
-export const operand = <const TConstraint extends ConstraintSpec>(
-  constraint?: TConstraint
-) =>
-  withAs<ExprSchema<TConstraint, "operand">>({
-    kind: "expr",
-    constraint: constraint,
-    role: "operand",
-  });
-
-/**
- * Create a CURRENT-LEVEL expression element.
- *
- * Parses at the same level. A pattern whose final operand is rest() makes
- * its level RIGHT-associative (`a ** b ** c` → `a ** (b ** c)`).
- *
- * Constraint forms: rest("number"), rest("string | number"), rest("left"),
- * rest().
- */
-export const rest = <const TConstraint extends ConstraintSpec>(
-  constraint?: TConstraint
-) =>
-  withAs<ExprSchema<TConstraint, "rest">>({
-    kind: "expr",
-    constraint: constraint,
-    role: "rest",
-  });
-
-/**
- * Create a FULL expression element.
- *
- * Resets to the full grammar (precedence 0). Only for DELIMITED contexts —
- * every expr() must be followed by at least one constVal in the same
- * pattern (parentheses' ")", ternary's ":"), otherwise it would swallow
- * looser operators and break precedence.
- */
-export const expr = <const TConstraint extends ConstraintSpec>(
-  constraint?: TConstraint
-) =>
-  withAs<ExprSchema<TConstraint, "expr">>({
-    kind: "expr",
-    constraint: constraint,
-    role: "expr",
-  });
+/** Immutable runtime builder: each call returns a fresh builder so a
+ *  stored intermediate chain state stays valid (matching the types). */
+function createBuilder(
+  pattern: readonly PatternSchema[],
+  resultType: ResultSpec | undefined,
+  evalFn: EvalFn | undefined
+): PatternBuilder & NameableBuilder<readonly [], {}, PatternSchemaBase> {
+  const append = (element: PatternSchemaBase) =>
+    createBuilder([...pattern, element], resultType, evalFn);
+  const builder = {
+    "~pattern": pattern,
+    "~resultType": resultType,
+    "~eval": evalFn,
+    number: () => append({ kind: "number" }),
+    string: (quotes: readonly string[]) => append({ kind: "string", quotes }),
+    ident: () => append({ kind: "ident" }),
+    path: () => append({ kind: "path" }),
+    constVal: (value: string) => append({ kind: "const", value }),
+    operand: (constraint?: ConstraintSpec) =>
+      append({ kind: "expr", constraint, role: "operand" }),
+    rest: (constraint?: ConstraintSpec) =>
+      append({ kind: "expr", constraint, role: "rest" }),
+    expr: (constraint?: ConstraintSpec) =>
+      append({ kind: "expr", constraint, role: "expr" }),
+    as: (name: string) => {
+      const last = pattern[pattern.length - 1];
+      if (last === undefined) {
+        throw new Error("stringent: .as() requires a preceding element");
+      }
+      return createBuilder(
+        [...pattern.slice(0, -1), { ...last, __named: true, name } as never],
+        resultType,
+        evalFn
+      );
+    },
+    result: (def: ResultSpec) => createBuilder(pattern, def, evalFn),
+    eval: (fn: EvalFn) => createBuilder(pattern, resultType, fn),
+  };
+  return builder as never;
+}
 
 // =============================================================================
 // Node Definition Schema
@@ -392,29 +563,27 @@ type EvalScope<TPattern extends readonly PatternSchema[]> = {
 /**
  * Define a node type for the grammar.
  *
- * The `const` modifier on generics ensures literal types are preserved.
- * resultType may be:
- * - an arktype def ("boolean", { min: "number", max: "number" }) — the
- *   node mints a type
- * - a binding name ("then") — derived per-parse from that operand
- * - omitted — only for single-element passthrough patterns
- *
- * Evaluation is uniformly lazy: eval receives each binding as a MEMOIZED
- * THUNK (`() => value`). Call a binding to evaluate it; untaken branches
- * are never evaluated, so short-circuit semantics (ternary, &&, ||) need
- * no opt-in.
+ * The pattern is authored through a fluent builder (see PatternBuilder):
+ * elements chain left to right, `.as(name)` names the element just
+ * appended, `.result(def)` declares the node's result type (a binding
+ * name, or an arktype def — validated against the chain's bindings), and
+ * `.eval(fn)` attaches evaluation (bindings arrive as memoized thunks;
+ * the return type is checked against the declared result). Every def is
+ * validated by arktype WHERE IT IS WRITTEN — a typo like operand("nmbr")
+ * is a compile error at that call.
  *
  * @example A polymorphic, short-circuiting ternary:
  * const ternary = defineNode({
  *   name: "ternary",
- *   pattern: [
- *     operand("boolean").as("cond"), constVal("?"),
- *     expr().as("then"), constVal(":"),
- *     rest("then").as("else"),
- *   ],
  *   precedence: 0,
- *   resultType: "then",
- *   eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
+ *   pattern: (p) => p
+ *     .operand("boolean").as("cond")
+ *     .constVal("?")
+ *     .expr().as("then")
+ *     .constVal(":")
+ *     .rest("then").as("else")
+ *     .result("then")
+ *     .eval(({ cond, then, else: alt }) => (cond() ? then() : alt())),
  * });
  */
 export function defineNode<
@@ -424,14 +593,17 @@ export function defineNode<
   const TResultType extends ResultSpec | undefined = undefined
 >(config: {
   readonly name: TName;
-  readonly pattern: TPattern;
   readonly precedence: TPrecedence;
-  readonly resultType?: TResultType;
-  readonly eval?: (
-    values: Thunked<InferEvaluatedBindings<TPattern>>
-  ) => EvalReturn<NoInfer<TResultType>, TPattern>;
+  readonly pattern: (p: PatternBuilder) => BuiltPattern<TPattern, TResultType>;
 }): NodeSchema<TName, TPattern, TPrecedence, TResultType> {
-  return config as NodeSchema<TName, TPattern, TPrecedence, TResultType>;
+  const built = config.pattern(createBuilder([], undefined, undefined));
+  return {
+    name: config.name,
+    precedence: config.precedence,
+    pattern: built["~pattern"],
+    resultType: built["~resultType"],
+    eval: built["~eval"],
+  } as NodeSchema<TName, TPattern, TPrecedence, TResultType>;
 }
 
 // =============================================================================

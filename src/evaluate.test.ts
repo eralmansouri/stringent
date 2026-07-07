@@ -7,15 +7,8 @@
 import { describe, expect, it } from "vitest";
 import {
   EvaluationError,
-  constVal,
   createParser,
   defineNode,
-  expr,
-  ident,
-  operand,
-  number,
-  path,
-  rest,
 } from "./index.js";
 import { fixtureParser as parser, formSchema } from "./__fixtures__/grammar.js";
 
@@ -171,9 +164,8 @@ describe("evaluate", () => {
   it("throws EvaluationError for nodes without eval", () => {
     const noEval = defineNode({
       name: "wrap",
-      pattern: [path().as("inner")],
       precedence: 1,
-      resultType: "unknown",
+      pattern: (p) => p.path().as("inner").result("unknown"),
     });
     const p = createParser([noEval] as const);
     const parsed = p.safeParse("foo", { foo: "number" });
@@ -189,25 +181,35 @@ describe("evaluate", () => {
     it("memoizes binding thunks: a side-effecting child evaluates once", () => {
       let evaluations = 0;
       const nodes = [
-        defineNode({ name: "n", pattern: [number()], precedence: 2 }),
+        defineNode({
+          name: "n",
+          precedence: 2,
+          pattern: (p) => p.number(),
+        }),
         defineNode({
           name: "tick",
-          pattern: [constVal("tick("), expr("number").as("inner"), constVal(")")],
           precedence: 2,
-          resultType: "number",
-          eval: ({ inner }) => {
+          pattern: (p) =>
+            p
+              .constVal("tick(")
+              .expr("number").as("inner")
+              .constVal(")")
+              .result("number")
+              .eval(({ inner }) => {
             evaluations += 1;
             return inner();
-          },
+          }),
         }),
         defineNode({
           name: "twice",
-          pattern: [operand("number").as("a"), constVal("&"), rest("number").as("b")],
           precedence: 1,
-          resultType: "number",
-          // calls each thunk twice — memoization means children still
-          // evaluate exactly once
-          eval: ({ a, b }) => a() + a() + b() + b(),
+          pattern: (p) =>
+            p
+              .operand("number").as("a")
+              .constVal("&")
+              .rest("number").as("b")
+              .result("number")
+              .eval(({ a, b }) => a() + a() + b() + b()),
         }),
       ] as const;
       const p = createParser(nodes);
@@ -219,13 +221,13 @@ describe("evaluate", () => {
   it("evaluates single-segment ident() elements", () => {
     const numberLit = defineNode({
       name: "n",
-      pattern: [number()],
       precedence: 1,
+      pattern: (p) => p.number(),
     });
     const variable = defineNode({
       name: "v",
-      pattern: [ident()],
       precedence: 1,
+      pattern: (p) => p.ident(),
     });
     const p = createParser([numberLit, variable] as const);
     const parsed = p.safeParse("y", { y: "number" });

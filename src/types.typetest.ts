@@ -24,12 +24,6 @@ import type {
 } from "./index.js";
 import {
   defineNode,
-  operand,
-  rest,
-  expr,
-  constVal,
-  number,
-  string,
 } from "./index.js";
 import { add, eq, fixtureNodes, fixtureParser, formSchema, sub, ternary } from "./__fixtures__/grammar.js";
 
@@ -114,13 +108,21 @@ type _k5 = AssertTrue<
 
 // word-boundary rule for infix identifier-like consts: `andy` never
 // matches constVal("and") (runtime twin in design-claims.test.ts)
-const _wbNum = defineNode({ name: "n", pattern: [number()], precedence: 2 });
+const _wbNum = defineNode({
+  name: "n",
+  precedence: 2,
+  pattern: (p) => p.number(),
+});
 const _wbConj = defineNode({
   name: "and",
-  pattern: [operand("number").as("l"), constVal("and"), rest("number").as("r")],
   precedence: 1,
-  resultType: "number",
-  eval: ({ l, r }) => l() && r(),
+  pattern: (p) =>
+    p
+      .operand("number").as("l")
+      .constVal("and")
+      .rest("number").as("r")
+      .result("number")
+      .eval(({ l, r }) => l() && r()),
 });
 type WbG = ComputeGrammar<[typeof _wbNum, typeof _wbConj]>;
 type _wb1 = AssertTrue<
@@ -134,10 +136,12 @@ type _wb2 = AssertTrue<
 // resultType "true" (arktype unit keyword) and satisfy "boolean" slots
 const _unitTrue = defineNode({
   name: "yes",
-  pattern: [constVal("yes")],
   precedence: 2,
-  resultType: "true",
-  eval: () => true as const,
+  pattern: (p) =>
+    p
+      .constVal("yes")
+      .result("true")
+      .eval(() => true as const),
 });
 type UnitG = ComputeGrammar<[typeof _wbNum, typeof _unitTrue, typeof _wbConj]>;
 type PUnit = Parse<UnitG, "yes", EmptyCtx>;
@@ -334,36 +338,41 @@ fixtureParser.evaluate("x == 1", { x: "number" }, { x: "no" });
 // Embedded binding references (scoped defs; spike/union-defs)
 // =============================================================================
 
-const embNum = defineNode({ name: "num", pattern: [number()], precedence: 2 });
+const embNum = defineNode({
+  name: "num",
+  precedence: 2,
+  pattern: (p) => p.number(),
+});
 const embStr = defineNode({
   name: "str",
-  pattern: [string(["'"])],
   precedence: 2,
+  pattern: (p) => p.string(["'"]),
 });
 const embNull = defineNode({
   name: "null",
-  pattern: [constVal("null")],
   precedence: 2,
-  resultType: "null",
-  eval: () => null,
+  pattern: (p) => p.constVal("null").result("null").eval(() => null),
 });
 const embMaybe = defineNode({
   name: "maybe",
-  pattern: [operand("number | string | null").as("v"), constVal("?")],
   precedence: 1,
-  resultType: "v | null",
-  eval: ({ v }) => v as never,
+  pattern: (p) =>
+    p
+      .operand("number | string | null").as("v")
+      .constVal("?")
+      .result("v | null")
+      .eval(({ v }) => v as never),
 });
 const embPair = defineNode({
   name: "pair",
-  pattern: [
-    operand("number | string").as("l"),
-    constVal("~"),
-    rest("l | null").as("r"),
-  ],
   precedence: 0,
-  resultType: "boolean",
-  eval: ({ l, r }) => l === r,
+  pattern: (p) =>
+    p
+      .operand("number | string").as("l")
+      .constVal("~")
+      .rest("l | null").as("r")
+      .result("boolean")
+      .eval(({ l, r }) => l === r),
 });
 const embNodes = [embNum, embStr, embNull, embMaybe, embPair] as const;
 type EmbG = ComputeGrammar<typeof embNodes>;
@@ -452,16 +461,16 @@ type _b4 = AssertTrue<AssertEqual<SubBindings, { left: number; right: number }>>
 // c references b references a, so all three carry a's def type
 const _chain = defineNode({
   name: "chain3",
-  pattern: [
-    operand("number | string").as("a"),
-    constVal("~"),
-    operand("a").as("b"),
-    constVal("~"),
-    operand("b").as("c"),
-  ],
   precedence: 1,
-  resultType: "a",
-  eval: (b) => b.a(),
+  pattern: (p) =>
+    p
+      .operand("number | string").as("a")
+      .constVal("~")
+      .operand("a").as("b")
+      .constVal("~")
+      .operand("b").as("c")
+      .result("a")
+      .eval((b) => b.a()),
 });
 type ChainBindings = InferEvaluatedBindings<(typeof _chain)["pattern"]>;
 type _b5 = AssertTrue<
@@ -474,10 +483,14 @@ type _b5 = AssertTrue<
 // linked bindings on a non-union constraint resolve to that type
 const _iff = defineNode({
   name: "iff",
-  pattern: [operand("boolean").as("a"), constVal("<=>"), rest("a").as("b")],
   precedence: 1,
-  resultType: "boolean",
-  eval: (b) => b.a() === b.b(),
+  pattern: (p) =>
+    p
+      .operand("boolean").as("a")
+      .constVal("<=>")
+      .rest("a").as("b")
+      .result("boolean")
+      .eval((b) => b.a() === b.b()),
 });
 type IffBindings = InferEvaluatedBindings<(typeof _iff)["pattern"]>;
 type _b6 = AssertTrue<AssertEqual<IffBindings, { a: boolean; b: boolean }>>;
@@ -485,37 +498,53 @@ type _b6 = AssertTrue<AssertEqual<IffBindings, { a: boolean; b: boolean }>>;
 // eval return is verified against resultType for reference-linked patterns
 const _badLinked = defineNode({
   name: "badLinked",
-  pattern: [operand("number | string").as("l"), constVal("&"), rest("l").as("r")],
   precedence: 1,
-  resultType: "l",
-  // @ts-expect-error — eval must return l's type (string | number), not boolean
-  eval: (b) => b.l() === b.r(),
+  pattern: (p) =>
+    p
+      .operand("number | string").as("l")
+      .constVal("&")
+      .rest("l").as("r")
+      .result("l")
+      // @ts-expect-error — eval must return l's type (string | number), not boolean
+      .eval((b) => b.l() === b.r()),
 });
 
 const _badReturn = defineNode({
   name: "badReturn",
-  pattern: [operand("number").as("a"), constVal("!"), rest("number").as("b")],
   precedence: 1,
-  resultType: "boolean",
-  // @ts-expect-error — eval must return boolean, not number
-  eval: ({ a, b }) => a() + b(),
+  pattern: (p) =>
+    p
+      .operand("number").as("a")
+      .constVal("!")
+      .rest("number").as("b")
+      .result("boolean")
+      // @ts-expect-error — eval must return boolean, not number
+      .eval(({ a, b }) => a() + b()),
 });
 
 const _refReturn = defineNode({
   name: "refReturn",
-  pattern: [constVal("("), expr("number").as("inner"), constVal(")")],
   precedence: 1,
-  resultType: "inner",
-  // @ts-expect-error — eval must return inner's type (number), not string
-  eval: ({ inner }) => String(inner()),
+  pattern: (p) =>
+    p
+      .constVal("(")
+      .expr("number").as("inner")
+      .constVal(")")
+      .result("inner")
+      // @ts-expect-error — eval must return inner's type (number), not string
+      .eval(({ inner }) => String(inner())),
 });
 
 const _objReturn = defineNode({
   name: "range",
-  pattern: [operand("number").as("min"), constVal(".."), rest("number").as("max")],
   precedence: 1,
-  resultType: { min: "number", max: "number" },
-  eval: ({ min, max }) => ({ min: min(), max: max() }),
+  pattern: (p) =>
+    p
+      .operand("number").as("min")
+      .constVal("..")
+      .rest("number").as("max")
+      .result({ min: "number", max: "number" })
+      .eval(({ min, max }) => ({ min: min(), max: max() })),
 });
 
 // object resultTypes flow through evaluateAst
@@ -526,6 +555,11 @@ type _o1 = AssertTrue<AssertEqual<typeof rangeVal, { min: number; max: number }>
 // =============================================================================
 // Recursion canaries — pin the measured type-level floors. If a change
 // breaks one of these, literal-mode capacity regressed.
+//
+// Instantiation budget (tsc --extendedDiagnostics, whole project):
+// 1,083,879 before the pattern builder → 1,136,550 with it (2026-07-07)
+// — full definition-site validation of every def costs ~4.9%. Treat
+// ~1.25M as the alarm threshold when adding type-level features.
 // =============================================================================
 
 // left-assoc chains are folded tail-recursively: 30 terms

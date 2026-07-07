@@ -60,38 +60,47 @@ overlap verdicts are memoized per expression pair.
 
 Validation happens at three layers:
 
-1. `createParser` throws for any constraint or resultType that is neither an
-   earlier binding name nor a definition resolvable in the parser's scope (a
-   typo'd `operand("numbr")` is an immediate construction error, not a
-   silently dead grammar rule).
-2. Schema leaves are checked at **compile time** via `type.validate` on
-   `safeParse` (a typo'd `{ x: "numbr" }` errors at the leaf).
-   `parse`/`evaluate` cannot carry that validator, for two demonstrated
-   reasons (design-claims.typetest.ts): (a) a bare `type.infer<TSchema>`
-   values parameter DETERMINISTICALLY poisons inference — TS admits the
-   values argument as a candidate and unions it in (`TSchema` fixes to
-   `{x: "number"} | {x: 41}`, whose `41` leaf is not a def) — which is
-   why `evaluate`'s values are `NoInfer`-wrapped; and (b) with their
+1. **Compile time, at the definition site.** Patterns are authored through
+   a fluent builder whose chained calls validate every def the user
+   writes via arktype's `validate`, with the bindings accumulated so far
+   as scope aliases: `operand("nmbr")` errors AT that call with arktype's
+   own message; `rest("left")` and `rest("left | null")` compile because
+   `left` is in scope; refinements on references, forward/position-0
+   references, const-binding references, duplicate/reserved/type-shadowing
+   binding names, and typo'd result defs all error where they are written
+   (pinned in design-claims.typetest.ts "pattern builder"). `.result()`
+   and `.eval()` are chain methods — NOT config siblings — because a
+   pattern-dependent sibling property makes tuple inference order-
+   sensitive (demonstrated in the same file). Schema leaves are checked
+   via `type.validate` on `safeParse`/`compile`; `parse`/`evaluate`
+   cannot carry that validator, for two demonstrated reasons
+   (design-claims.typetest.ts): (a) a bare `type.infer<TSchema>` values
+   parameter DETERMINISTICALLY poisons inference — which is why
+   `evaluate`'s values are `NoInfer`-wrapped; and (b) with their
    deferred-conditional input parameter, a `validate`-wrapped schema is
    METASTABLE: the identical call typechecks or collapses to `never`
-   depending on declaration order elsewhere in the file. So bad leaves
+   depending on declaration order elsewhere in the file. Bad leaves
    there surface through the input check and at runtime.
-3. Schemas are compiled at **runtime** in the parser's scope, covering
-   dynamically-built schemas. Schema errors throw — they are programmer
-   errors, distinct from input errors, which never throw.
+2. **Construction time.** `createParser` re-checks everything the builder
+   checks (for plain-JS callers) plus the cross-element and cross-node
+   rules types cannot see, and throws with a precise message.
+3. **Runtime.** Schemas are compiled in the parser's scope, covering
+   dynamically-built schemas; `safeParse` returns a structured
+   `INVALID_SCHEMA` error instead of throwing.
 
 ```ts
-// layer 1 — a typo'd constraint kills createParser, not a grammar rule:
-createParser([defineNode({ pattern: [operand("numbr").as("a"), …] })]);
-// ✗ throws: "constraint 'numbr' … 'numbr' is unresolvable"
+// layer 1 — the typo is a COMPILE error at the chained call:
+defineNode({ name: "bad", precedence: 1, pattern: (p) => p.operand("nmbr") });
+//                                                                 ~~~~~~
+// ✗ Argument of type '"nmbr"' is not assignable to "'nmbr' is unresolvable"
 
-// layer 2 — the same typo in a schema leaf is a COMPILE error on safeParse:
+// the same typo in a schema leaf is a COMPILE error on safeParse:
 parser.safeParse("1+1", { x: "numbr" });
 //                            ~~~~~~~ ✗ Type '"numbr"' is not assignable
 //                                      to '"'numbr' is unresolvable"'
 // …but NOT on evaluate (the inference-poisoning limit) — layer 3 catches it:
 parser.evaluate("1+1" as never, { x: "numbr" } as never, { x: 1 } as never);
-// ✗ throws at runtime: "stringent: invalid schema — 'numbr' is unresolvable…"
+// ✗ StringentParseError: "invalid schema — 'numbr' is unresolvable…"
 ```
 
 `"unknown"` is the type of unresolved identifiers/paths. Constrained slots
@@ -140,7 +149,7 @@ A binding reference must name an element *earlier* in the pattern (position
 the pattern with the already-parsed children available — in both engines.
 
 References also work EMBEDDED in larger defs: `rest("left | null")`,
-`resultType: "left | null"`, `resultType: { value: "left" }`. Such
+`.result("left | null")`, `.result({ value: "left" })`. Such
 "template" defs are resolved per parse in a scope extended with the parsed
 sibling types — `scope({ left: <parsed> }).type("left | null")` at runtime
 (memoized by def + alias expressions), `type.infer<"left | null",
@@ -180,8 +189,8 @@ parser.evaluate("age + 1", { age: "number > 0" }, { age: -5 });
 
 | Form | Meaning |
 |---|---|
-| `resultType: "boolean"` | static — the node mints a type (any arktype def, string or object) |
-| `resultType: "then"` | derived — the node's type is whatever the operand bound as `then` parsed as |
+| `.result("boolean")` | static — the node mints a type (any arktype def, string or object) |
+| `.result("then")` | derived — the node's type is whatever the operand bound as `then` parsed as |
 | omitted | only for passthrough patterns (single unnamed non-const element), which forward a child and construct nothing — declaring a type there would be a lie, so it is forbidden |
 
 Derived `outputSchema` is computed per-parse: `evaluate("'a'+'b'", …)` is
@@ -198,7 +207,7 @@ the referenced operand's constraint type; everything else is the element's
 own type:
 
 ```ts
-pattern: [operand("number | string").as("left"), constVal("+"), operand("left").as("right")]
+pattern: (p) => p.operand("number | string").as("left").constVal("+").operand("left").as("right")
 // eval receives: { left: string | number; right: string | number } (as thunks)
 ```
 
@@ -215,8 +224,8 @@ const addImpl = match
   .case({ left: "string", right: "string" }, (b) => b.left + b.right)
   .default("assert");
 
-// bindings are THUNKS — evaluate them, then match:
-eval: (b) => addImpl({ left: b.left(), right: b.right() })
+// bindings are THUNKS — evaluate them, then match (in the chain):
+.result("left").eval((b) => addImpl({ left: b.left(), right: b.right() }))
 ```
 
 The runtime backstop matters because values may straddle the accepted
@@ -261,7 +270,8 @@ included.
   as `10 - (5 == 2)`), so it refuses to build:
 
   ```ts
-  defineNode({ name: "bad", pattern: [operand("number").as("a"), constVal("-"), expr().as("b")], … });
+  defineNode({ name: "bad", precedence: 1, pattern: (p) =>
+    p.operand("number").as("a").constVal("-").expr().as("b").result("number") });
   createParser([num, bad]);
   // ✗ "node 'bad' has an expr() element with no constVal after it — …"
   ```
@@ -288,7 +298,7 @@ included.
 - **Pattern elements**: `number()`, `string(quotes)`, `ident()`, `path()`,
   `constVal(text)`. There is no keyword element — keyword literals are
   ordinary const-pattern nodes
-  (`{ pattern: [constVal("null")], resultType: "null", eval: () => null }`),
+  (`pattern: (p) => p.constVal("null").result("null").eval(() => null)`),
   which works because of the **word-boundary rule**: an identifier-like
   const value matches only as a whole identifier (`nullable` is one
   identifier, never `null` + `able`; `andy` never matches `constVal("and")`
@@ -329,7 +339,7 @@ against the full schema (refinements included) before evaluating.
   "uniform laziness"):
 
   ```ts
-  eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
+  .eval(({ cond, then, else: alt }) => (cond() ? then() : alt()))
   // "1==1 ? 2 : x" with x undefined evaluates to 2 — the else branch
   // never runs (pinned in evaluate.test.ts)
   ```

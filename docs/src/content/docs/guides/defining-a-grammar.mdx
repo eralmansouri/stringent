@@ -11,15 +11,15 @@ with `createParser`. A node is a pattern of elements, a precedence, and
 
 ```ts
 const mul = defineNode({
-  name: "mul",                    // unique node name (appears in the AST)
-  pattern: [                      // what to match, in order
-    operand("number").as("left"),
-    constVal("*"),
-    operand("number").as("right"),
-  ],
-  precedence: 3,                  // binding strength; highest level = leaves
-  resultType: "number",           // the type this node produces (an arktype def)
-  eval: ({ left, right }) => left() * right(),
+  name: "mul",
+  precedence: 3,
+  pattern: (p) =>
+    p
+      .operand("number").as("left")
+      .constVal("*")
+      .operand("number").as("right")
+      .result("number")
+      .eval(({ left, right }) => left() * right()),
 });
 ```
 
@@ -49,10 +49,8 @@ keyword element:
 ```ts
 const nullLit = defineNode({
   name: "null",
-  pattern: [constVal("null")],
   precedence: 4,
-  resultType: "null",
-  eval: () => null,
+  pattern: (p) => p.constVal("null").result("null").eval(() => null),
 });
 ```
 
@@ -86,19 +84,27 @@ only; in literal mode (`parse`/`evaluate`) they are rejected — use
 // operand() tail → LEFT-associative: a-b-c = (a-b)-c
 const sub = defineNode({
   name: "sub",
-  pattern: [operand("number").as("left"), constVal("-"), operand("number").as("right")],
   precedence: 2,
-  resultType: "number",
-  eval: ({ left, right }) => left() - right(),
+  pattern: (p) =>
+    p
+      .operand("number").as("left")
+      .constVal("-")
+      .operand("number").as("right")
+      .result("number")
+      .eval(({ left, right }) => left() - right()),
 });
 
 // rest() tail → RIGHT-associative: 2^3^2 = 2^(3^2)
 const pow = defineNode({
   name: "pow",
-  pattern: [operand("number").as("left"), constVal("^"), rest("number").as("right")],
   precedence: 3,
-  resultType: "number",
-  eval: ({ left, right }) => left() ** right(),
+  pattern: (p) =>
+    p
+      .operand("number").as("left")
+      .constVal("^")
+      .rest("number").as("right")
+      .result("number")
+      .eval(({ left, right }) => left() ** right()),
 });
 ```
 
@@ -140,14 +146,16 @@ and short-circuiting `&&`/`||` work with no opt-in:
 ```ts
 const ternary = defineNode({
   name: "ternary",
-  pattern: [
-    operand("boolean").as("cond"), constVal("?"),
-    expr().as("then"), constVal(":"),
-    rest("then").as("else"),
-  ],
   precedence: 0,
-  resultType: "then",
-  eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
+  pattern: (p) =>
+    p
+      .operand("boolean").as("cond")
+      .constVal("?")
+      .expr().as("then")
+      .constVal(":")
+      .rest("then").as("else")
+      .result("then")
+      .eval(({ cond, then, else: alt }) => (cond() ? then() : alt())),
 });
 ```
 

@@ -10,21 +10,14 @@
 // Main API: defineNode & createParser
 // =============================================================================
 
-export {
-  defineNode,
-  number,
-  string,
-  ident,
-  path,
-  constVal,
-  operand,
-  rest,
-  expr,
-  overlapping,
-} from "./schema/index.js";
+export { defineNode, overlapping } from "./schema/index.js";
 export type {
   NodeSchema,
   PatternSchema,
+  PatternBuilder,
+  NameableBuilder,
+  ResultedBuilder,
+  EvaledBuilder,
   NumberSchema,
   StringSchema,
   IdentSchema,
