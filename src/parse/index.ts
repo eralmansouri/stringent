@@ -44,9 +44,6 @@ import type {
   NamedSchema,
   NumberSchema,
   StringSchema,
-  BooleanSchema,
-  NullSchema,
-  UndefinedSchema,
   IdentSchema,
   PathSchema,
   ConstSchema,
@@ -57,9 +54,6 @@ import type {
 import type {
   NumberNode,
   StringNode,
-  BooleanNode,
-  NullNode,
-  UndefinedNode,
   IdentNode,
   PathNode,
   ConstNode,
@@ -251,28 +245,6 @@ type ParseStringPrimitive<
     : ParseStringPrimitive<RestQuotes, TInput>
   : [];
 
-/**
- * Parse a keyword literal (true/false/null/undefined) as a WHOLE
- * identifier — `nullable` is one identifier, so it never matches the
- * `null` keyword (prefix guard). Mirrors parseKeyword in
- * src/runtime/parser.ts.
- */
-type ParseKeywordPrimitive<
-  TKind extends "boolean" | "null" | "undefined",
-  TInput extends string
-> = Token.TIdent<TInput> extends [
-  infer V extends string,
-  infer R extends string
-]
-  ? TKind extends "boolean"
-    ? V extends "true" | "false"
-      ? [BooleanNode<V>, R]
-      : []
-    : V extends TKind
-    ? [TKind extends "null" ? NullNode : UndefinedNode, R]
-    : []
-  : [];
-
 type ParseIdentPrimitive<
   TInput extends string,
   TContext extends Context
@@ -326,13 +298,25 @@ type ParsePathSegments<
     : [] // dangling dot "values." → fail whole element
   : [PathNode<TSegs, ResolvePath<TContext["data"], TSegs>>, TInput];
 
+/**
+ * Parse a constant. IDENTIFIER-LIKE values (the value is one whole
+ * identifier per parsebox's tokenizer) match only as a WHOLE identifier
+ * in the input — `nullable` is one identifier, so it never matches a
+ * `constVal("null")` (word-boundary rule; pinned in parser.test.ts and
+ * design-claims). Other values match as raw text. Mirrors parseConst in
+ * src/runtime/parser.ts.
+ */
 type ParseConstPrimitive<
   TValue extends string,
   TInput extends string
-> = Token.TConst<TValue, TInput> extends [
-  infer _V extends string,
-  infer R extends string
-]
+> = Token.TIdent<TValue> extends [TValue, ""]
+  ? Token.TIdent<TInput> extends [TValue, infer R extends string]
+    ? [ConstNode<TValue>, R]
+    : []
+  : Token.TConst<TValue, TInput> extends [
+      infer _V extends string,
+      infer R extends string
+    ]
   ? [ConstNode<TValue>, R]
   : [];
 
@@ -441,12 +425,6 @@ type ParseElement<
   ? ParseNumberPrimitive<TInput>
   : TElement extends StringSchema<infer Q>
   ? ParseStringPrimitive<Q, TInput>
-  : TElement extends BooleanSchema
-  ? ParseKeywordPrimitive<"boolean", TInput>
-  : TElement extends NullSchema
-  ? ParseKeywordPrimitive<"null", TInput>
-  : TElement extends UndefinedSchema
-  ? ParseKeywordPrimitive<"undefined", TInput>
   : TElement extends IdentSchema
   ? ParseIdentPrimitive<TInput, TContext>
   : TElement extends PathSchema

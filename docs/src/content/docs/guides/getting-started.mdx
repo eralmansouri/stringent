@@ -48,7 +48,7 @@ all arktype definitions.
 
    ```ts twoslash
    import {
-     defineNode, number, string, boolean, path, operand, rest, expr,
+     defineNode, number, string, path, operand, rest, expr,
      constVal, overlapping, createParser,
    } from "stringent";
 
@@ -58,7 +58,8 @@ all arktype definitions.
    const stringLit = defineNode({ name: "str", pattern: [string(['"', "'"])], precedence: 4 });
    // Keyword literals (true/false) must come before path() in the level,
    // or `true` would parse as an identifier
-   const boolLit   = defineNode({ name: "bool", pattern: [boolean()], precedence: 4 });
+   const trueLit   = defineNode({ name: "true",  pattern: [constVal("true")],  precedence: 4, resultType: "boolean", eval: () => true });
+   const falseLit  = defineNode({ name: "false", pattern: [constVal("false")], precedence: 4, resultType: "boolean", eval: () => false });
    const variable  = defineNode({ name: "var", pattern: [path()], precedence: 4 });
    // path() matches identifiers and dotted paths: x, values.password
 
@@ -118,7 +119,7 @@ all arktype definitions.
    });
 
    const parser = createParser(
-     [numberLit, stringLit, boolLit, variable, parens, ternary, eq, add, mul] as const
+     [numberLit, stringLit, trueLit, falseLit, variable, parens, ternary, eq, add, mul] as const
    );
    ```
 
@@ -129,13 +130,14 @@ all arktype definitions.
 
    ```ts twoslash
    import {
-     defineNode, number, string, boolean, path, operand, rest, expr,
+     defineNode, number, string, path, operand, rest, expr,
      constVal, overlapping, createParser,
    } from "stringent";
 
    const numberLit = defineNode({ name: "num", pattern: [number()], precedence: 4 });
    const stringLit = defineNode({ name: "str", pattern: [string(['"', "'"])], precedence: 4 });
-   const boolLit   = defineNode({ name: "bool", pattern: [boolean()], precedence: 4 });
+   const trueLit   = defineNode({ name: "true",  pattern: [constVal("true")],  precedence: 4, resultType: "boolean", eval: () => true });
+   const falseLit  = defineNode({ name: "false", pattern: [constVal("false")], precedence: 4, resultType: "boolean", eval: () => false });
    const variable  = defineNode({ name: "var", pattern: [path()], precedence: 4 });
 
    const eq = defineNode({
@@ -165,7 +167,7 @@ all arktype definitions.
      eval: ({ left, right }) => left() * right(),
    });
 
-   const parser = createParser([numberLit, stringLit, boolLit, variable, eq, add, mul] as const);
+   const parser = createParser([numberLit, stringLit, trueLit, falseLit, variable, eq, add, mul] as const);
    // ---cut---
    const [ast] = parser.parse("1+2*3", {});
    //     ^?
@@ -210,13 +212,14 @@ all arktype definitions.
 
    ```ts twoslash
    import {
-     defineNode, number, string, boolean, path, operand, rest, expr,
+     defineNode, number, string, path, operand, rest, expr,
      constVal, overlapping, createParser,
    } from "stringent";
 
    const numberLit = defineNode({ name: "num", pattern: [number()], precedence: 4 });
    const stringLit = defineNode({ name: "str", pattern: [string(['"', "'"])], precedence: 4 });
-   const boolLit   = defineNode({ name: "bool", pattern: [boolean()], precedence: 4 });
+   const trueLit   = defineNode({ name: "true",  pattern: [constVal("true")],  precedence: 4, resultType: "boolean", eval: () => true });
+   const falseLit  = defineNode({ name: "false", pattern: [constVal("false")], precedence: 4, resultType: "boolean", eval: () => false });
    const variable  = defineNode({ name: "var", pattern: [path()], precedence: 4 });
 
    const eq = defineNode({
@@ -246,7 +249,7 @@ all arktype definitions.
      eval: ({ left, right }) => left() * right(),
    });
 
-   const parser = createParser([numberLit, stringLit, boolLit, variable, eq, add, mul] as const);
+   const parser = createParser([numberLit, stringLit, trueLit, falseLit, variable, eq, add, mul] as const);
    // ---cut---
    const seven = parser.evaluate("1+2*3", {}, {});
    //    ^?

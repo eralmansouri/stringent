@@ -29,7 +29,6 @@ import {
   expr,
   constVal,
   number,
-  nullVal,
   string,
 } from "./index.js";
 import { add, eq, fixtureNodes, fixtureParser, formSchema, sub, ternary } from "./__fixtures__/grammar.js";
@@ -83,25 +82,25 @@ type _p3 = AssertTrue<
 >;
 
 // =============================================================================
-// Keyword literals & string escapes (Phase 5)
+// Keyword literals (const-pattern nodes) & string escapes
 // =============================================================================
 
 type PTrue = Parse<G, "true", EmptyCtx>;
 type _k1 = AssertTrue<
-  AssertExtends<PTrue, [{ node: "literal"; value: true; outputSchema: "boolean" }, ""]>
+  AssertExtends<PTrue, [{ node: "true"; outputSchema: "boolean" }, ""]>
 >;
 
 type PNull = Parse<G, "null", EmptyCtx>;
 type _k2 = AssertTrue<
-  AssertExtends<PNull, [{ node: "literal"; value: null; outputSchema: "null" }, ""]>
+  AssertExtends<PNull, [{ node: "null"; outputSchema: "null" }, ""]>
 >;
 
 type PUndef = Parse<G, "undefined", EmptyCtx>;
 type _k3 = AssertTrue<
-  AssertExtends<PUndef, [{ node: "literal"; value: undefined; outputSchema: "undefined" }, ""]>
+  AssertExtends<PUndef, [{ node: "undefined"; outputSchema: "undefined" }, ""]>
 >;
 
-// keyword-prefix guard: nullable is one identifier, not null + "able"
+// word-boundary rule: nullable is one identifier, not null + "able"
 type PNullable = Parse<G, "nullable", Context<{ nullable: "number" }>>;
 type _k4 = AssertTrue<
   AssertExtends<PNullable, [{ node: "path"; path: ["nullable"]; outputSchema: "number" }, ""]>
@@ -111,6 +110,40 @@ type _k4 = AssertTrue<
 type PTernKw = Parse<G, "true ? 1 : 2", EmptyCtx>;
 type _k5 = AssertTrue<
   AssertExtends<PTernKw, [{ node: "ternary"; outputSchema: "number" }, ""]>
+>;
+
+// word-boundary rule for infix identifier-like consts: `andy` never
+// matches constVal("and") (runtime twin in design-claims.test.ts)
+const _wbNum = defineNode({ name: "n", pattern: [number()], precedence: 2 });
+const _wbConj = defineNode({
+  name: "and",
+  pattern: [operand("number").as("l"), constVal("and"), rest("number").as("r")],
+  precedence: 1,
+  resultType: "number",
+  eval: ({ l, r }) => l() && r(),
+});
+type WbG = ComputeGrammar<[typeof _wbNum, typeof _wbConj]>;
+type _wb1 = AssertTrue<
+  AssertExtends<Parse<WbG, "1 and 2", EmptyCtx>, [{ node: "and" }, ""]>
+>;
+type _wb2 = AssertTrue<
+  AssertEqual<Parse<WbG, "1 andy 2", EmptyCtx> extends [unknown, ""] ? true : false, false>
+>;
+
+// UNIT keyword resultTypes work end-to-end: a node may declare
+// resultType "true" (arktype unit keyword) and satisfy "boolean" slots
+const _unitTrue = defineNode({
+  name: "yes",
+  pattern: [constVal("yes")],
+  precedence: 2,
+  resultType: "true",
+  eval: () => true as const,
+});
+type UnitG = ComputeGrammar<[typeof _wbNum, typeof _unitTrue, typeof _wbConj]>;
+type PUnit = Parse<UnitG, "yes", EmptyCtx>;
+type _u1 = AssertTrue<AssertExtends<PUnit, [{ node: "yes"; outputSchema: "true" }, ""]>>;
+type _u2 = AssertTrue<
+  AssertEqual<PUnit extends [{ outputSchema: infer O }, string] ? InferOfDef<O> : never, true>
 >;
 
 // null does not satisfy a boolean slot
@@ -309,8 +342,10 @@ const embStr = defineNode({
 });
 const embNull = defineNode({
   name: "null",
-  pattern: [nullVal()],
+  pattern: [constVal("null")],
   precedence: 2,
+  resultType: "null",
+  eval: () => null,
 });
 const embMaybe = defineNode({
   name: "maybe",

@@ -27,9 +27,6 @@ import type { type } from "arktype";
 import type {
   NumberNode,
   StringNode,
-  BooleanNode,
-  NullNode,
-  UndefinedNode,
   IdentNode,
   PathNode,
   ConstNode,
@@ -51,15 +48,6 @@ export interface StringSchema<
 > extends Schema<"string"> {
   readonly quotes: TQuotes;
 }
-
-/** Boolean keyword literal pattern element (`true` / `false`) */
-export interface BooleanSchema extends Schema<"boolean"> {}
-
-/** `null` keyword literal pattern element */
-export interface NullSchema extends Schema<"null"> {}
-
-/** `undefined` keyword literal pattern element */
-export interface UndefinedSchema extends Schema<"undefined"> {}
 
 /** Identifier pattern element (single segment, no dots) */
 export interface IdentSchema extends Schema<"ident"> {}
@@ -149,9 +137,6 @@ export interface ExprSchema<
 export type PatternSchemaBase =
   | NumberSchema
   | StringSchema<readonly string[]>
-  | BooleanSchema
-  | NullSchema
-  | UndefinedSchema
   | IdentSchema
   | PathSchema
   | ConstSchema<string>
@@ -213,31 +198,6 @@ export const string = <const TQuotes extends readonly string[]>(
   quotes: TQuotes
 ) => withAs<StringSchema<TQuotes>>({ kind: "string", quotes });
 
-/**
- * Create a boolean keyword literal pattern element.
- *
- * Matches exactly `true` or `false` as a WHOLE identifier — `truex` or
- * `falsey` never match (keyword-prefix guard), they fall through to
- * identifier/path nodes. Evaluates to the boolean value; type "boolean".
- */
-export const boolean = () => withAs<BooleanSchema>({ kind: "boolean" });
-
-/**
- * Create a `null` keyword literal pattern element.
- *
- * Matches exactly `null` as a WHOLE identifier — `nullable` never matches
- * (keyword-prefix guard). Evaluates to null; type "null".
- */
-export const nullVal = () => withAs<NullSchema>({ kind: "null" });
-
-/**
- * Create an `undefined` keyword literal pattern element.
- *
- * Matches exactly `undefined` as a WHOLE identifier (keyword-prefix
- * guard). Evaluates to undefined; type "undefined".
- */
-export const undefinedVal = () => withAs<UndefinedSchema>({ kind: "undefined" });
-
 /** Create an identifier pattern element (single segment, no dots) */
 export const ident = () => withAs<IdentSchema>({ kind: "ident" });
 
@@ -250,7 +210,24 @@ export const ident = () => withAs<IdentSchema>({ kind: "ident" });
  */
 export const path = () => withAs<PathSchema>({ kind: "path" });
 
-/** Create a constant (exact match) pattern element */
+/**
+ * Create a constant pattern element.
+ *
+ * IDENTIFIER-LIKE values (`constVal("null")`, `constVal("and")`) match
+ * only as a WHOLE identifier — `nullable` or `andy` never match (word-
+ * boundary rule; pinned in design-claims). Other values (`"+"`, `"=="`)
+ * match as raw text. Keyword literals are therefore ordinary const-
+ * pattern nodes:
+ *
+ * @example
+ * const nullLit = defineNode({
+ *   name: "null",
+ *   pattern: [constVal("null")],
+ *   precedence: 5,
+ *   resultType: "null",
+ *   eval: () => null,
+ * });
+ */
 export const constVal = <const TValue extends string>(value: TValue) =>
   withAs<ConstSchema<TValue>>({ kind: "const", value });
 
@@ -477,9 +454,6 @@ export type InferDef<T extends string> = [type.infer<T>] extends [never]
 export type InferNodeType<TSchema extends PatternSchemaBase> =
   TSchema extends NumberSchema ? NumberNode
   : TSchema extends StringSchema ? StringNode
-  : TSchema extends BooleanSchema ? BooleanNode
-  : TSchema extends NullSchema ? NullNode
-  : TSchema extends UndefinedSchema ? UndefinedNode
   : TSchema extends IdentSchema ? IdentNode
   : TSchema extends PathSchema ? PathNode
   : TSchema extends ConstSchema<infer V> ? ConstNode<V>
@@ -519,9 +493,6 @@ export type NormalizeConstraint<C> = [Exclude<C, undefined>] extends [never]
 export type InferEvaluatedType<TSchema extends PatternSchemaBase> =
   TSchema extends NumberSchema ? number
   : TSchema extends StringSchema ? string
-  : TSchema extends BooleanSchema ? boolean
-  : TSchema extends NullSchema ? null
-  : TSchema extends UndefinedSchema ? undefined
   : TSchema extends IdentSchema ? unknown
   : TSchema extends PathSchema ? unknown
   : TSchema extends ConstSchema<infer V> ? V // the matched text

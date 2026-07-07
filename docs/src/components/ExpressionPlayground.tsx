@@ -4,7 +4,6 @@ import {
   defineNode,
   number,
   string,
-  boolean,
   path,
   operand,
   rest,
@@ -13,11 +12,13 @@ import {
   overlapping,
 } from "stringent";
 
-// Leaf nodes live at the HIGHEST precedence level; keyword literals
-// (true/false) must come before path(), or `true` parses as an identifier.
+// Leaf nodes live at the HIGHEST precedence level; keyword-literal const
+// nodes (true/false) must come before path(), or `true` parses as an
+// identifier. Identifier-like const values match whole identifiers only.
 const numberLit = defineNode({ name: "num", pattern: [number()], precedence: 4 });
 const stringLit = defineNode({ name: "str", pattern: [string(['"', "'"])], precedence: 4 });
-const boolLit = defineNode({ name: "bool", pattern: [boolean()], precedence: 4 });
+const trueLit  = defineNode({ name: "true",  pattern: [constVal("true")],  precedence: 4, resultType: "boolean", eval: () => true });
+const falseLit = defineNode({ name: "false", pattern: [constVal("false")], precedence: 4, resultType: "boolean", eval: () => false });
 const variable = defineNode({ name: "var", pattern: [path()], precedence: 4 });
 
 const parens = defineNode({
@@ -70,7 +71,7 @@ const ternary = defineNode({
 });
 
 const parser = createParser(
-  [numberLit, stringLit, boolLit, variable, parens, ternary, eq, add, mul] as const
+  [numberLit, stringLit, trueLit, falseLit, variable, parens, ternary, eq, add, mul] as const
 );
 
 const schema = {

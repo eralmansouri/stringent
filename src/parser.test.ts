@@ -13,7 +13,6 @@ import {
   constVal,
   createParser,
   defineNode,
-  nullVal,
   number,
   operand,
   rest,
@@ -80,38 +79,21 @@ describe("atoms", () => {
   });
 });
 
-describe("keyword literals", () => {
-  it("parses true/false with boolean values", () => {
-    expect(parseOk("true")).toEqual({
-      node: "literal",
-      raw: "true",
-      value: true,
-      outputSchema: "boolean",
-    });
-    expect(parseOk(" false ")).toEqual({
-      node: "literal",
-      raw: "false",
-      value: false,
-      outputSchema: "boolean",
-    });
+describe("keyword literals (const-pattern nodes)", () => {
+  it("parses true/false as const nodes typed boolean", () => {
+    expect(parseOk("true")).toEqual({ node: "true", outputSchema: "boolean" });
+    expect(parseOk(" false ")).toEqual({ node: "false", outputSchema: "boolean" });
   });
 
   it("parses null and undefined", () => {
-    expect(parseOk("null")).toEqual({
-      node: "literal",
-      raw: "null",
-      value: null,
-      outputSchema: "null",
-    });
+    expect(parseOk("null")).toEqual({ node: "null", outputSchema: "null" });
     expect(parseOk("undefined")).toEqual({
-      node: "literal",
-      raw: "undefined",
-      value: undefined,
+      node: "undefined",
       outputSchema: "undefined",
     });
   });
 
-  it("keyword-prefix guard: 'nullable' is an identifier, not null + 'able'", () => {
+  it("word-boundary rule: 'nullable' is an identifier, not null + 'able'", () => {
     expect(parseOk("nullable", { nullable: "number" })).toEqual(
       pathNode(["nullable"], "number")
     );
@@ -393,8 +375,10 @@ describe("embedded binding references (scoped defs)", () => {
   });
   const nullLit = defineNode({
     name: "null",
-    pattern: [nullVal()],
+    pattern: [constVal("null")],
     precedence: 2,
+    resultType: "null",
+    eval: () => null,
   });
 
   /** postfix `x?`: resultType is a TEMPLATE over the operand. The operand

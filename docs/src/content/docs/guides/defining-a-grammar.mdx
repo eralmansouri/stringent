@@ -29,12 +29,9 @@ const mul = defineNode({
 |---------|-------------|
 | `number()` | Numeric literals |
 | `string(quotes)` | Quoted strings, e.g. `string(['"', "'"])` — escapes are processed (`\n \t \\ \" \' \xHH \uHHHH`, …) |
-| `boolean()` | The keyword literals `true` / `false` |
-| `nullVal()` | The keyword literal `null` |
-| `undefinedVal()` | The keyword literal `undefined` |
 | `ident()` | Single identifier, type resolved from schema |
 | `path()` | Identifier or dotted path (`values.password`), resolved via nested schema |
-| `constVal(value)` | Exact string (operators, keywords, delimiters) |
+| `constVal(value)` | Exact string (operators, keywords, delimiters). Identifier-like values match whole identifiers only |
 | `operand(constraint?)` | Subexpression at the **next tighter** precedence level |
 | `rest(constraint?)` | Subexpression at the **current** level |
 | `expr(constraint?)` | Full expression — resets to the whole grammar (parens, ternary branches) |
@@ -46,9 +43,23 @@ The roles name the parse *level*, not a left/right position: `operand()`
 parses at the next tighter level (which is what prevents left recursion),
 `rest()` stays at the current level, and `expr()` resets to the full grammar.
 
-Keyword literals (`boolean()`, `nullVal()`, `undefinedVal()`) match as *whole
-identifiers* — `nullable` is one identifier, never `null` + `able`. Within a
-level, keyword nodes must come **before** `ident()`/`path()` nodes, or `true`
+Keyword literals are ordinary **const-pattern nodes** — there is no special
+keyword element:
+
+```ts
+const nullLit = defineNode({
+  name: "null",
+  pattern: [constVal("null")],
+  precedence: 4,
+  resultType: "null",
+  eval: () => null,
+});
+```
+
+This works because identifier-like const values match as *whole identifiers*
+— `nullable` is one identifier, never `null` + `able` (the word-boundary
+rule; non-identifier values like `"+"` match as raw text). Within a level,
+keyword-const nodes must come **before** `ident()`/`path()` nodes, or `true`
 parses as an identifier. The `\xHH`/`\uHHHH` string escapes decode at runtime
 only; in literal mode (`parse`/`evaluate`) they are rejected — use
 `safeParse` for strings that need them.

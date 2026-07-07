@@ -17,9 +17,6 @@ import {
   defineNode,
   number,
   string,
-  boolean,
-  nullVal,
-  undefinedVal,
   path,
   operand,
   rest,
@@ -42,22 +39,39 @@ export const stringLit = defineNode({
   precedence: 5,
 });
 
-export const boolLit = defineNode({
-  name: "bool",
-  pattern: [boolean()],
+/** Keyword literals are ordinary const-pattern nodes: identifier-like
+ *  const values match whole identifiers only (word-boundary rule), so
+ *  `nullable` never matches `constVal("null")`. */
+export const trueLit = defineNode({
+  name: "true",
+  pattern: [constVal("true")],
   precedence: 5,
+  resultType: "boolean",
+  eval: () => true,
+});
+
+export const falseLit = defineNode({
+  name: "false",
+  pattern: [constVal("false")],
+  precedence: 5,
+  resultType: "boolean",
+  eval: () => false,
 });
 
 export const nullLit = defineNode({
   name: "null",
-  pattern: [nullVal()],
+  pattern: [constVal("null")],
   precedence: 5,
+  resultType: "null",
+  eval: () => null,
 });
 
 export const undefinedLit = defineNode({
   name: "undefined",
-  pattern: [undefinedVal()],
+  pattern: [constVal("undefined")],
   precedence: 5,
+  resultType: "undefined",
+  eval: () => undefined,
 });
 
 /** Keyword nodes MUST come before variable in the level: alternation is
@@ -166,7 +180,8 @@ export const pow = defineNode({
 export const fixtureNodes = [
   numberLit,
   stringLit,
-  boolLit,
+  trueLit,
+  falseLit,
   nullLit,
   undefinedLit,
   variable,

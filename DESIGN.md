@@ -243,13 +243,13 @@ included.
   integer; the **highest level present is the leaf level**, whose patterns
   must start with a consuming element. Duplicate precedences share a level;
   nodes within a level are tried in definition order with backtracking —
-  keyword-literal nodes must precede identifier/path nodes, or `true`
-  parses as an identifier:
+  keyword-const nodes must precede identifier/path nodes, or `true`
+  parses as an identifier (pinned in design-claims.test.ts):
 
   ```ts
-  createParser([boolLit, variable]).safeParse("true", {}).ast;
-  // { node: "literal", value: true, outputSchema: "boolean" }   ✓
-  createParser([variable, boolLit]).safeParse("true", {}).ast;
+  createParser([trueLit, variable]).safeParse("true", {}).ast;
+  // { node: "true", outputSchema: "boolean" }                   ✓
+  createParser([variable, trueLit]).safeParse("true", {}).ast;
   // { node: "path", path: ["true"], outputSchema: "unknown" }   ✗ trap
   ```
 - **Roles** name the grammar level a slot parses at: `operand()` parses at
@@ -285,14 +285,17 @@ included.
   // and mixing both shapes in one level refuses to build:
   createParser([leftTailSub, rightTailAdd]); // ✗ "precedence 1 mixes tail shapes"
   ```
-- **Built-in literals**: `number()`, `string(quotes)`, `boolean()`
-  (true/false), `nullVal()`, `undefinedVal()`, `ident()`, `path()`,
-  `constVal(text)`. Keyword literals match as *whole identifiers*
-  (`nullable` is one identifier, never `null` + `able`) and carry their
-  base types (`"boolean"`, not unit `true` — literal result types are a
-  roadmap item). String literals process escapes (`\n \t \r \\ \" \' \`
-  \0 \b \f \v \xHH \uHHHH`); unknown escapes resolve to the escaped
-  character, JS-style.
+- **Pattern elements**: `number()`, `string(quotes)`, `ident()`, `path()`,
+  `constVal(text)`. There is no keyword element — keyword literals are
+  ordinary const-pattern nodes
+  (`{ pattern: [constVal("null")], resultType: "null", eval: () => null }`),
+  which works because of the **word-boundary rule**: an identifier-like
+  const value matches only as a whole identifier (`nullable` is one
+  identifier, never `null` + `able`; `andy` never matches `constVal("and")`
+  — pinned in design-claims.test.ts), while non-identifier values (`"+"`,
+  `"=="`) match as raw text. String literals process escapes (`\n \t \r
+  \\ \" \' \` \0 \b \f \v \xHH \uHHHH`); unknown escapes resolve to the
+  escaped character, JS-style.
 - **Whitespace** is skipped before tokens, with one deliberate exception:
   no whitespace around `.` in paths. `values .password` ends the path after
   `values`; `values. password` and `values.` fail the element.

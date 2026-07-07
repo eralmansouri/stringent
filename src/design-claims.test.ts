@@ -13,7 +13,6 @@ import { match } from "arktype";
 import {
   EvaluationError,
   StringentParseError,
-  boolean,
   constVal,
   createParser,
   defineNode,
@@ -202,18 +201,94 @@ describe("DESIGN: parsing model — associativity by tail shape", () => {
   });
 });
 
-describe("DESIGN: keyword literals — alternation order matters", () => {
-  it("a path() node BEFORE boolean() swallows `true` as an identifier", () => {
+describe("DESIGN: identifier-like consts — word boundaries & alternation order", () => {
+  it("identifier-like const values match WHOLE identifiers only", () => {
+    // constVal("null") must not match the PREFIX of `nullable` — the
+    // word-boundary rule. Without it, "nullable" would parse as the
+    // keyword `null` followed by dangling text "able".
     const variable = defineNode({ name: "var", pattern: [path()], precedence: 1 });
-    const boolLit = defineNode({ name: "bool", pattern: [boolean()], precedence: 1 });
+    const nullLit = defineNode({
+      name: "null",
+      pattern: [constVal("null")],
+      precedence: 1,
+      resultType: "null",
+      eval: () => null,
+    });
+    const p = createParser([nullLit, variable] as const);
+
+    const keyword = p.safeParse("null", {});
+    expect(keyword.success && keyword.ast).toMatchObject({
+      node: "null",
+      outputSchema: "null",
+    });
+
+    // `nullable` is ONE identifier — the null node never matches it
+    const identifier = p.safeParse("nullable", { nullable: "number" });
+    expect(identifier.success && identifier.ast).toMatchObject({
+      node: "path",
+      path: ["nullable"],
+      outputSchema: "number",
+    });
+
+    // the rule also guards infix words: `andy` never matches constVal("and")
+    const num = defineNode({ name: "n", pattern: [number()], precedence: 2 });
+    const conj = defineNode({
+      name: "and",
+      pattern: [operand("number").as("l"), constVal("and"), rest("number").as("r")],
+      precedence: 1,
+      resultType: "number",
+      eval: ({ l, r }) => l() && r(),
+    });
+    const infix = createParser([num, conj] as const);
+    expect(infix.safeParse("1 and 2", {}).success).toBe(true);
+    expect(infix.safeParse("1 andy 2", {}).success).toBe(false);
+  });
+
+  it("UNIT keyword resultTypes work end-to-end (resultType 'true')", () => {
+    // a node may mint an arktype unit keyword; it satisfies base-type slots
+    const num = defineNode({ name: "n", pattern: [number()], precedence: 2 });
+    const yes = defineNode({
+      name: "yes",
+      pattern: [constVal("yes")],
+      precedence: 2,
+      resultType: "true",
+      eval: () => true as const,
+    });
+    const tern = defineNode({
+      name: "tern",
+      pattern: [
+        operand("boolean").as("cond"),
+        constVal("?"),
+        operand("number").as("then"),
+        constVal(":"),
+        rest("number").as("else"),
+      ],
+      precedence: 1,
+      resultType: "number",
+      eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
+    });
+    const p = createParser([num, yes, tern] as const);
+    const parsed = p.safeParse("yes ? 1 : 2", {});
+    expect(parsed.success && parsed.ast).toMatchObject({ node: "tern" });
+    expect(p.evaluate("yes ? 1 : 2", {}, {})).toBe(1);
+  });
+
+  it("a path() node BEFORE a keyword const swallows `true` as an identifier", () => {
+    const variable = defineNode({ name: "var", pattern: [path()], precedence: 1 });
+    const boolLit = defineNode({
+      name: "true",
+      pattern: [constVal("true")],
+      precedence: 1,
+      resultType: "boolean",
+      eval: () => true,
+    });
 
     const keywordsFirst = createParser([boolLit, variable] as const);
     const variableFirst = createParser([variable, boolLit] as const);
 
     const good = keywordsFirst.safeParse("true", {});
     expect(good.success && good.ast).toMatchObject({
-      node: "literal",
-      value: true,
+      node: "true",
       outputSchema: "boolean",
     });
 
