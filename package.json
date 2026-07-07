@@ -38,6 +38,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "bench": "vitest bench --run",
     "check:package": "publint && attw --pack . --profile esm-only",
     "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build && pnpm check:package"
   },
