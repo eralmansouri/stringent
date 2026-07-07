@@ -33,7 +33,7 @@ ergonomics. DESIGN.md still describes v1 and needs its rewrite in Phase 7.
 | D7 | `precedence` is a plain number; the `"atom"` sentinel is removed. The **highest** precedence level is the leaf level; built-in literals live there implicitly. | "Atom" is jargon; the only thing it encoded (recursion base, no leading expression element) is enforceable by validating the max level. |
 | D8 | Built-in literals gain `true`/`false`/`null`/`undefined` alongside number/string. | Biggest functional gap vs. the archive. Port the keyword-prefix-guard approach (so `nullable` ≠ `null` + `able`) in both engines. |
 | D9 | String escape handling (`\n \t \r \\ \" \' \0 \b \f \v \xHH \uHHHH`) in the runtime tokenizer, with the archive's 405-line test corpus ported. | v1 delegates to parsebox raw tokens; escapes silently don't work. |
-| D10 | Version: v2 ships as **0.1.0** (first minor bump; breaking). | Marks the API break under the 0.0.x scheme. |
+| D10 | Versioning: **0.0.x forever** (owner directive, 2026-07-07). v2 ships as the next 0.0.x patch. Never publish 0.1 or any 0.x minor, regardless of readiness. | Owner preference; unrelated to code state. |
 | D11 | **Schemas are arktype scopes/Types**, not a custom record-walking system. Identifier/path resolution uses `Type.get('address', 'zip')`; the legal-identifier set is `schema.keyof()`; nested access maps onto (rooted) submodules; `onUndeclaredKey: 'reject'` gives a strict no-undeclared-variables mode. `createParser(nodes, { scope })` accepts a user scope/module, which also makes arktype's keyword library (`string.email`, `number.integer`, …) valid in constraints for free. | Replaces v1's hand-rolled `resolveIdent`/`resolvePath`/`validateSchema` subsystem with public, typed arktype primitives. |
 | D12 | **A compiled rule is exposed as an arktype `Type`** (`parser.compile(input, schema)` → a Type whose input is the values schema and whose morph is evaluation; cross-field predicate rules lower to `narrow` with `ctx.reject({ path })`). | The integration story: a stringent rule becomes a Standard Schema, so it drops directly into react-hook-form (`arktypeResolver`), tRPC `.input`, hono, oRPC. `.in` introspects which variables a rule reads; `.in.toJsonSchema()` exports the form contract. |
 | D13 | **Evaluation/validation failures are `ArkErrors`** (serializable, `flatByPath` for per-field form state, `hasCode()` for programmatic handling, `actual: () => ''` to keep secret values out of messages). Parse-time failures remain stringent's own positioned `StringentError` diagnostics. | Two error domains, each using the representation built for it: source positions for parse errors, field paths for data errors. |
@@ -250,7 +250,8 @@ parallel once Phase 1's API lands.
 **Phase 7 — Docs, tests, release.** Rewrite affected DESIGN.md sections;
 update Starlight guides + playground fixture (playground gains identifier
 autocomplete via `schema.props`); port archive benchmark shapes
-(`vitest bench`); migration notes; bump to 0.1.0.
+(`vitest bench`); migration notes; release as the next **0.0.x** (see
+D10: never 0.1/0.x, owner directive).
 
 Phases 1–4 land together (they are one breaking change); 5–7 can follow
 incrementally.
@@ -352,9 +353,15 @@ check: ~510k instantiations / ~2.8s.
 
 - arktype `type.validate<T>` or bare `type.infer<T>` as a SIBLING
   parameter of the conditionally-typed input param poisons generic
-  inference (input collapses to `never`). Hence: `evaluate()` wraps
-  values in `NoInfer`, and eager leaf validation lives on `safeParse`
-  only. Probed exhaustively; don't try to "fix" this by intersecting.
+  inference. MECHANISM (proven by revealing the fixed generics): the
+  values ARGUMENT leaks in as an inference candidate for TSchema through
+  `type.infer`, and TS unions the candidates — TSchema fixes to e.g.
+  `{x: "number"} | {x: 41}`, whose 41-leaf is not a def, so the input
+  conditional evaluates to `never`. Only reproduces with a deep deferred
+  conditional like Parse<> (a shallow replica infers fine). Hence:
+  `evaluate()` wraps values in `NoInfer` (removes the candidate), and
+  eager leaf validation lives on `safeParse` only. Don't "fix" by
+  intersecting — probed exhaustively.
 - Deep-equality test assertions see enumerable symbol props → the parsed
   Type rides on a NON-enumerable symbol (`OUTPUT_TYPE`, set via
   `setOutputType`).
@@ -399,11 +406,21 @@ check: ~510k instantiations / ~2.8s.
   outputs against resultType.
 - **Phase 5**: built-in true/false/null/undefined literals with
   keyword-prefix guards in BOTH engines + string escape processing.
-  Reference implementations and 400+-line test corpora in the
-  formeddable archive (git bundle already delivered to the user;
-  `upstream` remote may still exist locally, org deletion pending).
+  Escapes are NOT redundant with parsebox — verified empirically
+  (2026-07-07): (a) `Token.String(['"'], '"a\\"b"')` TERMINATES at the
+  escaped quote (token `a\`, rest `b" rest`) — wrong tokenization, and
+  (b) `"line1\\nline2"` keeps a literal backslash-n — no unescaping.
+  Owner asks that Phase 5 tests pin exactly these observable
+  differences (escaped-quote termination; `\\n`/`\\xHH`/`\\uHHHH`
+  producing real characters in evaluated values). Reference
+  implementation + 405-line corpus in the formeddable archive (git
+  bundle delivered to the user in chat; org deletion pending).
 - **Phase 6**: rule-as-arktype-Type (`parser.compile`) → Standard Schema
   ecosystem (react-hook-form/tRPC/hono), ArkErrors with field paths.
+- Toolbox reminder (owner): arktype's `Type.distribute(mapper)` maps
+  over union branches — useful for Phase 4 (enumerating a union
+  constraint's members for correlated-binding generation / dev
+  assertions) and for diagnostics that list every accepted operand form.
 - **Phase 7**: DESIGN.md rewrite, Starlight docs + playground update,
   benchmarks (port shapes from archive), migration notes, version 0.1.0.
 
