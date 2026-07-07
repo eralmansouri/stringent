@@ -31,7 +31,6 @@ import {
   toUnexpectedInputError,
 } from "./runtime/diagnostics.js";
 import {
-  type EvaluateOptions,
   type EvaluationValues,
   EvaluationError,
   evaluateAst,
@@ -253,10 +252,6 @@ export interface Parser<
  * @param nodes - Tuple of node schemas defining the grammar
  * @param options.scope - Extra type aliases available in constraints,
  *   resultTypes, and schemas (e.g. { Money: "number" })
- * @param options.dev - Assert each node's eval output against its resolved
- *   result type during evaluation (~16ns/node via precompiled allows()) —
- *   the runtime complement of the compile-time eval-return check, for
- *   plain-JS users. Defaults to true outside NODE_ENV=production.
  *
  * @example
  * ```ts
@@ -267,22 +262,9 @@ export interface Parser<
  */
 export function createParser<const TNodes extends readonly NodeSchema[]>(
   nodes: TNodes,
-  options?: { readonly scope?: ScopeAliases; readonly dev?: boolean }
+  options?: { readonly scope?: ScopeAliases }
 ): Parser<ComputeGrammar<TNodes>, TNodes> {
   const compiled: CompiledGrammar = compileGrammar(nodes, options?.scope);
-
-  // dev defaults ON unless NODE_ENV is explicitly "production" — including
-  // when no process global exists (browser without a bundler define), so
-  // the docs' "on outside production" promise holds there too
-  const evalOptions: EvaluateOptions = {
-    assertResults:
-      options?.dev ??
-      !(
-        typeof process !== "undefined" &&
-        process.env !== undefined &&
-        process.env.NODE_ENV === "production"
-      ),
-  };
 
   const nodesByName = new Map<string, NodeSchema>(
     nodes.map((node) => [node.name, node])
@@ -352,11 +334,11 @@ export function createParser<const TNodes extends readonly NodeSchema[]>(
           `values do not match the schema: ${validated.summary}`
         );
       }
-      return evaluateAst(result.ast, nodesByName, values, evalOptions) as never;
+      return evaluateAst(result.ast, nodesByName, values) as never;
     },
 
     evaluateAst(ast: unknown, values: EvaluationValues) {
-      return evaluateAst(ast, nodesByName, values, evalOptions) as never;
+      return evaluateAst(ast, nodesByName, values) as never;
     },
 
     compile(input: string, schema: object, options?: CompileRuleOptions) {
@@ -376,7 +358,7 @@ export function createParser<const TNodes extends readonly NodeSchema[]>(
         const path = [...(options?.path ?? [])];
         return schemaType.narrow(
           (data, ctx) =>
-            evaluateAst(ast, nodesByName, data as EvaluationValues, evalOptions) ===
+            evaluateAst(ast, nodesByName, data as EvaluationValues) ===
               true ||
             // actual: "" keeps runtime values (possibly secrets) out of messages
             ctx.reject({ expected, actual: "", path: path as never })
@@ -384,7 +366,7 @@ export function createParser<const TNodes extends readonly NodeSchema[]>(
       }
 
       return schemaType.pipe((data) =>
-        evaluateAst(ast, nodesByName, data as EvaluationValues, evalOptions)
+        evaluateAst(ast, nodesByName, data as EvaluationValues)
       ) as never;
     },
 

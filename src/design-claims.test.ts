@@ -101,15 +101,15 @@ describe("DESIGN: refinements are validation-only", () => {
   });
 });
 
-describe("DESIGN: eval typing — correlated bindings", () => {
-  it("a bare arktype matcher as eval crashes: eval's 2nd arg lands in arktype's context slot", () => {
+describe("DESIGN: eval typing — flat bindings + match", () => {
+  it("eval receives THUNKS, so a bare arktype matcher cannot be an eval: evaluate the bindings, then match", () => {
     const addPattern = [
       operand("number | string").as("l"),
       constVal("&"),
       operand("l").as("r"),
     ] as const;
     const matcher = match
-      .in<{ l: number; r: number } | { l: string; r: string }>()
+      .in<{ l: number | string; r: number | string }>()
       .case({ l: "number", r: "number" }, (b) => b.l + b.r)
       .case({ l: "string", r: "string" }, (b) => b.l + b.r)
       .default("assert");
@@ -120,23 +120,23 @@ describe("DESIGN: eval typing — correlated bindings", () => {
       pattern: addPattern,
       precedence: 1,
       resultType: "l",
-      eval: matcher as never, // ✗ the runtime calls eval(bindings, runtimeValues)
+      eval: matcher as never, // ✗ bindings are thunks; no case matches
     });
     const wrapped = defineNode({
       name: "bare",
       pattern: addPattern,
       precedence: 1,
       resultType: "l",
-      eval: (b) => matcher(b as never), // ✓ wrap it
+      eval: (b) => matcher({ l: b.l(), r: b.r() }), // ✓ evaluate, then match
     });
 
     expect(() => {
       createParser([num, bare] as const).evaluate("1 & 2", {}, {});
-    }).toThrow(); // "Cannot read properties of undefined (reading 'push')"
+    }).toThrow(); // .default("assert") rejects thunk-shaped input
     expect(createParser([num, wrapped] as const).evaluate("1 & 2", {}, {})).toBe(3);
   });
 
-  it("the documented soundness hole: a union-typed identifier can straddle branches", () => {
+  it("flat bindings are honest: values may straddle the accepted combinations at runtime", () => {
     // x parses AS "string | number", so both slots accept `x + 1` — but at
     // runtime x may hold a string while the right operand is a number. The
     // fixture's match eval uses .default('assert'), so this throws instead
@@ -160,7 +160,7 @@ describe("DESIGN: parsing model — associativity by tail shape", () => {
       pattern: [operand("number").as("l"), constVal("-"), rest("number").as("r")],
       precedence: 1,
       resultType: "number",
-      eval: ({ l, r }) => l - r,
+      eval: ({ l, r }) => l() - r(),
     });
     const right = createParser([num, subR] as const);
     expect(right.evaluate("10-5-2", {}, {})).toBe(7); // 10-(5-2)
@@ -261,7 +261,7 @@ describe("DESIGN: dual-engine divergences", () => {
   });
 });
 
-describe("DESIGN: evaluation model — security & dev assertions", () => {
+describe("DESIGN: evaluation model — security", () => {
   it("prototype members never resolve: expressions are untrusted input", () => {
     expect(() => parser.evaluateAst(
       { node: "identifier", name: "constructor", outputSchema: "unknown" },
@@ -271,23 +271,6 @@ describe("DESIGN: evaluation model — security & dev assertions", () => {
       { node: "path", path: ["x", "__proto__"], outputSchema: "unknown" },
       { x: {} }
     )).toThrow("'x.__proto__' is not defined");
-  });
-
-  it("dev-mode result assertions catch evals that lie about their resultType", () => {
-    const num = defineNode({ name: "n", pattern: [number()], precedence: 2 });
-    const liar = defineNode({
-      name: "liar",
-      pattern: [operand("number").as("a"), constVal("!"), rest("number").as("b")],
-      precedence: 1,
-      resultType: "number",
-      eval: ({ a, b }) => String(a + b) as never, // returns a string
-    });
-    expect(() => {
-      createParser([num, liar] as const, { dev: true }).evaluate("1 ! 2", {}, {});
-    }).toThrow(EvaluationError);
-    expect(
-      createParser([num, liar] as const, { dev: false }).evaluate("1 ! 2", {}, {})
-    ).toBe("3");
   });
 });
 
@@ -302,7 +285,7 @@ describe("review findings (Fable, 2026-07-07) — regression pins", () => {
       pattern: [operand().as("x"), constVal("??"), rest("x | null").as("y")],
       precedence: 1,
       resultType: "x",
-      eval: ({ x }) => x as never,
+      eval: ({ x }) => x() as never,
     });
     // distinct morphs share an .expression — before the fix, "a ?? a"
     // seeded the caches and "b ?? a" silently reused the verdict; on a

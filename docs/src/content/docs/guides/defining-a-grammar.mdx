@@ -19,7 +19,7 @@ const mul = defineNode({
   ],
   precedence: 3,                  // binding strength; highest level = leaves
   resultType: "number",           // the type this node produces (an arktype def)
-  eval: ({ left, right }) => left * right,
+  eval: ({ left, right }) => left() * right(),
 });
 ```
 
@@ -78,7 +78,7 @@ const sub = defineNode({
   pattern: [operand("number").as("left"), constVal("-"), operand("number").as("right")],
   precedence: 2,
   resultType: "number",
-  eval: ({ left, right }) => left - right,
+  eval: ({ left, right }) => left() - right(),
 });
 
 // rest() tail → RIGHT-associative: 2^3^2 = 2^(3^2)
@@ -87,7 +87,7 @@ const pow = defineNode({
   pattern: [operand("number").as("left"), constVal("^"), rest("number").as("right")],
   precedence: 3,
   resultType: "number",
-  eval: ({ left, right }) => left ** right,
+  eval: ({ left, right }) => left() ** right(),
 });
 ```
 
@@ -120,11 +120,11 @@ and a static definition is for nodes that mint a new type (like an `eq` node
 producing `"boolean"`). `eval`'s return type is checked against the declared
 `resultType` at the `defineNode` call site.
 
-## Lazy nodes
+## Evaluation is lazy
 
-`lazy: true` makes `eval` receive memoized thunks (`() => value`) instead of
-values — this is how ternaries and short-circuiting `&&`/`||` avoid evaluating
-untaken branches:
+`eval` receives each binding as a **memoized thunk** (`() => value`) — call a
+binding to evaluate it. Untaken branches never run, which is how ternaries
+and short-circuiting `&&`/`||` work with no opt-in:
 
 ```ts
 const ternary = defineNode({
@@ -136,13 +136,12 @@ const ternary = defineNode({
   ],
   precedence: 0,
   resultType: "then",
-  lazy: true,                         // eval receives thunks
   eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
 });
 ```
 
-Eager is the default; laziness is per-node and visible in `eval`'s parameter
-types.
+Memoization means a binding evaluates at most once, no matter how many times
+its thunk is called.
 
 ## Construction-time validation
 

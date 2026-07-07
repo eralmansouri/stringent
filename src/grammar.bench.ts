@@ -52,15 +52,8 @@ describe("evaluate", () => {
     formSchema
   );
   if (!rule.success) throw new Error("bench setup failed");
-  const devParser = parser;
-  const prodParser = createParser(fixtureNodes, { dev: false });
-
-  bench("evaluateAst headline rule (dev assertions on)", () => {
-    devParser.evaluateAst(rule.ast, matching);
-  });
-
-  bench("evaluateAst headline rule (dev: false)", () => {
-    prodParser.evaluateAst(rule.ast, matching);
+  bench("evaluateAst headline rule", () => {
+    parser.evaluateAst(rule.ast, matching);
   });
 
   bench("parse + validate + evaluate: evaluate()", () => {

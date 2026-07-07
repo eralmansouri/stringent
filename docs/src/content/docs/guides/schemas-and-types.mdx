@@ -99,8 +99,11 @@ const add = defineNode({
   pattern: [operand("number | string").as("left"), constVal("+"), operand("left").as("right")],
   precedence: 2,
   resultType: "left",
-  eval: (b) =>
-    typeof b.left === "string" ? `${b.left}${b.right}` : Number(b.left) + Number(b.right),
+  eval: (b) => {
+    const left = b.left();
+    const right = b.right();
+    return typeof left === "string" ? `${left}${String(right)}` : Number(left) + Number(right);
+  },
 });
 ```
 
@@ -112,20 +115,18 @@ constrains the operand to "whatever `left` parsed as, or null", and
 `resultType: "left | null"` derives a union result the same way. The def
 is resolved per parse in a scope extended with the parsed operand types.
 
-## Correlated bindings & `match`
+## Polymorphic evals & `match`
 
-Reference-linked bindings are **correlated**: `eval`'s parameter is a
-distributed union over the root operand's constraint members, so the branches
-never mix.
+`eval`'s parameter is a **flat** per-binding map: a binding-reference
+constraint resolves to the referenced operand's constraint type.
 
 ```ts
 pattern: [operand("number | string").as("left"), constVal("+"), operand("left").as("right")]
-// eval receives: { left: number; right: number } | { left: string; right: string }
+// eval receives: { left: string | number; right: string | number } (as thunks)
 ```
 
-TypeScript does not narrow *sibling* properties through `typeof b.left`
-(discriminant narrowing needs unit types), so the idiomatic polymorphic eval
-is arktype's `match` — one case per union branch, no casts:
+For polymorphic evals, the idiomatic style is arktype's `match` — one case
+per accepted combination, `.default("assert")` rejecting the rest:
 
 ```ts
 import { match } from "arktype";
@@ -148,19 +149,15 @@ const add = defineNode({
   pattern: addPattern,
   precedence: 2,
   resultType: "left",
-  // wrap the matcher: eval is CALLED as (bindings, runtimeValues), and a
-  // bare arktype matcher would read the second argument as its internal
-  // traversal context and crash
-  eval: (b) => addImpl(b),
+  // bindings are thunks — evaluate them, then match
+  eval: (b) => addImpl({ left: b.left(), right: b.right() }),
 });
 ```
 
-Correlation granularity is definition-level: `"string | number"` splits into
-two branches, while `"boolean"` stays one branch. Runtime values can still
-straddle branches when a union-typed schema identifier fills either side
-(`x + 1` with `x: "string | number"` holding a string) — the same pragmatic
-unsoundness TypeScript accepts for correlated unions; `.default("assert")`
-turns it into a runtime error.
+The runtime backstop matters because values can straddle the accepted
+combinations when a union-typed schema identifier fills either side
+(`x + 1` with `x: "string | number"` holding a string) — `.default("assert")`
+turns the mixed case into a runtime error instead of a silent `"hi1"`.
 
 ## The `"unknown"` type
 

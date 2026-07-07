@@ -142,7 +142,7 @@ describe("schemas and scope", () => {
       pattern: [operand("number").as("v"), constVal("!")],
       precedence: 1,
       resultType: "boolean",
-      eval: ({ v }) => v > 0,
+      eval: ({ v }) => v() > 0,
     });
     const p = createParser([num, variable, positive] as const);
     // schema leaf is a REFINED number; the slot wants plain number —
@@ -415,7 +415,7 @@ describe("grammar validation", () => {
       pattern: [operand("number").as("min"), constVal(".."), rest("number").as("max")],
       precedence: 1,
       resultType: { min: "number", max: "number" },
-      eval: ({ min, max }) => ({ min, max }),
+      eval: ({ min, max }) => ({ min: min(), max: max() }),
     });
     const p = createParser([num, pair] as const);
     const result = p.safeParse("1 .. 2", {});

@@ -25,7 +25,7 @@ const parens = defineNode({
   pattern: [constVal("("), expr().as("inner"), constVal(")")],
   precedence: 4,
   resultType: "inner",
-  eval: ({ inner }) => inner,
+  eval: ({ inner }) => inner(),
 });
 
 const eq = defineNode({
@@ -33,7 +33,7 @@ const eq = defineNode({
   pattern: [operand().as("left"), constVal("=="), rest(overlapping("left")).as("right")],
   precedence: 1,
   resultType: "boolean",
-  eval: ({ left, right }) => left === right,
+  eval: ({ left, right }) => left() === right(),
 });
 
 const add = defineNode({
@@ -41,8 +41,10 @@ const add = defineNode({
   pattern: [operand("number | string").as("left"), constVal("+"), operand("left").as("right")],
   precedence: 2,
   resultType: "left",
-  eval: (b) =>
-    typeof b.left === "string" ? `${b.left}${b.right}` : Number(b.left) + Number(b.right),
+  eval: (b) => {
+    const l = b.left(), r = b.right();
+    return typeof l === "string" ? `${l}${String(r)}` : Number(l) + Number(r);
+  },
 });
 
 const mul = defineNode({
@@ -50,7 +52,7 @@ const mul = defineNode({
   pattern: [operand("number").as("left"), constVal("*"), operand("number").as("right")],
   precedence: 3,
   resultType: "number",
-  eval: ({ left, right }) => left * right,
+  eval: ({ left, right }) => left() * right(),
 });
 
 const ternary = defineNode({
@@ -64,7 +66,6 @@ const ternary = defineNode({
   ],
   precedence: 0,
   resultType: "then",
-  lazy: true,
   eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
 });
 

@@ -190,26 +190,23 @@ typed `string` while `evaluate("1+2", …)` is typed `number`. The AST's
 alongside on a non-enumerable symbol (`OUTPUT_TYPE`), invisible to JSON and
 deep-equality assertions.
 
-### Eval typing: correlated bindings
+### Eval typing: flat bindings
 
-`eval` receives typed bindings derived from the pattern. Reference-linked
-bindings are **correlated**: the bindings parameter is a distributed union
-over the root operand's constraint members —
+`eval` receives typed bindings derived from the pattern — a FLAT
+per-binding map. A binding-reference constraint resolves (transitively) to
+the referenced operand's constraint type; everything else is the element's
+own type:
 
 ```ts
 pattern: [operand("number | string").as("left"), constVal("+"), operand("left").as("right")]
-// eval receives: { left: number; right: number } | { left: string; right: string }
+// eval receives: { left: string | number; right: string | number } (as thunks)
 ```
 
-Correlation granularity is **definition-level**: `"string | number"` splits
-into two branches; `"boolean"` stays one branch (splitting into
-`true | false` would claim value-level correlation the parser never
-enforces). Reference chains (`a ← b ← c`) form one group; multiple groups
-cross-product.
-
-TypeScript does **not** narrow sibling properties through `typeof b.left`
-(discriminant narrowing needs unit types — verified against TS 5.9), so the
-idiomatic polymorphic eval is arktype's `match`, one case per union branch:
+The flat type is honest about what the parser guarantees **per binding**;
+it does not claim cross-binding correlation. For polymorphic evals, the
+idiomatic style is arktype's `match` — one case per accepted combination,
+`.default("assert")` rejecting the rest at runtime (pinned in
+design-claims.test.ts "eval typing"):
 
 ```ts
 const addImpl = match
@@ -218,32 +215,14 @@ const addImpl = match
   .case({ left: "string", right: "string" }, (b) => b.left + b.right)
   .default("assert");
 
-// eval is CALLED as (bindings, runtimeValues) — wrap the matcher, or
-// arktype reads the second argument as its internal traversal context:
-eval: (b) => addImpl(b)
+// bindings are THUNKS — evaluate them, then match:
+eval: (b) => addImpl({ left: b.left(), right: b.right() })
 ```
 
-The two claims above, demonstrated:
-
-```ts
-// TS 5.9 narrows the CHECKED property, never its siblings:
-declare const b: { left: number; right: number } | { left: string; right: string };
-if (typeof b.left === "string") {
-  b.left.toUpperCase();  // ✓ narrowed
-  b.right.toUpperCase(); // ✗ error: still string | number
-}
-
-// a BARE matcher as eval crashes inside arktype — the runtime calls
-// eval(bindings, runtimeValues), and arktype treats a second argument as
-// its internal traversal context:
-eval: addImpl        // ✗ "Cannot read properties of undefined (reading 'push')"
-eval: (b) => addImpl(b) // ✓
-```
-
-Known hole (documented, accepted): runtime values can straddle branches
-when a union-typed schema identifier fills either side. Same pragmatic
-unsoundness TS accepts for correlated unions; `.default("assert")` turns
-it into a runtime error:
+The runtime backstop matters because values may straddle the accepted
+combinations: a union-typed schema identifier satisfies both slots of
+`add`, so `.default("assert")` turns the mixed case into a runtime error
+(pinned in design-claims.test.ts):
 
 ```ts
 // x parses AS "string | number", satisfying both slots of add —
@@ -253,8 +232,9 @@ parser.evaluate("x + 1", { x: "string | number" }, { x: "hi" });
 ```
 
 `eval`'s **return type** is verified against the declared `resultType` at
-the `defineNode` call site (binding references and object defs included).
-At runtime, dev mode (below) re-asserts it for plain-JS users.
+the `defineNode` call site — binding references, object defs, and defs
+embedding references (resolved in a scope of the pattern's bindings) all
+included.
 
 ## Parsing model
 
@@ -332,30 +312,23 @@ At runtime, dev mode (below) re-asserts it for plain-JS users.
 ## Evaluation model
 
 `evaluate`/`evaluateAst` walk the AST post-order: literals yield their
-values, identifiers/paths look up the values object, named-binding children
-evaluate first, then the node's `eval(bindings, values)` runs. The parsed
-`outputSchema` types the result, so evaluation is typed end-to-end for
-literal inputs. `evaluate()` validates the values object against the full
-schema (refinements included) before evaluating.
+values, identifiers/paths look up the values object, and the node's
+`eval(bindings)` runs with each named binding delivered as a **memoized
+thunk**. The parsed `outputSchema` types the result, so evaluation is typed
+end-to-end for literal inputs. `evaluate()` validates the values object
+against the full schema (refinements included) before evaluating.
 
-- **Laziness**: `lazy: true` makes `eval` receive memoized thunks
-  (`() => value`) instead of values — this is how ternary/`&&`/`||`
-  short-circuit. Eager is the default; laziness is per-node and visible in
-  `eval`'s parameter types.
-- **Dev-mode result assertions**: `createParser(nodes, { dev })` — on by
-  default outside `NODE_ENV=production` — asserts each user node's eval
-  output against the node's per-parse resolved Type via precompiled
-  `allows()` (~16ns/node). This is the runtime complement of the
-  compile-time eval-return check, for plain-JS users. Failure messages
-  describe the value's *shape* only (never the value — it may be a secret).
-  Deserialized ASTs carry no attached Types and skip the check.
+- **Evaluation is uniformly lazy**: `eval` always receives memoized thunks
+  (`() => value`). Call a binding to evaluate it — untaken branches are
+  never evaluated, so ternary/`&&`/`||` short-circuit with no opt-in, and
+  memoization means a side-effecting child evaluates at most once no
+  matter how many times its thunk is called (pinned in evaluate.test.ts
+  "uniform laziness"):
 
   ```ts
-  // an eval that lies about its resultType ("number" but returns a string):
-  createParser([num, liar], { dev: true }).evaluate("1 ! 2", {}, {});
-  // ✗ EvaluationError: eval for node 'liar' returned a string, which does
-  //   not satisfy the node's result type 'number'
-  createParser([num, liar], { dev: false }).evaluate("1 ! 2", {}, {}); // "3"
+  eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
+  // "1==1 ? 2 : x" with x undefined evaluates to 2 — the else branch
+  // never runs (pinned in evaluate.test.ts)
   ```
 - **Security posture**: expressions are untrusted input. All identifier and
   path lookups — in the evaluator *and* in parse-time schema resolution —
@@ -419,8 +392,7 @@ Two error domains, each using the representation built for it:
   `evaluate()` and everything produced by compiled rules (serializable,
   `flatByPath` for per-field form state, field-path attribution via
   `ctx.reject({ path })`). The evaluator itself throws `EvaluationError`
-  for undefined identifiers/paths, missing `eval`, and dev-mode result
-  assertion failures.
+  for undefined identifiers/paths and missing `eval`.
 
 Ranking: the parser records the **furthest** token failure plus the
 furthest-reaching constraint mismatch *span*. A mismatch wins when its span
@@ -530,9 +502,11 @@ known exception in the other direction:
 - Union-typed outputs exist only where DECLARED (template resultTypes like
   `"left | null"`); a ternary's disagreeing branches still don't
   auto-synthesize `"number | string"` — they must agree via a reference.
-- Eval-binding typing for template constraints/resultTypes is conservative
-  (`unknown`): correlation and eval-return checking see through
-  whole-string references only.
+- Eval-binding typing for template CONSTRAINTS is conservative: a binding
+  constrained by a def embedding a reference (`rest("l | null")`) types as
+  `unknown` in eval's parameter. Eval-RETURN checking is not: resultType
+  defs embedding references resolve in a scope of the pattern's bindings
+  (see "Eval typing: flat bindings").
 - Evaluation is synchronous (arktype morphs cannot be async); async
   operators must be promise-valued outputs handled by the caller.
 - No incremental/streaming parse; inputs are expression-sized strings.

@@ -68,7 +68,7 @@ all arktype definitions.
      pattern: [constVal("("), expr().as("inner"), constVal(")")],
      precedence: 4,
      resultType: "inner",          // binding reference — derived per parse
-     eval: ({ inner }) => inner,
+     eval: ({ inner }) => inner(),
    });
 
    // Overlap-typed equality: 1 == 'a' is a parse-time type error,
@@ -78,7 +78,7 @@ all arktype definitions.
      pattern: [operand().as("left"), constVal("=="), rest(overlapping("left")).as("right")],
      precedence: 1,
      resultType: "boolean",
-     eval: ({ left, right }) => left === right,
+     eval: ({ left, right }) => left() === right(),
    });
 
    // ONE overloaded add: number+number → number, string+string → string.
@@ -89,8 +89,10 @@ all arktype definitions.
      pattern: [operand("number | string").as("left"), constVal("+"), operand("left").as("right")],
      precedence: 2,                // lower = binds looser
      resultType: "left",           // derived: whatever `left` parsed as
-     eval: (b) =>
-       typeof b.left === "string" ? `${b.left}${b.right}` : Number(b.left) + Number(b.right),
+     eval: (b) => {
+       const l = b.left(), r = b.right();
+       return typeof l === "string" ? `${l}${String(r)}` : Number(l) + Number(r);
+     },
    });
 
    const mul = defineNode({
@@ -98,7 +100,7 @@ all arktype definitions.
      pattern: [operand("number").as("left"), constVal("*"), operand("number").as("right")],
      precedence: 3,                // higher = binds tighter
      resultType: "number",
-     eval: ({ left, right }) => left * right,
+     eval: ({ left, right }) => left() * right(),
    });
 
    // A short-circuiting polymorphic ternary. The rest() tail makes the
@@ -112,7 +114,6 @@ all arktype definitions.
      ],
      precedence: 0,
      resultType: "then",                 // result = the branches' type
-     lazy: true,                         // eval receives thunks
      eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
    });
 
@@ -142,7 +143,7 @@ all arktype definitions.
      pattern: [operand().as("left"), constVal("=="), rest(overlapping("left")).as("right")],
      precedence: 1,
      resultType: "boolean",
-     eval: ({ left, right }) => left === right,
+     eval: ({ left, right }) => left() === right(),
    });
 
    const add = defineNode({
@@ -150,8 +151,10 @@ all arktype definitions.
      pattern: [operand("number | string").as("left"), constVal("+"), operand("left").as("right")],
      precedence: 2,
      resultType: "left",
-     eval: (b) =>
-       typeof b.left === "string" ? `${b.left}${b.right}` : Number(b.left) + Number(b.right),
+     eval: (b) => {
+       const l = b.left(), r = b.right();
+       return typeof l === "string" ? `${l}${String(r)}` : Number(l) + Number(r);
+     },
    });
 
    const mul = defineNode({
@@ -159,7 +162,7 @@ all arktype definitions.
      pattern: [operand("number").as("left"), constVal("*"), operand("number").as("right")],
      precedence: 3,
      resultType: "number",
-     eval: ({ left, right }) => left * right,
+     eval: ({ left, right }) => left() * right(),
    });
 
    const parser = createParser([numberLit, stringLit, boolLit, variable, eq, add, mul] as const);
@@ -221,7 +224,7 @@ all arktype definitions.
      pattern: [operand().as("left"), constVal("=="), rest(overlapping("left")).as("right")],
      precedence: 1,
      resultType: "boolean",
-     eval: ({ left, right }) => left === right,
+     eval: ({ left, right }) => left() === right(),
    });
 
    const add = defineNode({
@@ -229,8 +232,10 @@ all arktype definitions.
      pattern: [operand("number | string").as("left"), constVal("+"), operand("left").as("right")],
      precedence: 2,
      resultType: "left",
-     eval: (b) =>
-       typeof b.left === "string" ? `${b.left}${b.right}` : Number(b.left) + Number(b.right),
+     eval: (b) => {
+       const l = b.left(), r = b.right();
+       return typeof l === "string" ? `${l}${String(r)}` : Number(l) + Number(r);
+     },
    });
 
    const mul = defineNode({
@@ -238,7 +243,7 @@ all arktype definitions.
      pattern: [operand("number").as("left"), constVal("*"), operand("number").as("right")],
      precedence: 3,
      resultType: "number",
-     eval: ({ left, right }) => left * right,
+     eval: ({ left, right }) => left() * right(),
    });
 
    const parser = createParser([numberLit, stringLit, boolLit, variable, eq, add, mul] as const);
@@ -271,7 +276,7 @@ all arktype definitions.
 - [Schemas & types](/stringent/guides/schemas-and-types/) — arktype
   definitions, binding references, and polymorphic nodes.
 - [Parsing & evaluation](/stringent/guides/parsing-and-evaluation/) — the
-  entry points, `compile()`, and lazy evaluation.
+  entry points, `compile()`, and the lazy evaluation model.
 - [Error handling](/stringent/guides/error-handling/) — structured errors and
   what throws when.
 - [Playground](/stringent/playground/) — try the runtime engine live in your

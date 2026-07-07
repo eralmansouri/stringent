@@ -2,11 +2,12 @@
  * Shared fixture grammar for tests.
  *
  * Exercises the full v2 design: passthrough atoms without resultType, a
- * polymorphic parens rule (binding-reference resultType), a lazy
- * short-circuiting ternary (binding-reference constraint + resultType),
- * same-type equality, an overloaded add (union constraint + binding
- * reference = numeric add AND string concat), numeric LEFT-associative
- * operators (operand(...) tails), and a RIGHT-associative pow (rest(...) tail).
+ * polymorphic parens rule (binding-reference resultType), a short-
+ * circuiting ternary (binding-reference constraint + resultType; evaluation
+ * is uniformly lazy, so untaken branches never run), same-type equality,
+ * an overloaded add (union constraint + binding reference = numeric add
+ * AND string concat), numeric LEFT-associative operators (operand(...)
+ * tails), and a RIGHT-associative pow (rest(...) tail).
  *
  * Levels: ternary(0) < eq(1) < add,sub(2) < mul,div(3) < pow(4) < leaf(5)
  */
@@ -73,7 +74,7 @@ export const parens = defineNode({
   pattern: [constVal("("), expr().as("inner"), constVal(")")],
   precedence: 5,
   resultType: "inner",
-  eval: ({ inner }) => inner,
+  eval: ({ inner }) => inner(),
 });
 
 /** Polymorphic short-circuiting ternary: branches must agree, result derives */
@@ -88,7 +89,6 @@ export const ternary = defineNode({
   ],
   precedence: 0,
   resultType: "then",
-  lazy: true,
   eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
 });
 
@@ -99,17 +99,17 @@ export const eq = defineNode({
   pattern: [operand().as("left"), constVal("=="), rest(overlapping("left")).as("right")],
   precedence: 1,
   resultType: "boolean",
-  eval: ({ left, right }) => left === right,
+  eval: ({ left, right }) => left() === right(),
 });
 
 /** Overloaded add: number+number → number, string+string → string.
  *  operand(...) tail → the level folds left-associatively.
  *
- *  The binding reference correlates the operands, so eval's parameter is
- *  the distributed union { left: number; right: number } | { left: string;
- *  right: string }. TS can't narrow sibling properties through a typeof
- *  check, so the idiomatic polymorphic eval is arktype's match: one case
- *  per union branch, no casts. */
+ *  Eval bindings are FLAT: { left: string | number; right: string | number }
+ *  (the parser guarantees the sides are assignable per-parse, but the
+ *  static type does not correlate them). arktype's match is the idiomatic
+ *  polymorphic eval: one case per accepted combination, .default("assert")
+ *  rejects the rest at runtime. */
 const addPattern = [
   operand("number | string").as("left"),
   constVal("+"),
@@ -127,10 +127,7 @@ export const add = defineNode({
   pattern: addPattern,
   precedence: 2,
   resultType: "left",
-  // wrap the matcher: eval is CALLED as (bindings, runtimeValues), and a
-  // bare arktype matcher would treat the second argument as its internal
-  // traversal context and crash
-  eval: (b) => addImpl(b),
+  eval: (b) => addImpl({ left: b.left(), right: b.right() }),
 });
 
 export const sub = defineNode({
@@ -138,7 +135,7 @@ export const sub = defineNode({
   pattern: [operand("number").as("left"), constVal("-"), operand("number").as("right")],
   precedence: 2,
   resultType: "number",
-  eval: ({ left, right }) => left - right,
+  eval: ({ left, right }) => left() - right(),
 });
 
 export const mul = defineNode({
@@ -146,7 +143,7 @@ export const mul = defineNode({
   pattern: [operand("number").as("left"), constVal("*"), operand("number").as("right")],
   precedence: 3,
   resultType: "number",
-  eval: ({ left, right }) => left * right,
+  eval: ({ left, right }) => left() * right(),
 });
 
 export const div = defineNode({
@@ -154,7 +151,7 @@ export const div = defineNode({
   pattern: [operand("number").as("left"), constVal("/"), operand("number").as("right")],
   precedence: 3,
   resultType: "number",
-  eval: ({ left, right }) => left / right,
+  eval: ({ left, right }) => left() / right(),
 });
 
 /** rest(...) tail → right-associative: 2^3^2 = 2^(3^2) */
@@ -163,7 +160,7 @@ export const pow = defineNode({
   pattern: [operand("number").as("left"), constVal("^"), rest("number").as("right")],
   precedence: 4,
   resultType: "number",
-  eval: ({ left, right }) => left ** right,
+  eval: ({ left, right }) => left() ** right(),
 });
 
 export const fixtureNodes = [

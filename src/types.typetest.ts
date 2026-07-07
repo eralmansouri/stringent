@@ -193,7 +193,7 @@ type _p7 = AssertTrue<
 >;
 
 // =============================================================================
-// Ternary: lazy, polymorphic via binding references
+// Ternary: short-circuiting, polymorphic via binding references
 // =============================================================================
 
 type PTern = Parse<G, "1==1 ? 1 : 2", EmptyCtx>;
@@ -392,13 +392,13 @@ type _cp2 = AssertTrue<AssertEqual<Exclude<typeof morphOut, type.errors>, number
 // Eval binding inference (Phase 1 assertions, still pinned)
 // =============================================================================
 
-// Phase 4: reference-linked bindings are a DISTRIBUTED union over the
-// root's constraint members (def-level granularity)
+// Bindings are a FLAT per-binding map; reference-linked bindings resolve
+// to the referenced operand's constraint type (no distributed union)
 type AddBindings = InferEvaluatedBindings<(typeof add)["pattern"]>;
 type _b1 = AssertTrue<
   AssertEqual<
     AddBindings,
-    { left: number; right: number } | { left: string; right: string }
+    { left: string | number; right: string | number }
   >
 >;
 
@@ -413,7 +413,8 @@ type _b3 = AssertTrue<AssertEqual<EqBindings, { left: unknown; right: unknown }>
 type SubBindings = InferEvaluatedBindings<(typeof sub)["pattern"]>;
 type _b4 = AssertTrue<AssertEqual<SubBindings, { left: number; right: number }>>;
 
-// reference CHAINS correlate to the root: a ← b ← c ⇒ one group
+// reference CHAINS resolve transitively to the root constraint's type:
+// c references b references a, so all three carry a's def type
 const _chain = defineNode({
   name: "chain3",
   pattern: [
@@ -425,37 +426,35 @@ const _chain = defineNode({
   ],
   precedence: 1,
   resultType: "a",
-  eval: (b) => b.a,
+  eval: (b) => b.a(),
 });
 type ChainBindings = InferEvaluatedBindings<(typeof _chain)["pattern"]>;
 type _b5 = AssertTrue<
   AssertEqual<
     ChainBindings,
-    | { a: number; b: number; c: number }
-    | { a: string; b: string; c: string }
+    { a: string | number; b: string | number; c: string | number }
   >
 >;
 
-// a non-union root stays ONE branch — "boolean" must NOT distribute into
-// true | false (the parser never enforces value-level correlation)
+// linked bindings on a non-union constraint resolve to that type
 const _iff = defineNode({
   name: "iff",
   pattern: [operand("boolean").as("a"), constVal("<=>"), rest("a").as("b")],
   precedence: 1,
   resultType: "boolean",
-  eval: (b) => b.a === b.b,
+  eval: (b) => b.a() === b.b(),
 });
 type IffBindings = InferEvaluatedBindings<(typeof _iff)["pattern"]>;
 type _b6 = AssertTrue<AssertEqual<IffBindings, { a: boolean; b: boolean }>>;
 
-// eval return is still verified against resultType for correlated patterns
-const _badCorrelated = defineNode({
-  name: "badCorrelated",
+// eval return is verified against resultType for reference-linked patterns
+const _badLinked = defineNode({
+  name: "badLinked",
   pattern: [operand("number | string").as("l"), constVal("&"), rest("l").as("r")],
   precedence: 1,
   resultType: "l",
   // @ts-expect-error — eval must return l's type (string | number), not boolean
-  eval: (b) => b.l === b.r,
+  eval: (b) => b.l() === b.r(),
 });
 
 const _badReturn = defineNode({
@@ -464,7 +463,7 @@ const _badReturn = defineNode({
   precedence: 1,
   resultType: "boolean",
   // @ts-expect-error — eval must return boolean, not number
-  eval: ({ a, b }) => a + b,
+  eval: ({ a, b }) => a() + b(),
 });
 
 const _refReturn = defineNode({
@@ -473,7 +472,7 @@ const _refReturn = defineNode({
   precedence: 1,
   resultType: "inner",
   // @ts-expect-error — eval must return inner's type (number), not string
-  eval: ({ inner }) => String(inner),
+  eval: ({ inner }) => String(inner()),
 });
 
 const _objReturn = defineNode({
@@ -481,7 +480,7 @@ const _objReturn = defineNode({
   pattern: [operand("number").as("min"), constVal(".."), rest("number").as("max")],
   precedence: 1,
   resultType: { min: "number", max: "number" },
-  eval: ({ min, max }) => ({ min, max }),
+  eval: ({ min, max }) => ({ min: min(), max: max() }),
 });
 
 // object resultTypes flow through evaluateAst

@@ -151,20 +151,6 @@ parser.parse("zz == yy", {});
 parser.parse("age + 1", { age: "number > 0" });
 
 // =============================================================================
-// DESIGN: correlated bindings — TS does NOT narrow sibling properties
-// through typeof (needs unit-type discriminants; verified on TS 5.9)
-// =============================================================================
-
-declare const b:
-  | { left: number; right: number }
-  | { left: string; right: string };
-if (typeof b.left === "string") {
-  b.left.toUpperCase(); // the checked property narrows…
-  // @ts-expect-error — …but b.right is STILL string | number
-  b.right.toUpperCase();
-}
-
-// =============================================================================
 // DESIGN: template outputSchema carrier — a TS type cannot be turned back
 // into a def string, so the type level carries the resolved type; its
 // INFERRED type matches the runtime's displayed expression

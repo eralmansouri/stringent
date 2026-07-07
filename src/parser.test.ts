@@ -405,7 +405,7 @@ describe("embedded binding references (scoped defs)", () => {
     pattern: [operand("number | string | null").as("v"), constVal("?")],
     precedence: 1,
     resultType: "v | null",
-    eval: ({ v }) => v as never,
+    eval: ({ v }) => v(),
   });
 
   /** `l ~ r` where r must be l-or-null: a TEMPLATE constraint */
@@ -414,7 +414,7 @@ describe("embedded binding references (scoped defs)", () => {
     pattern: [operand("number | string").as("l"), constVal("~"), rest("l | null").as("r")],
     precedence: 0,
     resultType: "boolean",
-    eval: ({ l, r }) => l === r,
+    eval: ({ l, r }) => l() === r(),
   });
 
   /** object resultType embedding a reference */
@@ -423,7 +423,7 @@ describe("embedded binding references (scoped defs)", () => {
     pattern: [operand("number | string").as("v"), constVal("!")],
     precedence: 1,
     resultType: { value: "v | null" },
-    eval: ({ v }) => ({ value: v }) as never,
+    eval: ({ v }) => ({ value: v() }),
   });
 
   const p = createParser([num, str, nullLit, maybe, pair, box] as const);

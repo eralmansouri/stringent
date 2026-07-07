@@ -35,7 +35,7 @@ const eq = defineNode({
   pattern: [operand().as("left"), constVal("=="), rest(overlapping("left")).as("right")],
   precedence: 1,
   resultType: "boolean",
-  eval: ({ left, right }) => left === right,
+  eval: ({ left, right }) => left() === right(),
 });
 
 const parser = createParser([numberLit, stringLit, variable, eq] as const);
@@ -80,7 +80,7 @@ You declare each rule once — as data. The same declaration drives a
       pattern: [operand().as("left"), constVal("=="), rest(overlapping("left")).as("right")],
       precedence: 1,
       resultType: "boolean",
-      eval: ({ left, right }) => left === right,
+      eval: ({ left, right }) => left() === right(),
     });
 
     const add = defineNode({
@@ -88,8 +88,10 @@ You declare each rule once — as data. The same declaration drives a
       pattern: [operand("number | string").as("left"), constVal("+"), operand("left").as("right")],
       precedence: 2,
       resultType: "left",
-      eval: (b) =>
-        typeof b.left === "string" ? `${b.left}${b.right}` : Number(b.left) + Number(b.right),
+      eval: (b) => {
+        const l = b.left(), r = b.right();
+        return typeof l === "string" ? `${l}${String(r)}` : Number(l) + Number(r);
+      },
     });
 
     const mul = defineNode({
@@ -97,7 +99,7 @@ You declare each rule once — as data. The same declaration drives a
       pattern: [operand("number").as("left"), constVal("*"), operand("number").as("right")],
       precedence: 3,
       resultType: "number",
-      eval: ({ left, right }) => left * right,
+      eval: ({ left, right }) => left() * right(),
     });
 
     const ternary = defineNode({
@@ -109,7 +111,6 @@ You declare each rule once — as data. The same declaration drives a
       ],
       precedence: 0,
       resultType: "then",
-      lazy: true,
       eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
     });
 

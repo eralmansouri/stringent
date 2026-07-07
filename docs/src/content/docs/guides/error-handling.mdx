@@ -74,7 +74,7 @@ signal on mismatches lands, delimiter errors may read as type errors.
 |---|---|---|
 | Schema validation error | every entry point | Schema leaf that doesn't resolve in the parser's scope — a programmer error, not an input error |
 | `StringentParseError` | `parse()` / `evaluate()` / `compile()` | Invalid input: for `parse`/`evaluate`, the compile-time check was bypassed (cast, wide schema type); for `compile`, dynamic input simply failed to parse. Carries the same fields as `StringentError` |
-| `EvaluationError` | `evaluateAst` / `evaluate` | Undefined identifier or path at evaluation, a node without `eval`, values that fail the schema (`evaluate` only), or a dev-mode result assertion failure |
+| `EvaluationError` | `evaluateAst` / `evaluate` | Undefined identifier or path at evaluation, a node without `eval`, or values that fail the schema (`evaluate` only) |
 
 Compiled rules (`parser.compile`) never throw for data — they *return*
 `ArkErrors`, with the failure attributed to the field you pass as

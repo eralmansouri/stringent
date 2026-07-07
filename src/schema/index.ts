@@ -341,16 +341,11 @@ export interface NodeSchema<
   readonly resultType?: TResultType;
 
   /**
-   * When true, eval receives THUNKS (() => value) instead of eagerly
-   * evaluated values, enabling short-circuit semantics (ternary, &&, ||).
-   */
-  readonly lazy?: boolean;
-
-  /**
    * Optional: Evaluate the node to produce a runtime value.
    *
-   * @param values - The named bindings, evaluated (or thunks when lazy)
-   * @param runtimeValues - The values object passed to evaluate()
+   * @param values - The named bindings as memoized thunks (evaluation is
+   *   uniformly lazy — call a binding to evaluate it; untaken branches
+   *   are never evaluated)
    */
   readonly eval?: EvalFn;
 }
@@ -359,26 +354,26 @@ export interface NodeSchema<
 // Stored Function Types
 // =============================================================================
 //
-// NOTE: This type uses loose typing (Record<string, unknown>) intentionally.
-// When you call defineNode(), your eval function receives PROPERLY TYPED
-// parameters via InferEvaluatedBindings. The loose type below is only used
-// for STORAGE in NodeSchema (function parameter contravariance requires a
-// common type to store heterogeneous nodes in one array).
+// NOTE: This type uses loose typing (Record<string, () => unknown>)
+// intentionally. When you call defineNode(), your eval function receives
+// PROPERLY TYPED parameters via InferEvaluatedBindings. The loose type below
+// is only used for STORAGE in NodeSchema (function parameter contravariance
+// requires a common type to store heterogeneous nodes in one array).
 // =============================================================================
 
 /** Stored function type for eval - loose for variance compatibility */
-export type EvalFn = (
-  values: Record<string, unknown>,
-  runtimeValues: Record<string, unknown>
-) => unknown;
+export type EvalFn = (values: Record<string, () => unknown>) => unknown;
 
-/** Wrap every binding in a thunk (used when lazy: true) */
+/** Every binding as a memoized thunk — eval's uniform parameter shape */
 export type Thunked<T> = { [K in keyof T]: () => T[K] };
 
 /**
  * The eval return type, verified against the declared resultType:
  * - binding name → the referenced binding's evaluated type
- * - arktype def (string or object) → its inferred type
+ * - arktype def (string or object) → its inferred type, resolved in a
+ *   scope of the pattern's bindings so defs EMBEDDING references
+ *   ("v | null", { value: "v" }) type correctly (mirrors the engines'
+ *   per-parse scoped resolution; spike/union-defs)
  * - omitted (passthrough) → unknown
  */
 export type EvalReturn<
@@ -386,15 +381,36 @@ export type EvalReturn<
   TPattern extends readonly PatternSchema[]
 > = TResultType extends string
   ? [FindNamedElement<TPattern, TResultType>] extends [never]
-    ? InferDef<TResultType>
+    ? InferDefIn<TResultType, EvalScope<TPattern>>
     : InferEvaluatedBindings<TPattern> extends infer EB
     ? TResultType extends keyof EB
       ? EB[TResultType]
       : unknown
     : unknown
   : TResultType extends object
-  ? type.infer<TResultType>
+  ? InferDefIn<TResultType, EvalScope<TPattern>>
   : unknown;
+
+/**
+ * Infer a def in a scope of already-inferred alias types, falling back to
+ * unknown when unresolvable (e.g. custom parser-scope aliases, checked at
+ * runtime instead).
+ */
+type InferDefIn<D, S> = [type.infer<D, S>] extends [never]
+  ? unknown
+  : type.infer<D, S>;
+
+/**
+ * The pattern's bindings as a resolution scope for defs embedding
+ * references. Const bindings carry matched text, not a type — excluded
+ * (mirrors the engines' template classification; see
+ * parse/index.ts ScopeOfBindings and runtime/compile.ts).
+ */
+type EvalScope<TPattern extends readonly PatternSchema[]> = {
+  [K in ExtractNamedSchemas<TPattern> as K["schema"] extends ConstSchema
+    ? never
+    : K["name"]]: InferEvaluatedTypeInPattern<TPattern, K["schema"]>;
+};
 
 /**
  * Define a node type for the grammar.
@@ -406,6 +422,11 @@ export type EvalReturn<
  * - a binding name ("then") — derived per-parse from that operand
  * - omitted — only for single-element passthrough patterns
  *
+ * Evaluation is uniformly lazy: eval receives each binding as a MEMOIZED
+ * THUNK (`() => value`). Call a binding to evaluate it; untaken branches
+ * are never evaluated, so short-circuit semantics (ternary, &&, ||) need
+ * no opt-in.
+ *
  * @example A polymorphic, short-circuiting ternary:
  * const ternary = defineNode({
  *   name: "ternary",
@@ -416,7 +437,6 @@ export type EvalReturn<
  *   ],
  *   precedence: 0,
  *   resultType: "then",
- *   lazy: true,
  *   eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
  * });
  */
@@ -424,19 +444,14 @@ export function defineNode<
   const TName extends string,
   const TPattern extends readonly PatternSchema[],
   const TPrecedence extends Precedence,
-  const TResultType extends ResultSpec | undefined = undefined,
-  const TLazy extends boolean = false
+  const TResultType extends ResultSpec | undefined = undefined
 >(config: {
   readonly name: TName;
   readonly pattern: TPattern;
   readonly precedence: TPrecedence;
   readonly resultType?: TResultType;
-  readonly lazy?: TLazy;
   readonly eval?: (
-    values: TLazy extends true
-      ? Thunked<InferEvaluatedBindings<TPattern>>
-      : InferEvaluatedBindings<TPattern>,
-    runtimeValues: Record<string, unknown>
+    values: Thunked<InferEvaluatedBindings<TPattern>>
   ) => EvalReturn<NoInfer<TResultType>, TPattern>;
 }): NodeSchema<TName, TPattern, TPrecedence, TResultType> {
   return config as NodeSchema<TName, TPattern, TPrecedence, TResultType>;
@@ -519,11 +534,10 @@ export type InferEvaluatedType<TSchema extends PatternSchemaBase> =
   : never;
 
 /**
- * Evaluated type of an element WITH one-hop binding-reference resolution
- * against the rest of the pattern: a constraint that names an earlier
- * binding takes that element's type; otherwise the constraint is an
- * arktype def. (Used for bindings outside correlation groups — linked
- * bindings go through CorrelatedGroups below instead.)
+ * Evaluated type of an element WITH binding-reference resolution against
+ * the rest of the pattern: a constraint that names an earlier binding
+ * resolves (transitively) to the referenced operand's constraint type;
+ * otherwise the constraint is an arktype def.
  */
 type InferEvaluatedTypeInPattern<
   TPattern extends readonly PatternSchema[],
@@ -531,26 +545,42 @@ type InferEvaluatedTypeInPattern<
 > = TSchema extends { kind: "expr" }
   ? NormalizeConstraint<ExtractSpecOf<TSchema>> extends infer N
     ? N extends OverlapsRef<infer B>
-      ? EvaluatedTypeOfNamed<TPattern, B, unknown>
+      ? ResolveReference<TPattern, B>
       : N extends string
-      ? EvaluatedTypeOfNamed<TPattern, N, InferDef<N>>
-      : unknown
+      ? [FindNamedElement<TPattern, N>] extends [never]
+        ? InferDef<N> // an arktype def, not a reference
+        : ResolveReference<TPattern, N>
+      : unknown // unconstrained slot
     : never
   : InferEvaluatedType<TSchema>;
 
-/** Resolve a named element's evaluated type, or TFallback when absent.
- *  Gated via a conditional (NOT an intersection with PatternSchemaBase —
- *  intersecting pollutes constraint inference with the wide base union). */
-type EvaluatedTypeOfNamed<
+/**
+ * Resolve a binding reference to its target's evaluated type, following
+ * reference CHAINS to the root constraint (c → b → a resolves all three
+ * to a's def type). Tail-recursive; TSeen guards malformed cyclic inputs
+ * (createParser rejects forward/self references structurally, so cycles
+ * cannot be constructed through the public API).
+ */
+type ResolveReference<
   TPattern extends readonly PatternSchema[],
-  B extends string,
-  TFallback
-> = [FindNamedElement<TPattern, B>] extends [never]
-  ? TFallback
-  : FindNamedElement<TPattern, B> extends infer Target
-  ? Target extends PatternSchemaBase
-    ? InferEvaluatedType<Target>
-    : unknown
+  TName extends string,
+  TSeen extends string = never
+> = TName extends TSeen
+  ? unknown
+  : FindNamedElement<TPattern, TName> extends infer Target
+  ? Target extends { kind: "expr" }
+    ? NormalizeConstraint<ExtractSpecOf<Target>> extends infer C
+      ? C extends OverlapsRef<infer B>
+        ? ResolveReference<TPattern, B, TSeen | TName>
+        : C extends string
+        ? [FindNamedElement<TPattern, C>] extends [never]
+          ? InferDef<C> // the root: a def constraint
+          : ResolveReference<TPattern, C, TSeen | TName> // follow the chain
+        : unknown // unconstrained target
+      : never
+    : Target extends PatternSchemaBase
+    ? InferEvaluatedType<Target> // non-expr target (number(), string(), …)
+    : unknown // reference to a name that does not exist
   : never;
 
 /**
@@ -571,187 +601,19 @@ export type InferBindings<TPattern extends readonly PatternSchema[]> = {
 };
 
 // =============================================================================
-// Correlated bindings (Phase 4)
+// Evaluated bindings
 // =============================================================================
-//
-// When a pattern links operands via binding references (rest("left"),
-// overlapping("left")), the evaluated bindings are typed as a DISTRIBUTED
-// UNION over the root operand's constraint members: "number | string"
-// yields { left: string; right: string } | { left: number; right: number }
-// instead of two independent unions.
-//
-// TypeScript does NOT narrow sibling properties through a typeof check on
-// one property (`typeof b.left === "string"` narrows b.left, never b.right
-// — verified against TS 5.9; discriminant narrowing needs unit types). The
-// union's payoff is arktype's `match` (D14): its cases cover exactly the
-// union's branches, handlers are typed per branch, and `.default("assert")`
-// guards the unreachable rest. Plain functions must check each property
-// they use, or cast.
-//
-// Correlation granularity is DEF-level: "string | number" splits into
-// members "string" and "number"; "boolean" stays ONE branch (TS-level
-// distribution would split it into true | false — a value-level correlation
-// the parser never enforces; parse-time types are whole defs).
-//
-// Soundness caveat (documented in V2-PLAN.md): values may straddle
-// branches at runtime when a union-typed schema identifier fills either
-// side — the root parsing AS the whole union (`x + 1`), or, for
-// overlapping() refs, a referencer whose union type merely OVERLAPS the
-// root's parsed member. Same pragmatic hole TS accepts for correlated
-// unions; `.default("assert")` turns it into a runtime error.
-
-/** The binding name an element's constraint references, or never. */
-type RefTargetOf<
-  TPattern extends readonly PatternSchema[],
-  TSchema
-> = TSchema extends { kind: "expr" }
-  ? NormalizeConstraint<ExtractSpecOf<TSchema>> extends infer N
-    ? N extends OverlapsRef<infer B>
-      ? [FindNamedElement<TPattern, B>] extends [never]
-        ? never
-        : B
-      : N extends string
-      ? [FindNamedElement<TPattern, N>] extends [never]
-        ? never
-        : N
-      : never
-    : never
-  : never;
-
-/** Follow reference chains to their root binding (a ← b ← c ⇒ a for all).
- *  TSeen guards malformed cyclic inputs (createParser rejects them). */
-type RootOf<
-  TPattern extends readonly PatternSchema[],
-  N extends string,
-  TSeen extends string = never
-> = N extends TSeen
-  ? N
-  : RefTargetOf<TPattern, FindNamedElement<TPattern, N>> extends infer T
-  ? [T] extends [never]
-    ? N
-    : T extends string
-    ? RootOf<TPattern, T, TSeen | N>
-    : N
-  : never;
-
-/** Names of bindings whose constraints (transitively) reference TRoot. */
-type ReferencersOf<
-  TPattern extends readonly PatternSchema[],
-  TRoot extends string
-> = ExtractNamedSchemas<TPattern> extends infer K
-  ? K extends { name: infer N extends string }
-    ? N extends TRoot
-      ? never
-      : RootOf<TPattern, N> extends TRoot
-      ? N
-      : never
-    : never
-  : never;
-
-/** Correlation roots, in pattern order: named non-reference elements that
- *  at least one other binding references. */
-type CorrelationRoots<
-  TPattern extends readonly PatternSchema[],
-  TRest extends readonly PatternSchema[] = TPattern
-> = TRest extends readonly [
-  infer F extends PatternSchema,
-  ...infer R extends readonly PatternSchema[]
-]
-  ? F extends NamedSchema<PatternSchemaBase, infer N extends string>
-    ? [RefTargetOf<TPattern, F>] extends [never]
-      ? [ReferencersOf<TPattern, N>] extends [never]
-        ? CorrelationRoots<TPattern, R>
-        : [N, ...CorrelationRoots<TPattern, R>]
-      : CorrelationRoots<TPattern, R>
-    : CorrelationRoots<TPattern, R>
-  : [];
-
-type TrimDef<S extends string> = S extends ` ${infer R}`
-  ? TrimDef<R>
-  : S extends `${infer R} `
-  ? TrimDef<R>
-  : S;
-
-/** Split a def on "|" into member defs. Approximate: "|" nested inside
- *  parens/literals produces invalid members, detected below → the whole
- *  def stays one branch. */
-type SplitDefUnion<S extends string> = S extends `${infer A}|${infer B}`
-  ? TrimDef<A> | SplitDefUnion<B>
-  : TrimDef<S>;
-
-/** Did the split produce a fragment that is not a resolvable def? */
-type HasInvalidMember<M extends string> = true extends (
-  M extends string ? ([type.infer<M>] extends [never] ? true : never) : never
-)
-  ? true
-  : false;
-
-/** What a root distributes over: a union of member DEF strings, or a
- *  single TS type wrapped in a no-distribution marker. */
-type RootBranches<
-  TPattern extends readonly PatternSchema[],
-  TRoot extends string
-> = FindNamedElement<TPattern, TRoot> extends infer El
-  ? El extends { kind: "expr" }
-    ? NormalizeConstraint<ExtractSpecOf<El>> extends infer N
-      ? N extends string
-        ? SplitDefUnion<N> extends infer M extends string
-          ? HasInvalidMember<M> extends true
-            ? { __single: InferDef<N> }
-            : M
-          : { __single: unknown }
-        : { __single: unknown } // unconstrained root
-      : never
-    : El extends PatternSchemaBase
-    ? { __single: InferEvaluatedType<El> } // e.g. number().as("n")
-    : { __single: unknown }
-  : never;
-
-/** Merge an intersection of object types into one flat object type. */
-type MergeShape<T> = { [K in keyof T]: T[K] };
-
-/** Cross product of correlation groups: one union branch per combination
- *  of member defs across roots; each branch assigns the member's type to
- *  the root and all its referencers. */
-type CorrelatedGroups<
-  TPattern extends readonly PatternSchema[],
-  TRoots extends readonly string[]
-> = TRoots extends readonly [
-  infer R extends string,
-  ...infer Rest extends readonly string[]
-]
-  ? RootBranches<TPattern, R> extends infer M
-    ? M extends string
-      ? GroupBranch<TPattern, R, InferDef<M>, Rest>
-      : M extends { __single: infer T }
-      ? GroupBranch<TPattern, R, T, Rest>
-      : never
-    : never
-  : {};
-
-type GroupBranch<
-  TPattern extends readonly PatternSchema[],
-  R extends string,
-  T,
-  TRest extends readonly string[]
-> = CorrelatedGroups<TPattern, TRest> extends infer Tail
-  ? Tail extends object
-    ? MergeShape<Record<R | ReferencersOf<TPattern, R>, T> & Tail>
-    : never
-  : never;
-
-/** All binding names covered by some correlation group. */
-type CorrelatedNames<
-  TPattern extends readonly PatternSchema[],
-  TRoots extends readonly string[]
-> = TRoots[number] | ReferencersOf<TPattern, TRoots[number]>;
 
 /**
- * Infer evaluated bindings from a pattern (runtime values).
- * Used for eval() — receives already-evaluated values (or thunks of these
- * types when lazy: true). Binding-reference constraints resolve to the
- * referenced operand's type; reference-linked bindings are correlated as a
- * distributed union over the root's constraint members (see above).
+ * Infer evaluated bindings from a pattern: the object type eval receives
+ * (each property is delivered as a memoized thunk — see Thunked).
+ *
+ * A FLAT per-binding map: binding-reference constraints resolve to the
+ * referenced operand's constraint type; everything else is the element's
+ * own type. Linked bindings are intentionally NOT correlated into a
+ * distributed union — the flat type is honest about what the parser
+ * guarantees per binding, and arktype's `match` narrows per case for
+ * polymorphic evals (see the fixture's `add`).
  *
  * @example
  * ```ts
@@ -761,30 +623,12 @@ type CorrelatedNames<
  *   NamedSchema<ExprSchema<"left", "rest">, "right">
  * ];
  * type EvalBindings = InferEvaluatedBindings<Pattern>;
- * // { left: number; right: number } | { left: string; right: string }
+ * // { left: string | number; right: string | number }
  * ```
  */
-export type InferEvaluatedBindings<TPattern extends readonly PatternSchema[]> =
-  CorrelationRoots<TPattern> extends infer TRoots extends readonly string[]
-    ? TRoots extends readonly []
-      ? {
-          [K in ExtractNamedSchemas<TPattern> as K["name"]]: InferEvaluatedTypeInPattern<
-            TPattern,
-            K["schema"]
-          >;
-        }
-      : CorrelatedGroups<TPattern, TRoots> extends infer G
-      ? G extends object
-        ? MergeShape<
-            {
-              [K in ExtractNamedSchemas<TPattern> as K["name"] extends CorrelatedNames<
-                TPattern,
-                TRoots
-              >
-                ? never
-                : K["name"]]: InferEvaluatedTypeInPattern<TPattern, K["schema"]>;
-            } & G
-          >
-        : never
-      : never
-    : never;
+export type InferEvaluatedBindings<TPattern extends readonly PatternSchema[]> = {
+  [K in ExtractNamedSchemas<TPattern> as K["name"]]: InferEvaluatedTypeInPattern<
+    TPattern,
+    K["schema"]
+  >;
+};
