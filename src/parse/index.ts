@@ -28,9 +28,11 @@
  *   normalized `expression` string instead — behavioral parity is over
  *   accept/reject decisions and inferred TS types, not display strings.
  *
- * Scope caveat (documented): defs resolve in arktype's DEFAULT scope at
- * the type level, so grammars using createParser's `scope` aliases lose
- * literal-mode checking for those defs (use safeParse, or cast).
+ * Defs resolve in the PARSER'S scope at the type level too: Context
+ * carries the inferred scope aliases (createParser's `scope`), threaded
+ * through the def algebra (InferOfDef/DefAssignable/DefOverlaps/
+ * ResolveDefIn) — schema leaves like { created: "Timestamp" } type
+ * correctly in literal mode.
  */
 
 import type { Token } from "@sinclair/parsebox";
@@ -100,14 +102,29 @@ export interface ResolvedDef<T = unknown> {
 }
 
 /** The TS type of a def (string expression, object def, or resolved
- *  carrier). Refinements erase automatically (type.infer<"number > 0">
- *  = number). */
-export type InferOfDef<D> = D extends ResolvedDef<infer T>
+ *  carrier), resolved in the parser's inferred scope `$` (createParser's
+ *  aliases; defaults to the arktype keyword scope alone). Refinements
+ *  erase automatically (type.infer<"number > 0"> = number).
+ *
+ *  The UNSCOPED path is tried first and the scope engages only when it
+ *  yields never (an unresolvable — i.e. alias-referencing — def). This
+ *  is load-bearing, same rule as the runtime and the binding-scope path
+ *  (spike/union-defs): plain inference hits arktype's precomputed
+ *  keywords (shallow + memoized); inference under a custom scope takes
+ *  the deep generic path, and paying it per constraint check blows the
+ *  type-level recursion budget (scoped 30-term canary,
+ *  types.typetest.ts). Consequence: scope aliases must not shadow
+ *  arktype keywords (the runtime scope construction rejects that). */
+export type InferOfDef<D, $ = {}> = D extends ResolvedDef<infer T>
   ? T
   : D extends string
-  ? type.infer<D>
+  ? [type.infer<D>] extends [never]
+    ? type.infer<D, $>
+    : type.infer<D>
   : D extends object
-  ? type.infer<D>
+  ? [type.infer<D>] extends [never]
+    ? type.infer<D, $>
+    : type.infer<D>
   : never;
 
 /**
@@ -118,10 +135,13 @@ export type InferOfDef<D> = D extends ResolvedDef<infer T>
  * wrap their resolved type in a carrier. Costs ~10 instantiations per
  * resolution (measured; spike/union-defs).
  */
-type ResolveDefIn<D, S> = type.infer<D, S> extends infer Scoped
+type ResolveDefIn<D, S> = keyof S extends never
+  ? // no bindings in scope — the def cannot be binding-dependent
+    D
+  : type.infer<D, S> extends infer Scoped
   ? [type.infer<D>] extends [Scoped]
     ? [Scoped] extends [type.infer<D>]
-      ? D // scope-independent — keep the literal def
+      ? D // binding-independent — keep the literal def
       : { "~resolved": Scoped }
     : { "~resolved": Scoped }
   : never;
@@ -129,23 +149,27 @@ type ResolveDefIn<D, S> = type.infer<D, S> extends infer Scoped
 /** Scope of a bindings object: binding name → inferred parsed type.
  *  Const bindings carry matched text, not a type — excluded (mirrors
  *  compile.ts template classification). */
-type ScopeOfBindings<Bindings> = {
+type ScopeOfBindings<Bindings, $ = {}> = {
   [K in keyof Bindings as Bindings[K] extends { node: "const" }
     ? never
-    : K]: Bindings[K] extends { outputSchema: infer O } ? InferOfDef<O> : unknown;
+    : K]: Bindings[K] extends { outputSchema: infer O }
+    ? InferOfDef<O, $>
+    : unknown;
 };
 
 /** Assignability over defs — the type-level twin of TypeEnv.isAssignable.
  *  Keep arguments as LITERAL defs so TS memoizes each distinct check. */
-type DefAssignable<Candidate, Constraint> = [InferOfDef<Candidate>] extends [
-  InferOfDef<Constraint>
-]
+type DefAssignable<Candidate, Constraint, $ = {}> = [
+  InferOfDef<Candidate, $>
+] extends [InferOfDef<Constraint, $>]
   ? true
   : false;
 
 /** Overlap over defs — the type-level twin of TypeEnv.isOverlapping.
  *  Approximated as non-never intersection of the inferred types. */
-type DefOverlaps<A, B> = [InferOfDef<A> & InferOfDef<B>] extends [never]
+type DefOverlaps<A, B, $ = {}> = [
+  InferOfDef<A, $> & InferOfDef<B, $>
+] extends [never]
   ? false
   : true;
 
@@ -245,6 +269,22 @@ type ParseStringPrimitive<
     : ParseStringPrimitive<RestQuotes, TInput>
   : [];
 
+/**
+ * Resolve a schema-leaf def at PARSE TIME: defs the default scope cannot
+ * resolve (parser-scope aliases like "Money") are inferred once in the
+ * parser's scope and carried as a ResolvedDef, so every downstream
+ * constraint check is a shallow carrier extraction instead of a repeated
+ * deep scoped inference (load-bearing: the fold re-checks the left
+ * operand each iteration — the scoped 30-term canary in
+ * types.typetest.ts pins the consequence). Mirrors the runtime, where
+ * ident/path nodes carry their resolved Type.
+ */
+type ResolveLeafDef<D, $> = [D] extends ["unknown"]
+  ? D
+  : [type.infer<D>] extends [never]
+  ? { "~resolved": type.infer<D, $> }
+  : D;
+
 type ParseIdentPrimitive<
   TInput extends string,
   TContext extends Context
@@ -253,7 +293,7 @@ type ParseIdentPrimitive<
   infer R extends string
 ]
   ? V extends keyof TContext["data"]
-    ? [IdentNode<V, TContext["data"][V]>, R]
+    ? [IdentNode<V, ResolveLeafDef<TContext["data"][V], TContext["scope"]>>, R]
     : [IdentNode<V, "unknown">, R]
   : [];
 
@@ -296,7 +336,13 @@ type ParsePathSegments<
       ]
     ? ParsePathSegments<R, [...TSegs, Seg], TContext>
     : [] // dangling dot "values." → fail whole element
-  : [PathNode<TSegs, ResolvePath<TContext["data"], TSegs>>, TInput];
+  : [
+      PathNode<
+        TSegs,
+        ResolveLeafDef<ResolvePath<TContext["data"], TSegs>, TContext["scope"]>
+      >,
+      TInput
+    ];
 
 /**
  * Parse a constant. IDENTIFIER-LIKE values (the value is one whole
@@ -368,7 +414,8 @@ type ResolvedSpec =
 type ResolveSpec<
   TElement extends PatternSchema,
   TDone extends readonly PatternSchema[],
-  TAcc extends readonly unknown[]
+  TAcc extends readonly unknown[],
+  $ = {}
 > = NormalizeConstraint<ExtractSpecOf<TElement>> extends infer N
   ? N extends OverlapsRef<infer B>
     ? FindBoundOutput<TDone, TAcc, B> extends infer D
@@ -386,7 +433,7 @@ type ResolveSpec<
             // defs stay literal (ResolveDefIn)
             def: ResolveDefIn<
               N,
-              ScopeOfBindings<ExtractBindings<TDone, [...TAcc]>>
+              ScopeOfBindings<ExtractBindings<TDone, [...TAcc]>, $>
             >;
           }
         : { mode: "extends"; def: D } // whole-string binding reference
@@ -399,14 +446,16 @@ type ResolveSpec<
  * An "unknown" candidate is rejected by every constrained slot — that is
  * how "identifier not in schema" surfaces as a type mismatch.
  */
-type CheckConstraint<O, RC extends ResolvedSpec> = [RC] extends [undefined]
+type CheckConstraint<O, RC extends ResolvedSpec, $ = {}> = [RC] extends [
+  undefined
+]
   ? true
   : RC extends { mode: infer M; def: infer D }
   ? [O] extends ["unknown"]
     ? false
     : M extends "overlaps"
-    ? DefOverlaps<O, D>
-    : DefAssignable<O, D>
+    ? DefOverlaps<O, D, $>
+    : DefAssignable<O, D, $>
   : false;
 
 // =============================================================================
@@ -502,10 +551,10 @@ type ParseElementWithLevel<
   TAcc extends readonly unknown[]
 > = TElement extends { kind: "expr"; role: infer Role }
   ? Role extends "operand"
-    ? ParseExprWithConstraint<TNextLevels, TInput, TContext, ResolveSpec<TElement, TDone, TAcc>, TFullGrammar>
+    ? ParseExprWithConstraint<TNextLevels, TInput, TContext, ResolveSpec<TElement, TDone, TAcc, TContext["scope"]>, TFullGrammar>
     : Role extends "rest"
-    ? ParseExprWithConstraint<TCurrentLevels, TInput, TContext, ResolveSpec<TElement, TDone, TAcc>, TFullGrammar>
-    : ParseExprWithConstraint<TFullGrammar, TInput, TContext, ResolveSpec<TElement, TDone, TAcc>, TFullGrammar>
+    ? ParseExprWithConstraint<TCurrentLevels, TInput, TContext, ResolveSpec<TElement, TDone, TAcc, TContext["scope"]>, TFullGrammar>
+    : ParseExprWithConstraint<TFullGrammar, TInput, TContext, ResolveSpec<TElement, TDone, TAcc, TContext["scope"]>, TFullGrammar>
   : ParseElement<TElement, TInput, TContext>;
 
 // =============================================================================
@@ -570,6 +619,14 @@ type ExtractBindings<
  * resultType is an OPTIONAL property, so undefined must be stripped before
  * matching.
  */
+/** NOTE: deliberately UNSCOPED — threading the parser scope through the
+ *  fold-accumulated result chain doubles the per-level forcing depth and
+ *  breaks the 30-term canary (measured; see the scoped canary in
+ *  types.typetest.ts). Result defs cannot reference parser aliases (the
+ *  builder validates them against the default scope + bindings), so the
+ *  only conservative corner is a TEMPLATE result over an alias-typed
+ *  operand, which degrades toward unknown; the runtime resolves it
+ *  fully. */
 type ResultSchemaOf<TNode extends NodeSchema, Bindings> = Exclude<
   TNode["resultType"],
   undefined
@@ -633,7 +690,7 @@ type ParseExprWithConstraint<
   infer Node extends { outputSchema: unknown },
   infer Rest extends string
 ]
-  ? CheckConstraint<Node["outputSchema"], TConstraint> extends true
+  ? CheckConstraint<Node["outputSchema"], TConstraint, TContext["scope"]> extends true
     ? [Node, Rest]
     : [] // Type mismatch - backtrack
   : [];

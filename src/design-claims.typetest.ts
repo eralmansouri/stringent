@@ -191,13 +191,23 @@ declare const wide: Record<string, "number">;
 parser.parse("nope + 1", wide); // compiles; throws at runtime
 
 // =============================================================================
-// DESIGN: scope aliases are compile-time blind — schemas/constraints
-// using createParser's `scope` need casts at compile time; the runtime
-// resolves them fully
+// DESIGN: scope aliases resolve at COMPILE TIME — the parser's inferred
+// scope is threaded through schema validation and literal-mode parsing,
+// so alias schemas need no casts and get full end-to-end typing
 // =============================================================================
 
-// @ts-expect-error — "Money" resolves only in the parser's runtime scope
-parser.safeParse("x", { x: "Money" });
+import { createParser } from "./index.js";
+import { fixtureNodes as scopedNodes } from "./__fixtures__/grammar.js";
+
+const scoped = createParser(scopedNodes, { scope: { Money: "number" } });
+// alias schema leaves validate and resolve — no casts:
+scoped.safeParse("x + 1", { x: "Money" });
+// @ts-expect-error — typos in alias names still error at the leaf
+scoped.safeParse("x + 1", { x: "Mony" });
+// literal-mode parsing resolves the alias: x types as number, satisfies
+// add's slot, and the result type flows to the call site
+const scopedSum = scoped.evaluate("x + 1", { x: "Money" }, { x: 41 });
+type _scopedSum = AssertTrue<AssertExtends<typeof scopedSum, number>>;
 
 // =============================================================================
 // DESIGN: evaluation is typed end-to-end for literal inputs — derived

@@ -468,16 +468,23 @@ known exception in the other direction:
   parser.safeParse('"\\x41"', {}); // ✓ evaluates to "A"
   parser.parse('"a\\"b"', {});     // ✓ simple escapes work in BOTH engines
   ```
-- Definitions using `createParser`'s `scope` aliases resolve at runtime
-  only; compile-time validation and literal-mode parsing use arktype's
-  default scope, so scope-alias grammars need `as never` at compile time
-  (threading the scope through `type.validate` is an open work item):
+- SCHEMA defs using `createParser`'s `scope` aliases resolve at compile
+  time and runtime alike — the parser's inferred scope (arktype's
+  `scope.infer`) is threaded through `type.validate`, literal-mode
+  parsing, and result typing (pinned in design-claims.typetest.ts):
 
   ```ts
   const p = createParser(nodes, { scope: { Money: "number" } });
-  p.safeParse("x", { x: "Money" });          // ✗ compile error (default scope)
-  p.safeParse("x", { x: "Money" } as never); // ✓ runtime resolves Money fully
+  p.safeParse("x", { x: "Money" });      // ✓ validates; x types as number
+  p.evaluate("x + 1", { x: "Money" }, { x: 41 }); // 42, typed number
   ```
+
+  CONSTRAINT defs, by contrast, may not use scope aliases: the pattern
+  builder is self-contained (default arktype scope + the chain's
+  bindings), so a node is fully checkable at its definition site without
+  knowing which parser it joins. Alias-shaped constraints remain a
+  runtime-only affordance behind a cast (pinned in createParser.test.ts
+  "extends the scope").
 - Type-level input length: left-associative chains handle 30+ terms
   (tail-recursive fold; canary at 30). Everything that recurses per level
   pays instantiation depth proportional to the level count: on the 6-level
@@ -537,11 +544,9 @@ known exception in the other direction:
 - Precise eval typing through template defs (currently `unknown`).
 - Function-call operators via arktype's `type.fn`, paired with a
   `many()`/separated-list pattern element (argument lists).
-- Literal result types (number/string/boolean literals as arktype unit
-  types) for constant folding and exact-value comparison.
+- Literal result types beyond keyword units (number/string literals as
+  arktype unit types) for constant folding and exact-value comparison.
 - JSON Schema import (`@ark/json-schema`) to bootstrap a stringent schema
   from an existing document.
-- Scope-aware compile-time validation (threading `createParser`'s aliases
-  through `type.validate`/`Parse`).
 - Positional token spans on AST nodes for editor tooling; identifier
   autocomplete via the schema's properties.

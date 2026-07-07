@@ -33,9 +33,13 @@ export type SchemaShape = { readonly [key: string]: unknown };
 // =============================================================================
 
 /**
- * Parse context with schema data.
+ * Parse context with schema data and the parser's scope.
  *
  * @typeParam TData - Schema mapping variable names to their types
+ * @typeParam TScope - The parser's INFERRED scope aliases
+ *   (`createParser(nodes, { scope })` → alias name → inferred type),
+ *   threaded through the def algebra so schema leaves like
+ *   `{ created: "Timestamp" }` resolve at compile time
  *
  * @example
  * ```ts
@@ -43,9 +47,14 @@ export type SchemaShape = { readonly [key: string]: unknown };
  * // x resolves to type "number", y resolves to type "string"
  * ```
  */
-export interface Context<TData extends SchemaShape = SchemaShape> {
+export interface Context<
+  TData extends SchemaShape = SchemaShape,
+  TScope = {}
+> {
   /** Schema types for identifier resolution */
   readonly data: TData;
+  /** Inferred scope aliases for def resolution */
+  readonly scope: TScope;
 }
 
 // =============================================================================
@@ -53,7 +62,7 @@ export interface Context<TData extends SchemaShape = SchemaShape> {
 // =============================================================================
 
 /** Empty context (no schema variables) */
-export const emptyContext: Context<{}> = { data: {} };
+export const emptyContext: Context<{}> = { data: {}, scope: {} };
 
 /** Type alias for empty context */
 export type EmptyContext = Context<{}>;

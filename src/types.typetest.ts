@@ -557,9 +557,9 @@ type _o1 = AssertTrue<AssertEqual<typeof rangeVal, { min: number; max: number }>
 // breaks one of these, literal-mode capacity regressed.
 //
 // Instantiation budget (tsc --extendedDiagnostics, whole project):
-// 1,083,879 before the pattern builder → 1,136,550 with it (2026-07-07)
-// — full definition-site validation of every def costs ~4.9%. Treat
-// ~1.25M as the alarm threshold when adding type-level features.
+// 1,083,879 before the pattern builder → 1,136,550 with it → 1,274,619
+// with scope threading + the scoped canaries below (2026-07-07). Treat
+// ~1.5M as the alarm threshold when adding type-level features.
 // =============================================================================
 
 // left-assoc chains are folded tail-recursively: 30 terms
@@ -569,6 +569,35 @@ type Chain30 = Parse<
   EmptyCtx
 >;
 type _r1 = AssertTrue<AssertExtends<Chain30, [{ node: "add" }, ""]>>;
+
+// the same 30-term chain under a two-alias parser scope — scope
+// threading must not change the literal-led recursion floor (defs on the
+// hot path resolve unscoped-first; scoped inference engages only for
+// alias-referencing defs, resolved ONCE at the ident/path parse into a
+// "~resolved" carrier)
+type ScopedCtx = Context<{ x: "Money" }, { Money: number; Tag: string }>;
+type Chain30Scoped = Parse<
+  G,
+  "1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1",
+  ScopedCtx
+>;
+type _r1s = AssertTrue<AssertExtends<Chain30Scoped, [{ node: "add" }, ""]>>;
+
+// an ALIAS-LED chain: 20 terms. Identifier-led chains have a lower
+// pre-existing floor than literal-led ones (~20 vs 30+ — true before
+// scope threading too); the alias resolves once into the carrier and
+// rides the whole fold
+type Chain20Alias = Parse<
+  G,
+  "x+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1",
+  ScopedCtx
+>;
+type _r1a = AssertTrue<
+  AssertExtends<
+    Chain20Alias,
+    [{ node: "add"; outputSchema: { "~resolved": number } }, ""]
+  >
+>;
 
 // nested parens: 3 deep
 type Nested3 = Parse<G, "(((1)))", EmptyCtx>;

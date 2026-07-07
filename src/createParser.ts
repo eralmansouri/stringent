@@ -14,7 +14,7 @@
  * against the schema Type before evaluation.
  */
 
-import type { type, Type, Out } from "arktype";
+import type { scope, type, Type, Out } from "arktype";
 import type { NodeSchema } from "./schema/index.js";
 import type { InferDef } from "./schema/index.js";
 import type { ComputeGrammar, Grammar } from "./grammar/index.js";
@@ -52,22 +52,30 @@ export type SafeParseResult<TAst> =
   | { success: false; error: StringentError };
 
 /**
- * Map a schema def to the shape of its runtime values object.
+ * The parser's INFERRED scope: alias name → inferred type, computed by
+ * arktype's own scope inferencer (intra-scope references included).
+ */
+export type InferScope<TScope extends ScopeAliases> = scope.infer<TScope>;
+
+/**
+ * Map a schema def to the shape of its runtime values object, resolved
+ * in the parser's inferred scope.
  *
  * @example
  * InferValues<{ x: "number"; values: { password: "string" } }>
  * // { x: number; values: { password: string } }
  */
-export type InferValues<TSchema> = type.infer<TSchema>;
+export type InferValues<TSchema, $ = {}> = type.infer<TSchema, $>;
 
 /** The AST type for a literal input, or AnyAstNode for dynamic strings */
 type AstFor<
   TGrammar extends Grammar,
   TInput extends string,
-  TSchema extends SchemaShape
+  TSchema extends SchemaShape,
+  $ extends {} = {}
 > = string extends TInput // dynamic input
   ? AnyAstNode
-  : Parse<TGrammar, TInput, Context<TSchema>> extends [infer N, string]
+  : Parse<TGrammar, TInput, Context<TSchema, $>> extends [infer N, string]
   ? N
   : AnyAstNode;
 
@@ -75,12 +83,13 @@ type AstFor<
 export type EvaluateResult<
   TGrammar extends Grammar,
   TInput extends string,
-  TSchema extends SchemaShape
-> = Parse<TGrammar, TInput, Context<TSchema>> extends [
+  TSchema extends SchemaShape,
+  $ extends {} = {}
+> = Parse<TGrammar, TInput, Context<TSchema, $>> extends [
   infer N extends { outputSchema: unknown },
   string
 ]
-  ? InferOfDef<N["outputSchema"]>
+  ? InferOfDef<N["outputSchema"], $>
   : unknown;
 
 /** Options for parser.compile() — predicate-rule error attribution */
@@ -106,13 +115,14 @@ export interface CompileRuleOptions {
 export type CompiledRule<
   TGrammar extends Grammar,
   TInput extends string,
-  TSchema extends SchemaShape
+  TSchema extends SchemaShape,
+  $ extends {} = {}
 > = string extends TInput
-  ? Type<(In: InferValues<TSchema>) => Out<unknown>>
-  : EvaluateResult<TGrammar, TInput, TSchema> extends infer R
+  ? Type<(In: InferValues<TSchema, $>) => Out<unknown>>
+  : EvaluateResult<TGrammar, TInput, TSchema, $> extends infer R
   ? [R] extends [boolean]
-    ? Type<InferValues<TSchema>>
-    : Type<(In: InferValues<TSchema>) => Out<R>>
+    ? Type<InferValues<TSchema, $>>
+    : Type<(In: InferValues<TSchema, $>) => Out<R>>
   : never;
 
 type TrimWs<S extends string> = S extends
@@ -146,15 +156,13 @@ export type ValidatedInput<
  * Parser interface with type-safe parse methods.
  *
  * Schemas are arktype object defs, validated at compile time by
- * type.validate (a typo'd leaf like { x: "numbr" } errors at the leaf)
- * and compiled at runtime in the parser's scope.
+ * type.validate IN THE PARSER'S SCOPE — a typo'd leaf like { x: "numbr" }
+ * errors at the leaf, while an alias leaf like { created: "Timestamp" }
+ * resolves when the parser was created with { scope: { Timestamp: … } }.
+ * The same scope drives literal-mode parsing (identifier/path types) and
+ * runtime compilation.
  *
- * Scope caveat: compile-time validation and literal-mode parsing resolve
- * defs in arktype's DEFAULT scope, so schemas/constraints using
- * createParser's `scope` aliases need `as never` at compile time and are
- * fully checked at runtime instead.
- *
- * Schema-leaf validation: safeParse validates leaves eagerly via
+ * Schema-leaf validation: safeParse/compile validate leaves eagerly via
  * type.validate. parse/evaluate cannot: with their deferred-conditional
  * input parameter, a validate-wrapped schema sits on TS's instantiation
  * edge and inference becomes METASTABLE — the identical call typechecks
@@ -166,7 +174,8 @@ export type ValidatedInput<
  */
 export interface Parser<
   TGrammar extends Grammar,
-  TNodes extends readonly NodeSchema[]
+  TNodes extends readonly NodeSchema[],
+  $ extends {} = {}
 > {
   /**
    * Parse a string literal, validated at compile time.
@@ -177,9 +186,9 @@ export interface Parser<
    * was bypassed and the input is invalid.
    */
   parse<TInput extends string, const TSchema extends SchemaShape>(
-    input: ValidatedInput<TGrammar, TInput, Context<TSchema>>,
+    input: ValidatedInput<TGrammar, TInput, Context<TSchema, $>>,
     schema: TSchema
-  ): Parse<TGrammar, TInput, Context<TSchema>>;
+  ): Parse<TGrammar, TInput, Context<TSchema, $>>;
 
   /**
    * Parse any string (including runtime-provided input).
@@ -192,8 +201,8 @@ export interface Parser<
    */
   safeParse<TInput extends string, const TSchema extends SchemaShape>(
     input: TInput,
-    schema: type.validate<TSchema>
-  ): SafeParseResult<AstFor<TGrammar, TInput, TSchema>>;
+    schema: type.validate<TSchema, $>
+  ): SafeParseResult<AstFor<TGrammar, TInput, TSchema, $>>;
 
   /**
    * Parse a string literal and evaluate it against runtime values.
@@ -202,12 +211,12 @@ export interface Parser<
    * object is validated against the schema before evaluation.
    */
   evaluate<TInput extends string, const TSchema extends SchemaShape>(
-    input: ValidatedInput<TGrammar, TInput, Context<TSchema>>,
+    input: ValidatedInput<TGrammar, TInput, Context<TSchema, $>>,
     schema: TSchema,
     // NoInfer: type.infer as a sibling parameter otherwise poisons the
     // input conditional's generic inference (measured — see V2-PLAN.md)
-    values: NoInfer<type.infer<TSchema>>
-  ): EvaluateResult<TGrammar, TInput, TSchema>;
+    values: NoInfer<type.infer<TSchema, $>>
+  ): EvaluateResult<TGrammar, TInput, TSchema, $>;
 
   /**
    * Evaluate an already-parsed AST against runtime values.
@@ -216,7 +225,7 @@ export interface Parser<
   evaluateAst<TAst extends { outputSchema: unknown }>(
     ast: TAst,
     values: EvaluationValues
-  ): InferOfDef<TAst["outputSchema"]>;
+  ): InferOfDef<TAst["outputSchema"], $>;
 
   /**
    * Compile a rule into an arktype Type (D12) — the ecosystem bridge.
@@ -237,9 +246,9 @@ export interface Parser<
    */
   compile<TInput extends string, const TSchema extends SchemaShape>(
     input: TInput,
-    schema: type.validate<TSchema>,
+    schema: type.validate<TSchema, $>,
     options?: CompileRuleOptions
-  ): CompiledRule<TGrammar, TInput, TSchema>;
+  ): CompiledRule<TGrammar, TInput, TSchema, $>;
 
   /** The node schemas used to create this parser */
   readonly nodes: TNodes;
@@ -263,10 +272,13 @@ export interface Parser<
  * const sum = parser.evaluate("1+2", {}, {});  // 3
  * ```
  */
-export function createParser<const TNodes extends readonly NodeSchema[]>(
+export function createParser<
+  const TNodes extends readonly NodeSchema[],
+  const TScope extends ScopeAliases = {}
+>(
   nodes: TNodes,
-  options?: { readonly scope?: ScopeAliases }
-): Parser<ComputeGrammar<TNodes>, TNodes> {
+  options?: { readonly scope?: TScope }
+): Parser<ComputeGrammar<TNodes>, TNodes, InferScope<TScope>> {
   const compiled: CompiledGrammar = compileGrammar(nodes, options?.scope);
 
   const nodesByName = new Map<string, NodeSchema>(
@@ -372,5 +384,5 @@ export function createParser<const TNodes extends readonly NodeSchema[]>(
     },
 
     nodes,
-  } as Parser<ComputeGrammar<TNodes>, TNodes>;
+  } as Parser<ComputeGrammar<TNodes>, TNodes, InferScope<TScope>>;
 }

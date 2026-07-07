@@ -20,29 +20,35 @@ the keyword library plus any aliases you pass as
 
 ```ts
 const parser = createParser(nodes, {
-  scope: { quantity: "number" },  // "quantity" now usable in constraints & schemas
+  scope: { quantity: "number" },  // "quantity" now usable in schemas
 });
 ```
 
-Every distinct definition is compiled once per parser and cached.
+Every distinct definition is compiled once per parser and cached. Schemas
+that use scope aliases resolve at **compile time and runtime alike** — a
+leaf like `{ total: "quantity" }` validates, and `total` types as `number`
+in literal mode, with no casts.
 
 Validation happens at three layers:
 
-1. **Construction time** — `createParser` throws for any constraint or
-   `resultType` that is neither an earlier binding name nor a definition
-   resolvable in the parser's scope. A typo'd `operand("numbr")` is an
-   immediate construction error, not a silently dead grammar rule.
-2. **Compile time** — schema leaves are checked via arktype's
-   `type.validate` on `safeParse`, so `{ x: "numbr" }` errors at the leaf.
+1. **Compile time, at the definition site** — the pattern builder
+   validates every constraint and result def where it is written, against
+   the chain's bindings; a typo'd `operand("nmbr")` is a compile error at
+   that call. Schema leaves are checked via arktype's `type.validate` (in
+   the parser's scope) on `safeParse` and `compile`, so `{ x: "numbr" }`
+   errors at the leaf.
+2. **Construction time** — `createParser` re-checks everything for
+   plain-JS callers, plus the cross-element and cross-node rules types
+   cannot see, and throws with a precise message.
 3. **Runtime** — schemas are compiled in the parser's scope, covering
-   dynamically-built schemas. Schema errors **throw** — they are programmer
-   errors, distinct from input errors, which never throw.
+   dynamically-built schemas; `safeParse` returns a structured
+   `INVALID_SCHEMA` error instead of throwing.
 
-:::caution[Scope aliases are runtime-only]
-Compile-time validation and literal-mode parsing resolve definitions in
-arktype's *default* scope, so schemas and constraints that use
-`createParser`'s `scope` aliases need `as never` at compile time — the
-runtime still fully validates them.
+:::note[Constraints don't use scope aliases]
+Pattern constraints are validated against the default arktype scope plus
+the chain's bindings, so a node is fully checkable at its definition site
+without knowing which parser it joins. Write the definition inline
+(`operand("number")`) rather than through an alias.
 :::
 
 ## Matching is assignability
