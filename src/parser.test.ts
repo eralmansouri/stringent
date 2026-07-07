@@ -316,3 +316,24 @@ describe("const-only atoms", () => {
     });
   });
 });
+
+describe("overlapping() constraints (symmetric equality)", () => {
+  const schema = { x: "string | number" } as const;
+
+  it("accepts both operand orders when types overlap", () => {
+    expect(parseOk("x == 1", schema)).toMatchObject({ node: "eq" });
+    expect(parseOk("1 == x", schema)).toMatchObject({ node: "eq" });
+  });
+
+  it("still rejects disjoint operand types", () => {
+    const error = parseErr("1 == 'a'");
+    expect(error.code).toBe("TYPE_MISMATCH");
+    expect(error.message).toContain("overlapping 'left'");
+  });
+
+  it("keeps refined-vs-base comparisons working via erasure", () => {
+    expect(
+      parseOk("age == 1", { age: "number > 0" })
+    ).toMatchObject({ node: "eq", outputSchema: "boolean" });
+  });
+});

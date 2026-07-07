@@ -66,17 +66,43 @@ export interface ConstSchema<TValue extends string = string>
 // =============================================================================
 
 /**
- * A constraint on an expression slot is a string that is either:
- * - the name of an EARLIER binding in the same pattern — "assignable to
- *   whatever that operand parsed as" (e.g. rhs("left"))
- * - an arktype definition compiled in the parser's scope
- *   (e.g. lhs("number"), lhs("string | number"), lhs("string.email"))
+ * Symmetric constraint for equality-style operators: satisfied when the
+ * operand's type OVERLAPS the referenced binding's type (some value could
+ * inhabit both), rather than being a subtype of it. `x == 1` and `1 == x`
+ * both parse for x: "string | number"; "a" == 1 still fails (disjoint).
+ */
+export interface OverlapsRef<TBinding extends string = string> {
+  readonly kind: "overlaps";
+  readonly binding: TBinding;
+}
+
+/** Create a symmetric (overlap) constraint referencing an earlier binding */
+export const overlapping = <const TBinding extends string>(
+  binding: TBinding
+): OverlapsRef<TBinding> => ({ kind: "overlaps", binding });
+
+/** Runtime type guard for the overlapping() marker */
+export function isOverlapsRef(value: unknown): value is OverlapsRef {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { kind?: unknown }).kind === "overlaps"
+  );
+}
+
+/**
+ * A constraint on an expression slot:
+ * - a string naming an EARLIER binding in the same pattern — "assignable
+ *   to whatever that operand parsed as" (e.g. rhs("left"))
+ * - any other string — an arktype definition compiled in the parser's
+ *   scope (e.g. lhs("number"), lhs("string | number"), lhs("string.email"))
+ * - overlapping("left") — symmetric: types must overlap, not nest
  *
- * createParser decides which one it is: binding names shadow nothing
+ * createParser decides string interpretation: binding names shadow nothing
  * because a binding name that is also a resolvable def is a construction
  * error.
  */
-export type ConstraintSpec = string;
+export type ConstraintSpec = string | OverlapsRef;
 
 /**
  * A node's result type:
@@ -456,13 +482,28 @@ type InferEvaluatedTypeInPattern<
   TSchema extends PatternSchemaBase
 > = TSchema extends { kind: "expr" }
   ? NormalizeConstraint<ExtractSpecOf<TSchema>> extends infer N
-    ? N extends string
-      ? [FindNamedElement<TPattern, N>] extends [never]
-        ? InferDef<N>
-        : InferEvaluatedType<FindNamedElement<TPattern, N> & PatternSchemaBase>
+    ? N extends OverlapsRef<infer B>
+      ? EvaluatedTypeOfNamed<TPattern, B, unknown>
+      : N extends string
+      ? EvaluatedTypeOfNamed<TPattern, N, InferDef<N>>
       : unknown
     : never
   : InferEvaluatedType<TSchema>;
+
+/** Resolve a named element's evaluated type, or TFallback when absent.
+ *  Gated via a conditional (NOT an intersection with PatternSchemaBase —
+ *  intersecting pollutes constraint inference with the wide base union). */
+type EvaluatedTypeOfNamed<
+  TPattern extends readonly PatternSchema[],
+  B extends string,
+  TFallback
+> = [FindNamedElement<TPattern, B>] extends [never]
+  ? TFallback
+  : FindNamedElement<TPattern, B> extends infer Target
+  ? Target extends PatternSchemaBase
+    ? InferEvaluatedType<Target>
+    : unknown
+  : never;
 
 /**
  * Extract all NamedSchema entries from a pattern tuple as a union.

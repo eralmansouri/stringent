@@ -202,11 +202,17 @@ function parseConst(value: string, input: string, env: ParseEnv): ParseResult {
 interface ResolvedConstraint {
   /** undefined = unconstrained */
   readonly type: Type | undefined;
+  /** "extends" = directional subtype; "overlaps" = symmetric */
+  readonly check: "extends" | "overlaps";
   /** Human description for diagnostics */
   readonly describe: string | undefined;
 }
 
-const UNCONSTRAINED: ResolvedConstraint = { type: undefined, describe: undefined };
+const UNCONSTRAINED: ResolvedConstraint = {
+  type: undefined,
+  check: "extends",
+  describe: undefined,
+};
 
 /**
  * Resolve an element's compiled constraint against already-parsed siblings.
@@ -219,24 +225,35 @@ function resolveConstraint(
 ): ResolvedConstraint {
   if (constraint === null || constraint.kind === "none") return UNCONSTRAINED;
   if (constraint.kind === "static") {
-    return { type: constraint.type, describe: constraint.describe };
+    return {
+      type: constraint.type,
+      check: "extends",
+      describe: constraint.describe,
+    };
   }
   // Binding reference: find the referenced sibling's parsed Type
+  const verb =
+    constraint.check === "overlaps" ? "overlapping" : "type of";
   for (let i = 0; i < done.length; i++) {
     const el = done[i] as { __named?: boolean; name?: string };
     if (el.__named === true && el.name === constraint.binding) {
       const type = outputTypeOf(children[i]);
       return {
         type,
+        check: constraint.check,
         describe:
           type === undefined
-            ? `type of '${constraint.binding}' (unknown)`
-            : `${type.expression} (type of '${constraint.binding}')`,
+            ? `${verb} '${constraint.binding}' (unknown)`
+            : `${type.expression} (${verb} '${constraint.binding}')`,
       };
     }
   }
   // Unreachable when compile.ts validated the pattern
-  return { type: undefined, describe: `type of '${constraint.binding}'` };
+  return {
+    type: undefined,
+    check: constraint.check,
+    describe: `${verb} '${constraint.binding}'`,
+  };
 }
 
 /** Assignability check: a candidate with no resolved Type ("unknown") is
@@ -249,7 +266,9 @@ function constraintAccepts(
 ): boolean {
   if (constraint.type === undefined) return true;
   if (candidate === undefined) return false;
-  return env.compiled.env.isAssignable(candidate, constraint.type);
+  return constraint.check === "overlaps"
+    ? env.compiled.env.isOverlapping(candidate, constraint.type)
+    : env.compiled.env.isAssignable(candidate, constraint.type);
 }
 
 // =============================================================================

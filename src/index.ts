@@ -20,6 +20,7 @@ export {
   lhs,
   rhs,
   expr,
+  overlapping,
 } from "./schema/index.js";
 export type {
   NodeSchema,
@@ -33,6 +34,7 @@ export type {
   ExprRole,
   Precedence,
   ConstraintSpec,
+  OverlapsRef,
   ResultSpec,
   EvalFn,
   Thunked,

@@ -20,10 +20,11 @@
  */
 
 import type { Type } from "arktype";
-import type {
-  ExprSchema,
-  NodeSchema,
-  PatternSchema,
+import {
+  isOverlapsRef,
+  type ExprSchema,
+  type NodeSchema,
+  type PatternSchema,
 } from "../schema/index.js";
 import { RESERVED_NODE_NAMES } from "./evaluate.js";
 import { createTypeEnv, eraseRefinements, type ScopeAliases, type TypeEnv } from "./types.js";
@@ -34,7 +35,12 @@ import { createTypeEnv, eraseRefinements, type ScopeAliases, type TypeEnv } from
 
 export type CompiledConstraint =
   | { readonly kind: "none" }
-  | { readonly kind: "ref"; readonly binding: string }
+  | {
+      readonly kind: "ref";
+      readonly binding: string;
+      /** "extends" = directional subtype; "overlaps" = symmetric */
+      readonly check: "extends" | "overlaps";
+    }
   | { readonly kind: "static"; readonly type: Type; readonly describe: string };
 
 export type CompiledResult =
@@ -257,9 +263,25 @@ function compileConstraint(
 ): CompiledConstraint {
   const spec = element.constraint;
   if (spec === undefined) return { kind: "none" };
+
+  if (isOverlapsRef(spec)) {
+    const target = namedSoFar.get(spec.binding);
+    if (target === undefined) {
+      throw new Error(
+        `stringent: node '${node.name}' uses overlapping('${spec.binding}') but no earlier element is named '${spec.binding}'`
+      );
+    }
+    if (target.kind === "const") {
+      throw new Error(
+        `stringent: node '${node.name}' uses overlapping('${spec.binding}') on a const element — const bindings carry their matched text, not a type`
+      );
+    }
+    return { kind: "ref", binding: spec.binding, check: "overlaps" };
+  }
+
   if (typeof spec !== "string") {
     throw new Error(
-      `stringent: node '${node.name}' has a non-string constraint — constraints are arktype defs or binding names`
+      `stringent: node '${node.name}' has a non-string constraint — constraints are arktype defs, binding names, or overlapping(binding)`
     );
   }
 
@@ -271,7 +293,7 @@ function compileConstraint(
         `stringent: node '${node.name}' constrains a slot to binding '${spec}', which is a const element — const bindings carry their matched text, which no expression can produce`
       );
     }
-    return { kind: "ref", binding: spec };
+    return { kind: "ref", binding: spec, check: "extends" };
   }
 
   if (index === 0 && element.role === "lhs" && /^[A-Za-z_$][\w$]*$/.test(spec) && !env.resolves(spec)) {

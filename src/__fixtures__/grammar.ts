@@ -20,6 +20,7 @@ import {
   rhs,
   expr,
   constVal,
+  overlapping,
   createParser,
 } from "../index.js";
 
@@ -66,10 +67,11 @@ export const ternary = defineNode({
   eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
 });
 
-/** Same-type equality: 1 == 'a' is a parse-time type error */
+/** Overlap-typed equality: 1 == 'a' is a parse-time type error, but
+ *  operand order never matters (x == 1 and 1 == x both parse). */
 export const eq = defineNode({
   name: "eq",
-  pattern: [lhs().as("left"), constVal("=="), rhs("left").as("right")],
+  pattern: [lhs().as("left"), constVal("=="), rhs(overlapping("left")).as("right")],
   precedence: 1,
   resultType: "boolean",
   eval: ({ left, right }) => left === right,
