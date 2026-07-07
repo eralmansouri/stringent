@@ -1,25 +1,24 @@
 ---
 title: Defining a Grammar
-description: Grammar nodes, pattern elements, precedence, associativity, and construction-time validation.
+description: Grammar nodes, pattern elements, precedence, associativity by tail shape, and construction-time validation.
 sidebar:
   order: 2
 ---
 
 A grammar is a list of **nodes**, each declared with `defineNode` and combined
 with `createParser`. A node is a pattern of elements, a precedence, and
-(optionally) a result type and an evaluation function:
+(usually) a result type and an evaluation function:
 
 ```ts
 const mul = defineNode({
   name: "mul",                    // unique node name (appears in the AST)
   pattern: [                      // what to match, in order
-    lhs("number").as("left"),
+    operand("number").as("left"),
     constVal("*"),
-    rhs("number").as("right"),
+    operand("number").as("right"),
   ],
-  precedence: 3,                  // binding strength; "atom" for literals
-  associativity: "left",          // per precedence level; defaults to "right"
-  resultType: "number",           // the type this node produces
+  precedence: 3,                  // binding strength; highest level = leaves
+  resultType: "number",           // the type this node produces (an arktype def)
   eval: ({ left, right }) => left * right,
 });
 ```
@@ -29,54 +28,97 @@ const mul = defineNode({
 | Pattern | Description |
 |---------|-------------|
 | `number()` | Numeric literals |
-| `string(quotes)` | Quoted strings, e.g. `string(['"', "'"])` |
+| `string(quotes)` | Quoted strings, e.g. `string(['"', "'"])` — escapes are processed (`\n \t \\ \" \' \xHH \uHHHH`, …) |
+| `boolean()` | The keyword literals `true` / `false` |
+| `nullVal()` | The keyword literal `null` |
+| `undefinedVal()` | The keyword literal `undefined` |
 | `ident()` | Single identifier, type resolved from schema |
 | `path()` | Identifier or dotted path (`values.password`), resolved via nested schema |
 | `constVal(value)` | Exact string (operators, keywords, delimiters) |
-| `lhs(constraint?)` | Left operand — parses at the next-higher precedence level |
-| `rhs(constraint?)` | Right operand — same level (right-assoc) or next level (left-assoc fold) |
+| `operand(constraint?)` | Subexpression at the **next tighter** precedence level |
+| `rest(constraint?)` | Subexpression at the **current** level |
 | `expr(constraint?)` | Full expression — resets to the whole grammar (parens, ternary branches) |
 
 Use `.as(name)` to capture an element as a named **binding** — bindings become
 fields on the AST node and typed parameters of `eval`.
 
+The roles name the parse *level*, not a left/right position: `operand()`
+parses at the next tighter level (which is what prevents left recursion),
+`rest()` stays at the current level, and `expr()` resets to the full grammar.
+
+Keyword literals (`boolean()`, `nullVal()`, `undefinedVal()`) match as *whole
+identifiers* — `nullable` is one identifier, never `null` + `able`. Within a
+level, keyword nodes must come **before** `ident()`/`path()` nodes, or `true`
+parses as an identifier. The `\xHH`/`\uHHHH` string escapes decode at runtime
+only; in literal mode (`parse`/`evaluate`) they are rejected — use
+`safeParse` for strings that need them.
+
 ## Precedence & associativity
 
-- **Precedence** is a non-negative integer, or `"atom"` for literals. Lower
-  numbers bind looser (outermost in the tree); higher numbers bind tighter.
+- **Precedence** is a non-negative integer. Lower numbers bind looser
+  (outermost in the tree); higher numbers bind tighter. The **highest level
+  present is the leaf level** — its patterns must start with a consuming
+  element (literals, `path()`, or a `constVal` like an opening paren).
   Duplicate precedences share a level; nodes within a level are tried in
   definition order with backtracking.
-- **Associativity** is a property of a precedence level (all nodes at one
-  level must agree) and defaults to `"right"`:
-  - `associativity: "left"`: `5-2-1` parses as `(5-2)-1` — for `-`, `/`, and
-    friends.
-  - `"right"` (the default): `2^3^2` parses as `2^(3^2)` — for
+- **Associativity is derived from the pattern's tail element** — there is no
+  associativity property to set:
+  - An `operand()` tail folds **left**: `5-2-1` parses as `(5-2)-1` — for
+    `-`, `/`, and friends.
+  - A `rest()` tail recurses **right**: `2^3^2` parses as `2^(3^2)` — for
     exponentiation and ternaries.
 
-The roles connect to precedence like this: `lhs` parses at the next level up
-(preventing left recursion); `rhs` parses at the current level (right
-associativity) or, on left-associative levels, the next level up; `expr`
-resets to the full grammar — that's what you want inside parentheses, ternary
-branches, and call arguments.
+  All patterns in one precedence level must agree on their tail shape;
+  mixing them is a construction error.
+
+```ts
+// operand() tail → LEFT-associative: a-b-c = (a-b)-c
+const sub = defineNode({
+  name: "sub",
+  pattern: [operand("number").as("left"), constVal("-"), operand("number").as("right")],
+  precedence: 2,
+  resultType: "number",
+  eval: ({ left, right }) => left - right,
+});
+
+// rest() tail → RIGHT-associative: 2^3^2 = 2^(3^2)
+const pow = defineNode({
+  name: "pow",
+  pattern: [operand("number").as("left"), constVal("^"), rest("number").as("right")],
+  precedence: 3,
+  resultType: "number",
+  eval: ({ left, right }) => left ** right,
+});
+```
 
 On left-associative levels the parser seeds an operand from the next level and
 then iteratively folds `op operand`. The fold re-checks each candidate node's
-`lhs` constraint against the folded-so-far result on every iteration, so
+leading constraint against the folded-so-far result on every iteration, so
 heterogeneous operators can share a level.
+
+`expr()` must be followed by a `constVal` in the same pattern — it resets to
+the full grammar, so it is only sound in delimiter-bounded regions (parens'
+`)`, ternary's `:`). An undelimited `expr()` tail would swallow operators
+looser than the node's own precedence and break associativity; final operand
+slots must be `operand()`/`rest()`.
 
 ## Result types
 
+`resultType` is any arktype definition — or the name of an earlier binding:
+
 | Form | Meaning |
 |---|---|
-| `resultType: "boolean"` | static — the node mints a type |
-| `resultType: fromBinding("then")` | derived — the node's type is whatever the named operand parsed as |
+| `resultType: "boolean"` | static — the node mints a type (any arktype def, string or object) |
+| `resultType: "then"` | derived — the node's type is whatever the operand bound as `then` parsed as |
 | omitted | only for passthrough patterns (a single unnamed non-const element) |
 
 `resultType` is only required where it cannot be derived: single-element
-passthrough atoms omit it entirely, [derivation handles polymorphic
-operators](/stringent/guides/schemas-and-types/#polymorphic-nodes), and a
-static name is for nodes that mint a new type (like an `eq` node producing
-`"boolean"`).
+passthrough atoms must omit it entirely (they forward a child and construct
+nothing — declaring a type there would be a lie), [binding references handle
+polymorphic operators](/stringent/guides/schemas-and-types/#polymorphic-nodes),
+and a static definition is for nodes that mint a new type (like an `eq` node
+producing `"boolean"`). `eval`'s return type is checked against the declared
+`resultType` at the `defineNode` call site.
 
 ## Lazy nodes
 
@@ -88,12 +130,12 @@ untaken branches:
 const ternary = defineNode({
   name: "ternary",
   pattern: [
-    lhs("boolean").as("cond"), constVal("?"),
+    operand("boolean").as("cond"), constVal("?"),
     expr().as("then"), constVal(":"),
-    rhs(sameAs("then")).as("else"),
+    rest("then").as("else"),
   ],
   precedence: 0,
-  resultType: fromBinding("then"),
+  resultType: "then",
   lazy: true,                         // eval receives thunks
   eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
 });
@@ -108,16 +150,20 @@ types.
 errors for:
 
 - duplicate or reserved node names (`literal`, `identifier`, `path`, `const`)
-- invalid precedence values and mixed associativity within a level
-- left patterns not shaped `[lhs, ...rest]`, and `rhs`/`expr` at position 0
-  (guaranteed infinite recursion)
-- atoms starting with expression elements, `constVal("")`, and empty
-  constraint lists (`lhs([])`)
+- invalid precedence values and mixed tail shapes within a level
+- left-level patterns not starting with `operand(...)`, and `rest`/`expr` at
+  position 0 (guaranteed infinite recursion)
+- leaf-level patterns starting with expression elements, `constVal("")`, and
+  undelimited `expr()` (no following `constVal`)
 - binding names that collide with AST structure (`node`, `outputSchema`,
-  `__proto__`) or repeat within a pattern
-- `sameAs` referencing a missing, later, or const binding, and `fromBinding`
-  referencing a missing or const binding
-- missing `resultType` where one is required, and constraint strings outside
-  the [type vocabulary](/stringent/guides/schemas-and-types/#the-type-vocabulary)
+  `__proto__`), repeat within a pattern, or shadow a resolvable type in scope
+- binding references to missing, later, or const bindings — in constraints
+  (`operand("left")`, `overlapping("left")`) and in `resultType`
+- missing `resultType` where one is required (or one present on a
+  passthrough pattern)
+- constraints and resultTypes that don't resolve as
+  [arktype definitions in the parser's scope](/stringent/guides/schemas-and-types/)
+  (a typo'd `operand("numbr")` throws immediately), and unsatisfiable
+  constraint intersections
 
 A grammar that constructs is a grammar that parses safely.

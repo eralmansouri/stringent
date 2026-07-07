@@ -4,30 +4,33 @@ import {
   defineNode,
   number,
   string,
+  boolean,
   path,
-  lhs,
-  rhs,
+  operand,
+  rest,
   expr,
   constVal,
-  sameAs,
-  fromBinding,
+  overlapping,
 } from "stringent";
 
-const numberLit = defineNode({ name: "num", pattern: [number()], precedence: "atom" });
-const stringLit = defineNode({ name: "str", pattern: [string(['"', "'"])], precedence: "atom" });
-const variable = defineNode({ name: "var", pattern: [path()], precedence: "atom" });
+// Leaf nodes live at the HIGHEST precedence level; keyword literals
+// (true/false) must come before path(), or `true` parses as an identifier.
+const numberLit = defineNode({ name: "num", pattern: [number()], precedence: 4 });
+const stringLit = defineNode({ name: "str", pattern: [string(['"', "'"])], precedence: 4 });
+const boolLit = defineNode({ name: "bool", pattern: [boolean()], precedence: 4 });
+const variable = defineNode({ name: "var", pattern: [path()], precedence: 4 });
 
 const parens = defineNode({
   name: "parens",
   pattern: [constVal("("), expr().as("inner"), constVal(")")],
-  precedence: "atom",
-  resultType: fromBinding("inner"),
+  precedence: 4,
+  resultType: "inner",
   eval: ({ inner }) => inner,
 });
 
 const eq = defineNode({
   name: "eq",
-  pattern: [lhs().as("left"), constVal("=="), rhs(sameAs("left")).as("right")],
+  pattern: [operand().as("left"), constVal("=="), rest(overlapping("left")).as("right")],
   precedence: 1,
   resultType: "boolean",
   eval: ({ left, right }) => left === right,
@@ -35,18 +38,17 @@ const eq = defineNode({
 
 const add = defineNode({
   name: "add",
-  pattern: [lhs(["number", "string"]).as("left"), constVal("+"), rhs(sameAs("left")).as("right")],
+  pattern: [operand("number | string").as("left"), constVal("+"), operand("left").as("right")],
   precedence: 2,
-  associativity: "left",
-  resultType: fromBinding("left"),
-  eval: ({ left, right }) => (left as any) + (right as any),
+  resultType: "left",
+  eval: (b) =>
+    typeof b.left === "string" ? `${b.left}${b.right}` : Number(b.left) + Number(b.right),
 });
 
 const mul = defineNode({
   name: "mul",
-  pattern: [lhs("number").as("left"), constVal("*"), rhs("number").as("right")],
+  pattern: [operand("number").as("left"), constVal("*"), operand("number").as("right")],
   precedence: 3,
-  associativity: "left",
   resultType: "number",
   eval: ({ left, right }) => left * right,
 });
@@ -54,20 +56,20 @@ const mul = defineNode({
 const ternary = defineNode({
   name: "ternary",
   pattern: [
-    lhs("boolean").as("cond"),
+    operand("boolean").as("cond"),
     constVal("?"),
     expr().as("then"),
     constVal(":"),
-    rhs(sameAs("then")).as("else"),
+    rest("then").as("else"),
   ],
   precedence: 0,
-  resultType: fromBinding("then"),
+  resultType: "then",
   lazy: true,
   eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
 });
 
 const parser = createParser(
-  [numberLit, stringLit, variable, parens, ternary, eq, add, mul] as const
+  [numberLit, stringLit, boolLit, variable, parens, ternary, eq, add, mul] as const
 );
 
 const schema = {
@@ -86,6 +88,7 @@ const examples = [
   "user.name + '!'",
   "(1 + 2) * 3",
   "user.age == x + 15",
+  "true ? 'taken' : user.name",
   "1 + 'a'",
 ];
 

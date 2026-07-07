@@ -462,6 +462,11 @@ check: ~678k instantiations / ~2.7s.
 7. (on `claude/v2-plan-review-e13a11`) — Phase 6: `parser.compile()`
    (predicate narrow / morph pipe, CompiledRule typing, Standard Schema
    + JSON-Schema-fallback tests in `src/compile.test.ts`).
+8. (on `claude/v2-plan-review-e13a11`) — Phase 7: DESIGN.md v2 rewrite,
+   README rewrite (quickstart compile-verified), `pnpm bench` suite, and
+   all 8 Starlight pages + the playground component ported to v2 — every
+   docs snippet verified against the real engine (tsc + vitest) and the
+   docs site build ran green (73 pages; twoslash enforces snippets).
 
 ### The four load-bearing design rules
 
