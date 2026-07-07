@@ -160,11 +160,14 @@ cached alongside.
   all resolve (e.g. `'(a | b)[]'`) — and any non-union def, including
   `'boolean'` — stays one branch. TS-level distribution would fabricate
   value correlations (true/false) the parser never enforces.
-- **Known hole:** when the root operand parses AS the union itself (a
-  union-typed schema identifier), runtime values can straddle branches
-  (`x + 1` with `x: 'string \| number'` holding a string). Same pragmatic
-  unsoundness TS accepts for correlated unions; a match-based eval with
-  `.default('assert')` turns it into a runtime error.
+- **Known hole:** runtime values can straddle branches when a union-typed
+  schema identifier fills either side — the root parsing AS the union
+  itself (`x + 1` with `x: 'string \| number'` holding a string), or, for
+  `overlapping()` refs, a referencer whose union type merely overlaps the
+  root's parsed member (`5 == x`: root parses as `number`, `x` may hold a
+  string). Same pragmatic unsoundness TS accepts for correlated unions; a
+  match-based eval with `.default('assert')` turns it into a runtime
+  error.
 - This is typing only — runtime parsing semantics are unchanged, so the
   dual-engine law is untouched.
 

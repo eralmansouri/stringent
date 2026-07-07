@@ -170,8 +170,12 @@ export function evaluateAst(
           const actual =
             result === null
               ? "null"
+              : result === undefined
+              ? "undefined"
               : Array.isArray(result)
               ? "an array"
+              : typeof result === "object"
+              ? "an object"
               : `a ${typeof result}`;
           throw new EvaluationError(
             `eval for node '${node.node}' returned ${actual}, which does not satisfy the node's result type '${expected.expression}'`

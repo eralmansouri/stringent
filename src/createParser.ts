@@ -213,12 +213,17 @@ export function createParser<const TNodes extends readonly NodeSchema[]>(
 ): Parser<ComputeGrammar<TNodes>, TNodes> {
   const compiled: CompiledGrammar = compileGrammar(nodes, options?.scope);
 
+  // dev defaults ON unless NODE_ENV is explicitly "production" — including
+  // when no process global exists (browser without a bundler define), so
+  // the docs' "on outside production" promise holds there too
   const evalOptions: EvaluateOptions = {
     assertResults:
       options?.dev ??
-      (typeof process !== "undefined" &&
+      !(
+        typeof process !== "undefined" &&
         process.env !== undefined &&
-        process.env.NODE_ENV !== "production"),
+        process.env.NODE_ENV === "production"
+      ),
   };
 
   const nodesByName = new Map<string, NodeSchema>(

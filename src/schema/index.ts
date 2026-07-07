@@ -543,10 +543,12 @@ export type InferBindings<TPattern extends readonly PatternSchema[]> = {
 // distribution would split it into true | false — a value-level correlation
 // the parser never enforces; parse-time types are whole defs).
 //
-// Soundness caveat (documented in V2-PLAN.md): when the root operand
-// itself parses AS the union (a union-typed schema identifier), values may
-// straddle branches at runtime — same pragmatic hole TS accepts for
-// correlated unions. `.default("assert")` turns it into a runtime error.
+// Soundness caveat (documented in V2-PLAN.md): values may straddle
+// branches at runtime when a union-typed schema identifier fills either
+// side — the root parsing AS the whole union (`x + 1`), or, for
+// overlapping() refs, a referencer whose union type merely OVERLAPS the
+// root's parsed member. Same pragmatic hole TS accepts for correlated
+// unions; `.default("assert")` turns it into a runtime error.
 
 /** The binding name an element's constraint references, or never. */
 type RefTargetOf<
