@@ -54,10 +54,15 @@ export type NumberNode<TValue extends string = string> = ASTNode<
   "number"
 > & { raw: TValue; value: ToNumber<TValue> };
 
-export type StringNode<TValue extends string = string> = ASTNode<
-  "literal",
-  "string"
-> & { raw: TValue; value: TValue };
+/**
+ * String literal node. `raw` is the source text between the quotes
+ * (escape sequences intact); `value` is the unescaped runtime string.
+ * For strings without escapes the two coincide.
+ */
+export type StringNode<
+  TRaw extends string = string,
+  TValue extends string = TRaw
+> = ASTNode<"literal", "string"> & { raw: TRaw; value: TValue };
 
 export type NullNode = ASTNode<"literal", "null"> & {
   raw: "null";
@@ -68,10 +73,14 @@ export type UndefinedNode = ASTNode<"literal", "undefined"> & {
   value: undefined;
 };
 
-export type BooleanNode<TValue extends string = string> = ASTNode<
-  "boolean",
-  TValue
-> & { raw: TValue; value: TValue extends "true" ? true : false };
+/** Boolean keyword literal (`true` / `false`). Like number literals, the
+ *  outputSchema is the BASE type ("boolean"), not a unit type — literal
+ *  result types are deferred (see V2-PLAN.md). */
+export type BooleanNode<TValue extends "true" | "false" = "true" | "false"> =
+  ASTNode<"literal", "boolean"> & {
+    raw: TValue;
+    value: TValue extends "true" ? true : false;
+  };
 
 export type LiteralNode =
   | NumberNode

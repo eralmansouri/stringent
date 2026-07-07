@@ -60,6 +60,31 @@ describe("evaluate", () => {
     expect(parser.evaluate("x+1", { x: "number" }, { x: 41 })).toBe(42);
   });
 
+  it("evaluates keyword literals", () => {
+    expect(parser.evaluate("true ? 'y' : 'n'", {}, {})).toBe("y");
+    expect(parser.evaluate("false ? 'y' : 'n'", {}, {})).toBe("n");
+    expect(parser.evaluate("x == null", { x: "string | null" }, { x: null })).toBe(
+      true
+    );
+    expect(parser.evaluate("x == null", { x: "string | null" }, { x: "hi" })).toBe(
+      false
+    );
+  });
+
+  it("evaluates escaped strings to their unescaped values", () => {
+    // dynamic path (safeParse) — the compile-time engine rejects \x/\u
+    const result = parser.safeParse('"line1\\nline2" == x', { x: "string" });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(parser.evaluateAst(result.ast, { x: "line1\nline2" })).toBe(true);
+    }
+    const hex = parser.safeParse('"\\x41\\u0042"', {});
+    expect(hex.success).toBe(true);
+    if (hex.success) {
+      expect(parser.evaluateAst(hex.ast, {})).toBe("AB");
+    }
+  });
+
   it("evaluates the headline use case", () => {
     const matching = parser.evaluate(
       "values.password == values.confirmPassword",

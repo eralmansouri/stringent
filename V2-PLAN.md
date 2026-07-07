@@ -1,8 +1,9 @@
 # Stringent v2 — API Redesign Plan
 
-Status: **Phases 0–4 implemented and green**. Phases 0–3 landed on
-`claude/formeddable-stringent-review-suiwqu` (PR #5); Phase 4 and a plan
-review continue on `claude/v2-plan-review-e13a11`, which contains the
+Status: **Phases 0–5 implemented and green**. Phases 0–3 landed on
+`claude/formeddable-stringent-review-suiwqu` (PR #5); Phases 4–5, the
+D16 rename, and a plan review continue on `claude/v2-plan-review-e13a11`,
+which contains the
 suiwqu history (see the Session Handoff section at the bottom for exact
 state). Decisions below came out of a design review comparing this repo
 against the archived formeddable/stringent (Jan 2026, arktype-based) and a
@@ -289,10 +290,25 @@ during implementation:
   called `(bindings, runtimeValues)` and arktype reads a second argument
   as its internal traversal context. Wrap it: `eval: (b) => impl(b)`.
 
-**Phase 5 — Built-in literals & escapes.** `true`/`false`/`null`/`undefined`
-leaf nodes with keyword-prefix guards in both engines; escape processing in
-the runtime string tokenizer. Port the archive's string-escape and
-primitive-literal test corpora (adapted to the v2 API).
+**Phase 5 — Built-in literals & escapes. ✅ DONE.** New leaf pattern
+elements `boolean()` (true/false), `nullVal()`, `undefinedVal()` — named
+like `constVal` because `null`/`undefined` are not usable as export
+names. Keyword-prefix guard implemented as WHOLE-IDENTIFIER comparison
+(`Token.Ident`/`Token.TIdent`, then equality) in both engines — `nullable`
+is one identifier, so it can never match `null`. Keyword literals carry
+their BASE type (`"boolean"`, not unit `true` — consistent with number
+literals; unit types stay deferred). Ordering rule (documented): keyword
+nodes must precede ident/path nodes within a level, since alternation is
+ordered. String escapes: hand-rolled scanner replaces `Token.String` in
+BOTH engines (`scanString` in runtime/parser.ts ↔ `ScanString` in
+parse/index.ts); `\n \t \r \\ \" \' \` \0 \b \f \v` mirror exactly;
+unknown escapes resolve to the escaped char (JS semantics); `\xHH \uHHHH`
+decode at runtime but are REJECTED in literal mode (hex can't be decoded
+at the type level — conservative divergence, use safeParse). StringNode
+now carries `raw` (source text, escapes intact) + `value` (unescaped).
+The archive corpus was not available in this repo (bundle lives in chat;
+org deleted) — a fresh corpus pins the owner's two required observables:
+escaped-quote termination and real-character escape values.
 
 **Phase 6 — Rule-as-Type integration (D12/D13).** `parser.compile()`
 returning an arktype Type; predicate rules via `narrow` + `ctx.reject({
@@ -373,9 +389,9 @@ tracked by **PR #5** (https://github.com/eralmansouri/stringent/pull/5).
 Phase 4 + the plan-review corrections continue on
 `claude/v2-plan-review-e13a11` (a superset of the suiwqu history) — the
 owner decides whether to point PR #5 at it or open a fresh PR.
-At handoff: `pnpm typecheck`, `pnpm test` (95 tests, 3 files),
+At handoff: `pnpm typecheck`, `pnpm test` (108 tests, 3 files),
 `pnpm build`, and `pnpm check:package` are all green. Whole-project
-check: ~520k instantiations / ~2.2s.
+check: ~552k instantiations / ~2.3s.
 
 ### Done (this branch, in commit order)
 
@@ -405,6 +421,11 @@ check: ~520k instantiations / ~2.2s.
    `src/runtime/types.ts` so the evaluator can read it without an import
    cycle). Plus plan-review corrections (D5 mechanism, eq sketch,
    resolved risks, versioning slip).
+6. (on `claude/v2-plan-review-e13a11`) — D16 rename (`operand()`/`rest()`)
+   and Phase 5: `boolean()`/`nullVal()`/`undefinedVal()` keyword literals
+   (whole-identifier prefix guard, both engines), escape-aware string
+   scanner (`scanString` ↔ `ScanString`), fresh escape/keyword corpus in
+   parser.test.ts + evaluate.test.ts + typetest.
 
 ### The four load-bearing design rules
 
@@ -489,7 +510,8 @@ check: ~520k instantiations / ~2.2s.
 
 ### Next up (in plan order)
 
-- **Phase 5**: built-in true/false/null/undefined literals with
+- ~~**Phase 5**~~ DONE (see the Phases section) — built-in
+  true/false/null/undefined literals with
   keyword-prefix guards in BOTH engines + string escape processing.
   Escapes are NOT redundant with parsebox — verified empirically
   (2026-07-07): (a) `Token.String(['"'], '"a\\"b"')` TERMINATES at the

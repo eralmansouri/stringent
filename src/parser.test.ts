@@ -70,6 +70,110 @@ describe("atoms", () => {
   });
 });
 
+describe("keyword literals", () => {
+  it("parses true/false with boolean values", () => {
+    expect(parseOk("true")).toEqual({
+      node: "literal",
+      raw: "true",
+      value: true,
+      outputSchema: "boolean",
+    });
+    expect(parseOk(" false ")).toEqual({
+      node: "literal",
+      raw: "false",
+      value: false,
+      outputSchema: "boolean",
+    });
+  });
+
+  it("parses null and undefined", () => {
+    expect(parseOk("null")).toEqual({
+      node: "literal",
+      raw: "null",
+      value: null,
+      outputSchema: "null",
+    });
+    expect(parseOk("undefined")).toEqual({
+      node: "literal",
+      raw: "undefined",
+      value: undefined,
+      outputSchema: "undefined",
+    });
+  });
+
+  it("keyword-prefix guard: 'nullable' is an identifier, not null + 'able'", () => {
+    expect(parseOk("nullable", { nullable: "number" })).toEqual(
+      pathNode(["nullable"], "number")
+    );
+    expect(parseOk("truthy", { truthy: "string" })).toEqual(
+      pathNode(["truthy"], "string")
+    );
+    expect(parseOk("undefinedish", { undefinedish: "string" })).toEqual(
+      pathNode(["undefinedish"], "string")
+    );
+  });
+
+  it("keyword types feed constraints: boolean satisfies ternary's cond", () => {
+    const ast = parseOk("true ? 1 : 2");
+    expect(ast).toMatchObject({ node: "ternary", outputSchema: "number" });
+  });
+
+  it("non-boolean keywords do not satisfy boolean slots", () => {
+    const error = parseErr("null ? 1 : 2");
+    expect(error.message).toBeTruthy();
+  });
+
+  it("null overlaps a nullable identifier in eq, but not a number", () => {
+    expect(parseOk("x == null", { x: "string | null" })).toMatchObject({
+      node: "eq",
+      outputSchema: "boolean",
+    });
+    parseErr("1 == null");
+  });
+});
+
+describe("string escapes", () => {
+  // Written source-escaped: '"a\\"b"' is the 7-char input  "a\"b"
+  it("an escaped quote does NOT terminate the string (the parsebox difference)", () => {
+    expect(parseOk('"a\\"b"')).toEqual({
+      node: "literal",
+      raw: 'a\\"b',
+      value: 'a"b',
+      outputSchema: "string",
+    });
+    expect(parseOk("'it\\'s'")).toEqual({
+      node: "literal",
+      raw: "it\\'s",
+      value: "it's",
+      outputSchema: "string",
+    });
+  });
+
+  it("simple escapes produce real characters in the value", () => {
+    expect(parseOk('"line1\\nline2"')).toMatchObject({ value: "line1\nline2" });
+    expect(parseOk('"a\\tb"')).toMatchObject({ value: "a\tb" });
+    expect(parseOk('"a\\\\b"')).toMatchObject({ value: "a\\b" });
+    expect(parseOk('"a\\0b"')).toMatchObject({ value: "a\0b" });
+    expect(parseOk('"\\b\\f\\v\\r"')).toMatchObject({ value: "\b\f\v\r" });
+  });
+
+  it("hex and unicode escapes decode (runtime only)", () => {
+    expect(parseOk('"\\x41\\x62"')).toMatchObject({ value: "Ab" });
+    expect(parseOk('"\\u0041\\u00e9"')).toMatchObject({ value: "Aé" });
+  });
+
+  it("unknown escapes resolve to the escaped character (JS semantics)", () => {
+    expect(parseOk('"a\\qb"')).toMatchObject({ value: "aqb" });
+  });
+
+  it("rejects unterminated strings and malformed hex escapes", () => {
+    parseErr('"abc');
+    parseErr('"abc\\"'); // the only quote is escaped → unterminated
+    parseErr('"\\xZZ"');
+    parseErr('"\\u12"'); // \u needs exactly 4 hex digits
+  });
+});
+
 describe("precedence", () => {
   it("mul binds tighter than add: 1+2*3", () => {
     expect(parseOk("1+2*3")).toEqual(

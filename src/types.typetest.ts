@@ -73,6 +73,62 @@ type _p3 = AssertTrue<
 >;
 
 // =============================================================================
+// Keyword literals & string escapes (Phase 5)
+// =============================================================================
+
+type PTrue = Parse<G, "true", EmptyCtx>;
+type _k1 = AssertTrue<
+  AssertExtends<PTrue, [{ node: "literal"; value: true; outputSchema: "boolean" }, ""]>
+>;
+
+type PNull = Parse<G, "null", EmptyCtx>;
+type _k2 = AssertTrue<
+  AssertExtends<PNull, [{ node: "literal"; value: null; outputSchema: "null" }, ""]>
+>;
+
+type PUndef = Parse<G, "undefined", EmptyCtx>;
+type _k3 = AssertTrue<
+  AssertExtends<PUndef, [{ node: "literal"; value: undefined; outputSchema: "undefined" }, ""]>
+>;
+
+// keyword-prefix guard: nullable is one identifier, not null + "able"
+type PNullable = Parse<G, "nullable", Context<{ nullable: "number" }>>;
+type _k4 = AssertTrue<
+  AssertExtends<PNullable, [{ node: "path"; path: ["nullable"]; outputSchema: "number" }, ""]>
+>;
+
+// boolean literal satisfies ternary's cond constraint
+type PTernKw = Parse<G, "true ? 1 : 2", EmptyCtx>;
+type _k5 = AssertTrue<
+  AssertExtends<PTernKw, [{ node: "ternary"; outputSchema: "number" }, ""]>
+>;
+
+// null does not satisfy a boolean slot
+type PTernNull = Parse<G, "null ? 1 : 2", EmptyCtx>;
+type _k6 = AssertTrue<AssertEqual<PTernNull extends [unknown, ""] ? true : false, false>>;
+
+// null overlaps a nullable identifier in eq; disjoint from number
+type PEqNull = Parse<G, "x == null", Context<{ x: "string | null" }>>;
+type _k7 = AssertTrue<AssertExtends<PEqNull, [{ node: "eq"; outputSchema: "boolean" }, ""]>>;
+type PEqNullBad = Parse<G, "1 == null", EmptyCtx>;
+type _k8 = AssertTrue<AssertEqual<PEqNullBad extends [unknown, ""] ? true : false, false>>;
+
+// escaped quote does NOT terminate the string; value is unescaped, raw keeps
+// the source escapes ("'a\\'b'" below is the 7-char source 'a\'b')
+type PEsc = Parse<G, "'a\\'b'", EmptyCtx>;
+type _k9 = AssertTrue<
+  AssertExtends<PEsc, [{ node: "literal"; raw: "a\\'b"; value: "a'b"; outputSchema: "string" }, ""]>
+>;
+
+type PEscNl = Parse<G, "'line1\\nline2'", EmptyCtx>;
+type _k10 = AssertTrue<AssertExtends<PEscNl, [{ value: "line1\nline2" }, ""]>>;
+
+// \xHH / \uHHHH are runtime-only (hex cannot be decoded at the type level):
+// literal-mode parsing conservatively rejects them — use safeParse
+type PEscHex = Parse<G, "'\\x41'", EmptyCtx>;
+type _k11 = AssertTrue<AssertEqual<PEscHex extends [unknown, ""] ? true : false, false>>;
+
+// =============================================================================
 // Precedence & associativity
 // =============================================================================
 

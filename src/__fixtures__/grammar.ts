@@ -16,6 +16,9 @@ import {
   defineNode,
   number,
   string,
+  boolean,
+  nullVal,
+  undefinedVal,
   path,
   operand,
   rest,
@@ -38,6 +41,26 @@ export const stringLit = defineNode({
   precedence: 5,
 });
 
+export const boolLit = defineNode({
+  name: "bool",
+  pattern: [boolean()],
+  precedence: 5,
+});
+
+export const nullLit = defineNode({
+  name: "null",
+  pattern: [nullVal()],
+  precedence: 5,
+});
+
+export const undefinedLit = defineNode({
+  name: "undefined",
+  pattern: [undefinedVal()],
+  precedence: 5,
+});
+
+/** Keyword nodes MUST come before variable in the level: alternation is
+ *  ordered, and `true` would otherwise parse as a path/identifier. */
 export const variable = defineNode({
   name: "var",
   pattern: [path()],
@@ -146,6 +169,9 @@ export const pow = defineNode({
 export const fixtureNodes = [
   numberLit,
   stringLit,
+  boolLit,
+  nullLit,
+  undefinedLit,
   variable,
   parens,
   ternary,

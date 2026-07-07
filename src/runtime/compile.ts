@@ -69,7 +69,16 @@ export interface CompiledGrammar {
 // Helpers
 // =============================================================================
 
-const CONSUMING_KINDS = new Set(["number", "string", "ident", "path", "const"]);
+const CONSUMING_KINDS = new Set([
+  "number",
+  "string",
+  "boolean",
+  "null",
+  "undefined",
+  "ident",
+  "path",
+  "const",
+]);
 
 /** Binding names that would collide with AST node structure or JS proto
  *  setter semantics */
@@ -169,7 +178,7 @@ export function compileGrammar(
       if (modes[i] === "leaf") {
         if (!CONSUMING_KINDS.has(first.kind)) {
           throw new Error(
-            `stringent: leaf node '${node.name}' (highest precedence level) must start with a consuming element (number, string, ident, path, const)`
+            `stringent: leaf node '${node.name}' (highest precedence level) must start with a consuming element (number, string, boolean, nullVal, undefinedVal, ident, path, const)`
           );
         }
       } else if (modes[i] === "left") {

@@ -44,6 +44,9 @@ import type {
   NamedSchema,
   NumberSchema,
   StringSchema,
+  BooleanSchema,
+  NullSchema,
+  UndefinedSchema,
   IdentSchema,
   PathSchema,
   ConstSchema,
@@ -54,6 +57,9 @@ import type {
 import type {
   NumberNode,
   StringNode,
+  BooleanNode,
+  NullNode,
+  UndefinedNode,
   IdentNode,
   PathNode,
   ConstNode,
@@ -141,14 +147,90 @@ type ParseNumberPrimitive<TInput extends string> =
     ? [NumberNode<V>, R]
     : [];
 
+type WsChar = " " | "\t" | "\n" | "\r";
+
+type TrimLeftWs<S extends string> = S extends `${WsChar}${infer R}`
+  ? TrimLeftWs<R>
+  : S;
+
+/** Single-character escape map — MUST match SIMPLE_ESCAPES in
+ *  src/runtime/parser.ts. Unknown escapes resolve to the escaped char. */
+interface SimpleEscapes {
+  n: "\n";
+  t: "\t";
+  r: "\r";
+  "\\": "\\";
+  '"': '"';
+  "'": "'";
+  "`": "`";
+  "0": "\0";
+  b: "\b";
+  f: "\f";
+  v: "\v";
+}
+
+/**
+ * Escape-aware string scanner, mirroring scanString in
+ * src/runtime/parser.ts. Returns [raw, value, rest] or [] for
+ * unterminated strings. One deliberate divergence: `\xHH` / `\uHHHH`
+ * cannot be hex-decoded at the type level, so literal-mode parsing
+ * REJECTS them (conservative — safeParse handles them at runtime).
+ */
+type ScanString<
+  Q extends string,
+  I extends string,
+  Raw extends string = "",
+  Val extends string = ""
+> = I extends `${Q}${infer R}`
+  ? [Raw, Val, R]
+  : I extends `\\${infer C}${infer R}`
+  ? C extends keyof SimpleEscapes
+    ? ScanString<Q, R, `${Raw}\\${C}`, `${Val}${SimpleEscapes[C]}`>
+    : C extends "x" | "u"
+    ? [] // hex escapes are runtime-only
+    : ScanString<Q, R, `${Raw}\\${C}`, `${Val}${C}`>
+  : I extends `${infer C}${infer R}`
+  ? ScanString<Q, R, `${Raw}${C}`, `${Val}${C}`>
+  : []; // unterminated
+
 type ParseStringPrimitive<
   TQuotes extends readonly string[],
   TInput extends string
-> = Token.TString<[...TQuotes], TInput> extends [
+> = TQuotes extends readonly [
+  infer Q extends string,
+  ...infer RestQuotes extends readonly string[]
+]
+  ? TrimLeftWs<TInput> extends `${Q}${infer Body}`
+    ? ScanString<Q, Body> extends [
+        infer Raw extends string,
+        infer Val extends string,
+        infer R extends string
+      ]
+      ? [StringNode<Raw, Val>, R]
+      : []
+    : ParseStringPrimitive<RestQuotes, TInput>
+  : [];
+
+/**
+ * Parse a keyword literal (true/false/null/undefined) as a WHOLE
+ * identifier — `nullable` is one identifier, so it never matches the
+ * `null` keyword (prefix guard). Mirrors parseKeyword in
+ * src/runtime/parser.ts.
+ */
+type ParseKeywordPrimitive<
+  TKind extends "boolean" | "null" | "undefined",
+  TInput extends string
+> = Token.TIdent<TInput> extends [
   infer V extends string,
   infer R extends string
 ]
-  ? [StringNode<V>, R]
+  ? TKind extends "boolean"
+    ? V extends "true" | "false"
+      ? [BooleanNode<V>, R]
+      : []
+    : V extends TKind
+    ? [TKind extends "null" ? NullNode : UndefinedNode, R]
+    : []
   : [];
 
 type ParseIdentPrimitive<
@@ -310,6 +392,12 @@ type ParseElement<
   ? ParseNumberPrimitive<TInput>
   : TElement extends StringSchema<infer Q>
   ? ParseStringPrimitive<Q, TInput>
+  : TElement extends BooleanSchema
+  ? ParseKeywordPrimitive<"boolean", TInput>
+  : TElement extends NullSchema
+  ? ParseKeywordPrimitive<"null", TInput>
+  : TElement extends UndefinedSchema
+  ? ParseKeywordPrimitive<"undefined", TInput>
   : TElement extends IdentSchema
   ? ParseIdentPrimitive<TInput, TContext>
   : TElement extends PathSchema

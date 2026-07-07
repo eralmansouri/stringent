@@ -83,24 +83,127 @@ function parseNumber(input: string, env: ParseEnv): ParseResult {
   return [node, result[1]];
 }
 
+/** Single-character escape sequences (JS semantics). Unknown escapes
+ *  resolve to the escaped character itself (`\q` → `q`), like JS. */
+const SIMPLE_ESCAPES: Record<string, string> = {
+  n: "\n",
+  t: "\t",
+  r: "\r",
+  "\\": "\\",
+  '"': '"',
+  "'": "'",
+  "`": "`",
+  "0": "\0",
+  b: "\b",
+  f: "\f",
+  v: "\v",
+};
+
+const WHITESPACE = new Set([" ", "\t", "\n", "\r"]);
+const HEX_RE = /^[0-9a-fA-F]+$/;
+
+/**
+ * Escape-aware string scanner, replacing parsebox's Token.String, which
+ * (verified) terminates AT an escaped quote and never unescapes.
+ *
+ * Returns [raw, value, rest]: raw = source text between the quotes
+ * (escapes intact), value = the unescaped runtime string. No match for a
+ * missing/unterminated quote or a malformed \xHH / \uHHHH escape.
+ * Behavior MUST stay in sync with ScanString in src/parse/index.ts
+ * (which conservatively rejects \x/\u — hex decoding is runtime-only).
+ */
+function scanString(
+  quotes: readonly string[],
+  input: string
+): [] | [string, string, string] {
+  let i = 0;
+  while (i < input.length && WHITESPACE.has(input[i])) i++;
+  const quote = input[i];
+  if (quote === undefined || !quotes.includes(quote)) return [];
+
+  let value = "";
+  let j = i + 1;
+  while (j < input.length) {
+    const c = input[j];
+    if (c === quote) {
+      return [input.slice(i + 1, j), value, input.slice(j + 1)];
+    }
+    if (c === "\\") {
+      const e = input[j + 1];
+      if (e === undefined) return []; // dangling backslash at end of input
+      if (e === "x" || e === "u") {
+        const len = e === "x" ? 2 : 4;
+        const hex = input.slice(j + 2, j + 2 + len);
+        if (hex.length !== len || !HEX_RE.test(hex)) return [];
+        value += String.fromCharCode(parseInt(hex, 16));
+        j += 2 + len;
+        continue;
+      }
+      value += SIMPLE_ESCAPES[e] ?? e;
+      j += 2;
+      continue;
+    }
+    value += c;
+    j++;
+  }
+  return []; // unterminated
+}
+
 function parseString(
   quotes: readonly string[],
   input: string,
   env: ParseEnv
 ): ParseResult {
-  const result = Token.String([...quotes], input) as [] | [string, string];
+  const result = scanString(quotes, input);
   if (result.length === 0) {
     fail(env.diag, input, "string");
     return [];
   }
+  const [raw, value, rest] = result;
   const node = {
     node: "literal",
-    raw: result[0],
-    value: result[0],
+    raw,
+    value,
     outputSchema: "string",
-  } as StringNode<(typeof result)[0]>;
+  } as StringNode<string, string>;
   setOutputType(node, env.compiled.env.compileDef("string"));
-  return [node, result[1]];
+  return [node, rest];
+}
+
+/**
+ * Parse a keyword literal (true/false/null/undefined) as a WHOLE
+ * identifier — `nullable` is one identifier, not `null` + `able`, so it
+ * never matches (the keyword-prefix guard, mirrored by the type engine).
+ */
+function parseKeyword(
+  kind: "boolean" | "null" | "undefined",
+  input: string,
+  env: ParseEnv
+): ParseResult {
+  const result = Token.Ident(input) as [] | [string, string];
+  const expected =
+    kind === "boolean" ? "'true' or 'false'" : `'${kind}'`;
+  if (result.length === 0) {
+    fail(env.diag, input, expected);
+    return [];
+  }
+  const [word, rest] = result;
+  const matches =
+    kind === "boolean" ? word === "true" || word === "false" : word === kind;
+  if (!matches) {
+    fail(env.diag, input, expected);
+    return [];
+  }
+  const value =
+    kind === "boolean" ? word === "true" : kind === "null" ? null : undefined;
+  const node = {
+    node: "literal",
+    raw: word,
+    value,
+    outputSchema: kind,
+  } as ASTNode & { raw: string; value: unknown };
+  setOutputType(node, env.compiled.env.compileDef(kind));
+  return [node, rest];
 }
 
 function parseIdent(input: string, env: ParseEnv): ParseResult {
@@ -269,6 +372,10 @@ function parseElement(
       return parseNumber(input, env);
     case "string":
       return parseString((element as StringSchema).quotes, input, env);
+    case "boolean":
+    case "null":
+    case "undefined":
+      return parseKeyword(element.kind, input, env);
     case "ident":
       return parseIdent(input, env);
     case "path":
