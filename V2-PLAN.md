@@ -372,7 +372,10 @@ check: ~510k instantiations / ~2.8s.
   arrows `expect(() => { createParser(...); })` in throw tests.
 - Widened `number` or `never` precedence used to hang the type-level
   digit comparator; `IsValidPrecedence` now guards both (grammar →
-  `never`).
+  `never`). Docs (Phase 7) should recommend generic factories —
+  `<const TPrec extends number>(precedence: TPrec)` — which preserve
+  literals through helpers (verified); the guard remains for genuinely
+  runtime-sourced values, where no generic can help.
 - `Token.Number("1..2")` consumes "1" then leaves ".2" — range-like
   operators need whitespace or a different spelling in tests.
 - Python heredoc file edits corrupted a UTF-8 file once; prefer the Edit
