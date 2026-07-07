@@ -291,6 +291,58 @@ describe("DESIGN: evaluation model — security & dev assertions", () => {
   });
 });
 
+describe("review findings (Fable, 2026-07-07) — regression pins", () => {
+  it("F1: morph-typed schema leaves cannot crash or corrupt the caches", () => {
+    const f = type("string").pipe((s) => s.length);
+    const g = type("string").pipe((s) => s + "!");
+    const num = defineNode({ name: "n", pattern: [number()], precedence: 2 });
+    const vary = defineNode({ name: "v", pattern: [path()], precedence: 2 });
+    const coalesce = defineNode({
+      name: "coalesce",
+      pattern: [operand().as("x"), constVal("??"), rest("x | null").as("y")],
+      precedence: 1,
+      resultType: "x",
+      eval: ({ x }) => x as never,
+    });
+    // distinct morphs share an .expression — before the fix, "a ?? a"
+    // seeded the caches and "b ?? a" silently reused the verdict; on a
+    // fresh parser "b ?? a" THREW out of safeParse instead
+    const schema = { a: f, b: g } as never;
+    const fresh = createParser([num, vary, coalesce] as const);
+    expect(fresh.safeParse("b ?? a", schema).success).toBe(false); // no throw
+
+    const seeded = createParser([num, vary, coalesce] as const);
+    expect(seeded.safeParse("a ?? a", schema).success).toBe(true); // same morph: fine
+    expect(seeded.safeParse("b ?? a", schema).success).toBe(false); // cache not fooled
+  });
+
+  it("F2: the '~resolved' carrier key is enforced as reserved", () => {
+    const num = defineNode({ name: "n", pattern: [number()], precedence: 2 });
+    const sneaky = defineNode({
+      name: "sneaky",
+      pattern: [operand("number").as("a"), constVal("!"), rest("number").as("b")],
+      precedence: 1,
+      resultType: { "~resolved": "number" } as never,
+    });
+    expect(() => {
+      createParser([num, sneaky] as const);
+    }).toThrow(/'~resolved' key .* reserved/);
+  });
+
+  it("F3: refinement-on-reference templates get an honest construction error", () => {
+    const num = defineNode({ name: "n", pattern: [number()], precedence: 2 });
+    const refined = defineNode({
+      name: "refined",
+      pattern: [operand("number").as("left"), constVal("!"), rest("left > 5").as("r")],
+      precedence: 1,
+      resultType: "number",
+    });
+    expect(() => {
+      createParser([num, refined] as const);
+    }).toThrow(/refinements must live on the referenced operand's own constraint/);
+  });
+});
+
 describe("DESIGN: error model — known ranking weakness", () => {
   it("unclosed delimiters report a speculative constraint mismatch, not the missing ')'", () => {
     // The ternary probes whether `1` is boolean while parsing "(1"; that

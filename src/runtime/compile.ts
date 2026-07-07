@@ -340,6 +340,17 @@ function compileConstraint(
     if (bindings.length > 0 && env.resolvesWith(spec, bindings)) {
       return { kind: "template", def: spec, bindings };
     }
+    // A def that DOES reference a binding but still fails validated as
+    // "unknown" (e.g. "left > 5") — say so instead of "'left' is
+    // unresolvable" (review F3)
+    const refined = bindings.find((name) =>
+      new RegExp(`\\b${name}\\b`).test(spec)
+    );
+    if (refined !== undefined) {
+      throw new Error(
+        `stringent: node '${node.name}' has constraint '${spec}', which applies an operator or refinement to the binding reference '${refined}' — references validate as 'unknown' at construction, so refinements must live on the referenced operand's own constraint instead`
+      );
+    }
     throw new Error(
       `stringent: node '${node.name}' has constraint '${spec}', which is neither an earlier binding name, a def referencing one, nor a valid type in this parser's scope — ${(e as Error).message}`
     );
@@ -352,6 +363,17 @@ function compileResult(
   env: TypeEnv
 ): CompiledResult {
   const spec = node.resultType;
+  // "~resolved" is the type engine's resolved-carrier key (parse/index.ts)
+  // — a user object def carrying it would silently infer wrong types
+  if (
+    spec !== null &&
+    typeof spec === "object" &&
+    Object.hasOwn(spec, "~resolved")
+  ) {
+    throw new Error(
+      `stringent: node '${node.name}' has a resultType with a '~resolved' key — that key is reserved for the type engine's resolved-type carrier`
+    );
+  }
   const hasNamed = allNamed.size > 0;
   const isPassthrough =
     !hasNamed && node.pattern.length === 1 && node.pattern[0].kind !== "const";

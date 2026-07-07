@@ -50,6 +50,22 @@ export function createTypeEnv(userAliases: ScopeAliases | undefined): TypeEnv {
   const scopedDefCache = new Map<string, Type>();
   const assignabilityCache = new Map<string, boolean>();
 
+  // DISTINCT morphs share an `.expression` ("(In: string) => Out<unknown>"),
+  // so expression-keyed caches would collide for them (review finding F1).
+  // Morph-containing types get a per-instance id appended to their keys.
+  const morphIds = new WeakMap<Type, number>();
+  let nextMorphId = 1;
+  const keyOf = (t: Type): string => {
+    const expression = t.expression;
+    if (!expression.includes("=>")) return expression;
+    let id = morphIds.get(t);
+    if (id === undefined) {
+      id = nextMorphId++;
+      morphIds.set(t, id);
+    }
+    return expression + "#" + id;
+  };
+
   const compileDef = (def: unknown): Type => {
     if (typeof def === "string") {
       let compiled = stringDefCache.get(def);
@@ -81,7 +97,7 @@ export function createTypeEnv(userAliases: ScopeAliases | undefined): TypeEnv {
     // normalized expression, NUL-separated (expressions contain spaces)
     let key = typeof def === "string" ? def : JSON.stringify(def);
     for (const name of Object.keys(aliases).sort()) {
-      key += "\0" + name + "\0" + aliases[name].expression;
+      key += "\0" + name + "\0" + keyOf(aliases[name]);
     }
     let compiled = scopedDefCache.get(key);
     if (compiled === undefined) {
@@ -100,10 +116,16 @@ export function createTypeEnv(userAliases: ScopeAliases | undefined): TypeEnv {
     isAssignable(candidate: Type, constraint: Type): boolean {
       // NUL separator: expressions contain spaces ("string | number"), so
       // any printable separator could make distinct pairs collide
-      const key = candidate.expression + "\0" + constraint.expression;
+      const key = keyOf(candidate) + "\0" + keyOf(constraint);
       let verdict = assignabilityCache.get(key);
       if (verdict === undefined) {
-        verdict = candidate.extends(constraint);
+        try {
+          verdict = candidate.extends(constraint);
+        } catch {
+          // e.g. "intersection of distinct morphs is indeterminate" —
+          // conservatively not assignable, and safeParse stays no-throw
+          verdict = false;
+        }
         assignabilityCache.set(key, verdict);
       }
       return verdict;
@@ -111,11 +133,15 @@ export function createTypeEnv(userAliases: ScopeAliases | undefined): TypeEnv {
 
     isOverlapping(a: Type, b: Type): boolean {
       // symmetric: normalize the cache key order
-      const [x, y] = a.expression <= b.expression ? [a, b] : [b, a];
-      const key = "?" + x.expression + "\0" + y.expression;
+      const [kx, ky] = [keyOf(a), keyOf(b)];
+      const key = kx <= ky ? "?" + kx + "\0" + ky : "?" + ky + "\0" + kx;
       let verdict = assignabilityCache.get(key);
       if (verdict === undefined) {
-        verdict = x.overlaps(y);
+        try {
+          verdict = a.overlaps(b);
+        } catch {
+          verdict = false; // indeterminate → conservatively disjoint
+        }
         assignabilityCache.set(key, verdict);
       }
       return verdict;
@@ -131,6 +157,10 @@ export function createTypeEnv(userAliases: ScopeAliases | undefined): TypeEnv {
     },
 
     resolvesWith(def: unknown, aliasNames: readonly string[]): boolean {
+      // References validate as "unknown" placeholders at construction, so
+      // defs applying operators/refinements to a reference ("left > 5")
+      // fail here even though they could resolve per-parse — callers
+      // surface that with a message naming the limitation (review F3)
       const placeholders: Record<string, Type> = {};
       for (const name of aliasNames) {
         placeholders[name] = compileDef("unknown");
