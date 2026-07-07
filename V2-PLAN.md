@@ -401,6 +401,19 @@ check: ~510k instantiations / ~2.8s.
   for object types with disjoint prop types (TS doesn't reduce those to
   never). Corner case, noted in parse/index.ts.
 
+### Open decision (owner input pending): rename lhs()/rhs()
+
+The owner flagged that `[lhs(...).as("left"), constVal("+"), lhs(...).as("right")]`
+reads wrong — correct, the names describe PARSE LEVEL (lhs = tighter
+level, rhs = current level) but still sound positional. Candidates
+discussed: **operand()/chain()** (recommended: "operand() is a complete
+tighter expression; chain() continues this level rightward; tail
+operand() → left fold, tail chain() → right recursion"),
+tighter()/same(), or keep-and-document. Mechanical rename (factories +
+role names in schema/index.ts, fixture, tests, plan examples; expr()
+unchanged). Do this FIRST in the next session once the owner picks —
+cheap now, expensive after docs/users exist.
+
 ### Next up (in plan order)
 
 - **Phase 4**: correlated distributed-union eval bindings (kills the
