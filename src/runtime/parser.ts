@@ -251,27 +251,33 @@ function isIdentifierLike(value: string): boolean {
 }
 
 /**
- * Parse a constant. IDENTIFIER-LIKE values match only as a WHOLE
+ * Parse a constant: an ORDERED alternation of values — the first member
+ * that matches wins. IDENTIFIER-LIKE members match only as a WHOLE
  * identifier in the input — `nullable` is one identifier, so it never
  * matches a `constVal("null")` (word-boundary rule; pinned in
- * parser.test.ts and design-claims). Other values match as raw text.
+ * parser.test.ts and design-claims). Other members match as raw text.
  * Mirrors ParseConstPrimitive in src/parse/index.ts.
  */
-function parseConst(value: string, input: string, env: ParseEnv): ParseResult {
-  if (isIdentifierLike(value)) {
-    const result = Token.Ident(input) as [] | [string, string];
-    if (result.length === 0 || result[0] !== value) {
-      fail(env.diag, input, `"${value}"`);
-      return [];
+function parseConst(
+  values: readonly string[],
+  input: string,
+  env: ParseEnv
+): ParseResult {
+  for (const value of values) {
+    if (isIdentifierLike(value)) {
+      const result = Token.Ident(input) as [] | [string, string];
+      if (result.length === 2 && result[0] === value) {
+        return [{ node: "const", outputSchema: value }, result[1]];
+      }
+    } else {
+      const result = Token.Const(value, input) as [] | [string, string];
+      if (result.length === 2) {
+        return [{ node: "const", outputSchema: value }, result[1]];
+      }
     }
-    return [{ node: "const", outputSchema: value }, result[1]];
-  }
-  const result = Token.Const(value, input) as [] | [string, string];
-  if (result.length === 0) {
     fail(env.diag, input, `"${value}"`);
-    return [];
   }
-  return [{ node: "const", outputSchema: value }, result[1]];
+  return [];
 }
 
 // =============================================================================
@@ -404,7 +410,7 @@ function parseElement(
     case "path":
       return parsePath(input, env);
     case "const":
-      return parseConst((element as ConstSchema).value, input, env);
+      return parseConst((element as ConstSchema).values, input, env);
     default:
       return [];
   }

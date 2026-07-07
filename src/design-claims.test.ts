@@ -104,6 +104,7 @@ describe("DESIGN: refinements are validation-only", () => {
 
 describe("DESIGN: eval typing — flat bindings + match", () => {
   it("eval receives THUNKS, so a bare arktype matcher cannot be an eval: evaluate the bindings, then match", () => {
+    // (see also the arktype-generics alternative pinned below)
     const matcher = match
       .in<{ l: number | string; r: number | string }>()
       .case({ l: "number", r: "number" }, (b) => b.l + b.r)
@@ -142,6 +143,22 @@ describe("DESIGN: eval typing — flat bindings + match", () => {
       createParser([num, bare] as const).evaluate("1 & 2", {}, {});
     }).toThrow(); // .default("assert") rejects thunk-shaped input
     expect(createParser([num, wrapped] as const).evaluate("1 & 2", {}, {})).toBe(3);
+  });
+
+  it("arktype GENERICS are an alternative correlated-pair guard", () => {
+    // (owner suggestion, PR #7) — instead of enumerating match cases, a
+    // generic type expresses "both sides are the same t" once and
+    // instantiates per member; eval picks the instantiation and lets the
+    // Type validate the correlated pair:
+    const samePair = type("<t extends string | number>", { l: "t", r: "t" });
+    const numPair = samePair("number");
+    const strPair = samePair("string");
+
+    expect(numPair({ l: 1, r: 2 }) instanceof type.errors).toBe(false);
+    expect(strPair({ l: "a", r: "b" }) instanceof type.errors).toBe(false);
+    // a mixed pair fails the instantiated Type — same backstop role as
+    // match's .default("assert"), with the correlation stated ONCE
+    expect(numPair({ l: 1, r: "x" }) instanceof type.errors).toBe(true);
   });
 
   it("flat bindings are honest: values may straddle the accepted combinations at runtime", () => {
@@ -328,6 +345,46 @@ describe("DESIGN: identifier-like consts — word boundaries & alternation order
     const parsed = p.safeParse("yes ? 1 : 2", {});
     expect(parsed.success && parsed.ast).toMatchObject({ node: "tern" });
     expect(p.evaluate("yes ? 1 : 2", {}, {})).toBe(1);
+  });
+
+  it("const alternation: ONE node matches several keywords; members try in order", () => {
+    // constVal("true", "false") is an ordered alternation — the named
+    // element binds the MATCHED text, so one node covers both booleans:
+    const num = defineNode({ name: "n", precedence: 2, pattern: (p) => p.number() });
+    const boolLit = defineNode({
+      name: "bool",
+      precedence: 2,
+      pattern: (p) =>
+        p
+          .constVal("true", "false").as("word")
+          .result("boolean")
+          .eval(({ word }) => word() === "true"),
+    });
+    const p = createParser([num, boolLit] as const);
+    expect(p.evaluate("true", {}, {})).toBe(true);
+    expect(p.evaluate("false", {}, {})).toBe(false);
+    // word boundary holds PER MEMBER: `truex` is one identifier
+    expect(p.safeParse("truex", {}).success).toBe(false);
+
+    // members are tried IN ORDER — a prefix member declared first wins,
+    // so list longer members first when they overlap:
+    const eqFirst = defineNode({
+      name: "op",
+      precedence: 2,
+      pattern: (p) => p.constVal("==", "=").as("op").result("string").eval(({ op }) => op()),
+    });
+    const eqLast = defineNode({
+      name: "op",
+      precedence: 2,
+      pattern: (p) => p.constVal("=", "==").as("op").result("string").eval(({ op }) => op()),
+    });
+    const longestFirst = createParser([eqFirst] as const).safeParse("==", {});
+    expect(longestFirst.success && longestFirst.ast).toMatchObject({
+      op: { outputSchema: "==" },
+    });
+    const prefixFirst = createParser([eqLast] as const).safeParse("==", {});
+    // "=" matched first, leaving "=" unconsumed → UNEXPECTED_INPUT
+    expect(prefixFirst.success).toBe(false);
   });
 
   it("a path() node BEFORE a keyword const swallows `true` as an identifier", () => {

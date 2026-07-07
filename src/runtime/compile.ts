@@ -224,7 +224,11 @@ function compileNode(node: NodeSchema, env: TypeEnv): CompiledNode {
   const constraints: (CompiledConstraint | null)[] = [];
 
   node.pattern.forEach((element, index) => {
-    if (element.kind === "const" && (element as { value: string }).value === "") {
+    const constValues =
+      element.kind === "const"
+        ? (element as { values: readonly string[] }).values
+        : undefined;
+    if (constValues !== undefined && (constValues.length === 0 || constValues.some((v) => v === ""))) {
       throw new Error(
         `stringent: node '${node.name}' uses constVal("") — empty constants match zero width and cannot terminate`
       );

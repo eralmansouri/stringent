@@ -31,7 +31,7 @@ const mul = defineNode({
 | `string(quotes)` | Quoted strings, e.g. `string(['"', "'"])` — escapes are processed (`\n \t \\ \" \' \xHH \uHHHH`, …) |
 | `ident()` | Single identifier, type resolved from schema |
 | `path()` | Identifier or dotted path (`values.password`), resolved via nested schema |
-| `constVal(value)` | Exact string (operators, keywords, delimiters). Identifier-like values match whole identifiers only |
+| `constVal(...values)` | Exact strings as an ordered alternation — first match wins (operators, keywords, delimiters). Identifier-like values match whole identifiers only |
 | `operand(constraint?)` | Subexpression at the **next tighter** precedence level |
 | `rest(constraint?)` | Subexpression at the **current** level |
 | `expr(constraint?)` | Full expression — resets to the whole grammar (parens, ternary branches) |

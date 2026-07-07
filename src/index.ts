@@ -52,7 +52,13 @@ export type { ScopeAliases } from "./runtime/types.js";
 // =============================================================================
 
 export { StringentParseError } from "./runtime/diagnostics.js";
-export type { StringentError } from "./runtime/diagnostics.js";
+export type {
+  StringentError,
+  ParseErrorResult,
+  TypeMismatchResult,
+  UnexpectedInputResult,
+  InvalidSchemaResult,
+} from "./runtime/diagnostics.js";
 export { EvaluationError } from "./runtime/evaluate.js";
 
 // =============================================================================

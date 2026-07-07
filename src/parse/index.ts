@@ -338,14 +338,31 @@ type ParsePathSegments<
     ];
 
 /**
- * Parse a constant. IDENTIFIER-LIKE values (the value is one whole
+ * Parse a constant: an ORDERED alternation of values — the first member
+ * that matches wins. IDENTIFIER-LIKE members (the value is one whole
  * identifier per parsebox's tokenizer) match only as a WHOLE identifier
  * in the input — `nullable` is one identifier, so it never matches a
  * `constVal("null")` (word-boundary rule; pinned in parser.test.ts and
- * design-claims). Other values match as raw text. Mirrors parseConst in
+ * design-claims). Other members match as raw text. Mirrors parseConst in
  * src/runtime/parser.ts.
  */
 type ParseConstPrimitive<
+  TValues extends readonly string[],
+  TInput extends string
+> = TValues extends readonly [
+  infer V extends string,
+  ...infer Rest extends readonly string[]
+]
+  ? ParseConstMember<V, TInput> extends [
+      infer N extends ConstNode,
+      infer R extends string
+    ]
+    ? [N, R]
+    : ParseConstPrimitive<Rest, TInput>
+  : [];
+
+/** Match one alternation member (word-boundary rule per member). */
+type ParseConstMember<
   TValue extends string,
   TInput extends string
 > = Token.TIdent<TValue> extends [TValue, ""]

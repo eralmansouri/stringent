@@ -300,13 +300,17 @@ included.
   createParser([leftTailSub, rightTailAdd]); // ✗ "precedence 1 mixes tail shapes"
   ```
 - **Pattern elements**: `number()`, `string(quotes)`, `ident()`, `path()`,
-  `constVal(text)`. There is no keyword element — keyword literals are
-  ordinary const-pattern nodes
+  `constVal(...values)` — an ordered alternation of exact strings, first
+  match wins (list longer members first when they overlap — pinned in
+  design-claims.test.ts). There is no keyword element — keyword literals
+  are ordinary const-pattern nodes
   (`pattern: (p) => p.constVal("null").result("null").eval(() => null)`),
-  which works because of the **word-boundary rule**: an identifier-like
-  const value matches only as a whole identifier (`nullable` is one
+  several keywords can share one node
+  (`p.constVal("true", "false").as("word")` binds the MATCHED text), and
+  it all works because of the **word-boundary rule**: an identifier-like
+  const member matches only as a whole identifier (`nullable` is one
   identifier, never `null` + `able`; `andy` never matches `constVal("and")`
-  — pinned in design-claims.test.ts), while non-identifier values (`"+"`,
+  — pinned in design-claims.test.ts), while non-identifier members (`"+"`,
   `"=="`) match as raw text. String literals process escapes (`\n \t \r
   \\ \" \' \` \0 \b \f \v \xHH \uHHHH`); unknown escapes resolve to the
   escaped character, JS-style.

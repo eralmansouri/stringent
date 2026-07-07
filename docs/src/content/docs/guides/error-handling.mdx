@@ -19,15 +19,21 @@ each using the representation built for it:
 
 ## `safeParse` never throws
 
-Its error object:
+Its error object is a **discriminated union** — narrow on `code` and each
+variant's fields are exact (no optional-field guessing):
 
 ```ts
-interface StringentError {
-  code: "PARSE_ERROR" | "TYPE_MISMATCH" | "UNEXPECTED_INPUT" | "INVALID_SCHEMA";
-  message: string;
-  position: number;              // 0-based offset into the input
-  expected?: readonly string[];  // what would have been valid at position
-  found?: string;                // the next few characters at position
+type StringentError =
+  | { code: "PARSE_ERROR"; message: string; position: number;
+      expected: readonly string[]; found: string }
+  | { code: "TYPE_MISMATCH"; message: string; position: number;
+      expected: readonly string[]; found: string }
+  | { code: "UNEXPECTED_INPUT"; message: string; position: number;
+      found: string; expected?: readonly string[] }
+  | { code: "INVALID_SCHEMA"; message: string; position: 0 };
+
+if (!result.success && result.error.code === "PARSE_ERROR") {
+  result.error.expected; // readonly string[] — required on this variant
 }
 ```
 

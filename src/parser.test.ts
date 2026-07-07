@@ -75,9 +75,17 @@ describe("atoms", () => {
 });
 
 describe("keyword literals (const-pattern nodes)", () => {
-  it("parses true/false as const nodes typed boolean", () => {
-    expect(parseOk("true")).toEqual({ node: "true", outputSchema: "boolean" });
-    expect(parseOk(" false ")).toEqual({ node: "false", outputSchema: "boolean" });
+  it("parses true/false through ONE alternation node, binding the matched text", () => {
+    expect(parseOk("true")).toEqual({
+      node: "bool",
+      word: { node: "const", outputSchema: "true" },
+      outputSchema: "boolean",
+    });
+    expect(parseOk(" false ")).toEqual({
+      node: "bool",
+      word: { node: "const", outputSchema: "false" },
+      outputSchema: "boolean",
+    });
   });
 
   it("parses null and undefined", () => {
@@ -465,7 +473,9 @@ describe("embedded binding references (scoped defs)", () => {
 describe("diagnostics", () => {
   it("reports expected tokens at end of input", () => {
     const error = parseErr("1+");
+    // the union narrows on code — per-code fields are REQUIRED thereafter
     expect(error.code).toBe("PARSE_ERROR");
+    if (error.code !== "PARSE_ERROR") throw new Error("narrowed above");
     expect(error.position).toBe(2);
     expect(error.found).toBe("end of input");
     expect(error.expected).toContain("number");
@@ -488,6 +498,7 @@ describe("diagnostics", () => {
   it("reports trailing input with expected continuations", () => {
     const error = parseErr("1+2 junk!!");
     expect(error.code).toBe("UNEXPECTED_INPUT");
+    if (error.code !== "UNEXPECTED_INPUT") throw new Error("narrowed above");
     expect(error.position).toBe(4);
     expect(error.expected).toContain('"*"');
   });

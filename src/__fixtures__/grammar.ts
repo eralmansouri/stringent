@@ -29,21 +29,16 @@ export const stringLit = defineNode({
 
 /** Keyword literals are ordinary const-pattern nodes: identifier-like
  *  const values match whole identifiers only (word-boundary rule), so
- *  `nullable` never matches `constVal("null")`. */
-export const trueLit = defineNode({
-  name: "true",
-  precedence: 5,
-  pattern: (p) => p.constVal("true").result("boolean").eval(() => true),
-});
-
-export const falseLit = defineNode({
-  name: "false",
+ *  `nullable` never matches `constVal("null")`. Both booleans live in ONE
+ *  node via const ALTERNATION — the named element binds the MATCHED text. */
+export const boolLit = defineNode({
+  name: "bool",
   precedence: 5,
   pattern: (p) =>
     p
-      .constVal("false")
+      .constVal("true", "false").as("word")
       .result("boolean")
-      .eval(() => false),
+      .eval(({ word }) => word() === "true"),
 });
 
 export const nullLit = defineNode({
@@ -195,8 +190,7 @@ export const pow = defineNode({
 export const fixtureNodes = [
   numberLit,
   stringLit,
-  trueLit,
-  falseLit,
+  boolLit,
   nullLit,
   undefinedLit,
   variable,

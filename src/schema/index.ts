@@ -55,10 +55,13 @@ export interface IdentSchema extends Schema<"ident"> {}
 /** Member-access path pattern element: matches `ident(.ident)*` */
 export interface PathSchema extends Schema<"path"> {}
 
-/** Constant (exact match) pattern element */
-export interface ConstSchema<TValue extends string = string>
-  extends Schema<"const"> {
-  readonly value: TValue;
+/** Constant pattern element: an ordered ALTERNATION of exact values —
+ *  the first member that matches wins (usually a single value; e.g.
+ *  constVal("true", "false") for one boolean-keyword node). */
+export interface ConstSchema<
+  TValues extends readonly string[] = readonly string[]
+> extends Schema<"const"> {
+  readonly values: TValues;
 }
 
 // =============================================================================
@@ -139,7 +142,7 @@ export type PatternSchemaBase =
   | StringSchema<readonly string[]>
   | IdentSchema
   | PathSchema
-  | ConstSchema<string>
+  | ConstSchema
   | ExprSchema;
 
 // =============================================================================
@@ -277,22 +280,27 @@ export interface PatternBuilder<
   path(): NameableBuilder<TPattern, $, PathSchema>;
 
   /**
-   * Append a constant element. IDENTIFIER-LIKE values
+   * Append a constant element — one or more values as an ORDERED
+   * alternation (first match wins). IDENTIFIER-LIKE values
    * (`constVal("null")`, `constVal("and")`) match only as a WHOLE
    * identifier — `nullable` or `andy` never match (word-boundary rule;
-   * pinned in design-claims). Other values (`"+"`, `"=="`) match as raw
-   * text. Keyword literals are ordinary const-pattern nodes:
+   * pinned in design-claims); other values (`"+"`, `"=="`) match as raw
+   * text, per member. Keyword literals are ordinary const-pattern nodes;
+   * name the element to receive the MATCHED text in eval:
    *
    * @example
-   * const nullLit = defineNode({
-   *   name: "null",
+   * const booleanLit = defineNode({
+   *   name: "bool",
    *   precedence: 5,
-   *   pattern: (p) => p.constVal("null").result("null").eval(() => null),
+   *   pattern: (p) =>
+   *     p.constVal("true", "false").as("word")
+   *       .result("boolean")
+   *       .eval(({ word }) => word() === "true"),
    * });
    */
-  constVal<const TValue extends string>(
-    value: TValue
-  ): NameableBuilder<TPattern, $, ConstSchema<TValue>>;
+  constVal<const TValues extends readonly [string, ...string[]]>(
+    ...values: TValues
+  ): NameableBuilder<TPattern, $, ConstSchema<TValues>>;
 
   /**
    * Append a TIGHTER-LEVEL expression element.
@@ -441,7 +449,7 @@ function createBuilder(
     string: (quotes: readonly string[]) => append({ kind: "string", quotes }),
     ident: () => append({ kind: "ident" }),
     path: () => append({ kind: "path" }),
-    constVal: (value: string) => append({ kind: "const", value }),
+    constVal: (...values: string[]) => append({ kind: "const", values }),
     operand: (constraint?: ConstraintSpec) =>
       append({ kind: "expr", constraint, role: "operand" }),
     rest: (constraint?: ConstraintSpec) =>
@@ -636,7 +644,7 @@ export type InferNodeType<TSchema extends PatternSchemaBase> =
   : TSchema extends StringSchema ? StringNode
   : TSchema extends IdentSchema ? IdentNode
   : TSchema extends PathSchema ? PathNode
-  : TSchema extends ConstSchema<infer V> ? ConstNode<V>
+  : TSchema extends ConstSchema<infer V> ? ConstNode<V[number]>
   : TSchema extends { kind: "expr" } ? { outputSchema: string }
   : never;
 
@@ -675,7 +683,7 @@ export type InferEvaluatedType<TSchema extends PatternSchemaBase> =
   : TSchema extends StringSchema ? string
   : TSchema extends IdentSchema ? unknown
   : TSchema extends PathSchema ? unknown
-  : TSchema extends ConstSchema<infer V> ? V // the matched text
+  : TSchema extends ConstSchema<infer V> ? V[number] // the matched text
   : TSchema extends { kind: "expr" }
   ? NormalizeConstraint<ExtractSpecOf<TSchema>> extends infer N
     ? N extends string
@@ -770,7 +778,7 @@ export type InferBindings<TPattern extends readonly PatternSchema[]> = {
  * ```ts
  * type Pattern = [
  *   NamedSchema<ExprSchema<"number | string", "operand">, "left">,
- *   ConstSchema<"+">,
+ *   ConstSchema<["+"]>,
  *   NamedSchema<ExprSchema<"left", "rest">, "right">
  * ];
  * type EvalBindings = InferEvaluatedBindings<Pattern>;

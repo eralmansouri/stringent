@@ -61,25 +61,17 @@ all arktype definitions.
      precedence: 4,
      pattern: (p) => p.string(['"', "'"]),
    });
-   // Keyword literals (true/false) must come before path() in the level,
-   // or `true` would parse as an identifier
-   const trueLit   = defineNode({
-     name: "true",
+   // Keyword literals must come before path() in the level, or `true`
+   // would parse as an identifier.
+   // ONE node for both booleans: const ALTERNATION binds the matched text
+   const booleanLit = defineNode({
+     name: "bool",
      precedence: 4,
      pattern: (p) =>
        p
-         .constVal("true")
+         .constVal("true", "false").as("word")
          .result("boolean")
-         .eval(() => true),
-   });
-   const falseLit  = defineNode({
-     name: "false",
-     precedence: 4,
-     pattern: (p) =>
-       p
-         .constVal("false")
-         .result("boolean")
-         .eval(() => false),
+         .eval(({ word }) => word() === "true"),
    });
    const variable  = defineNode({
      name: "var",
@@ -162,7 +154,7 @@ all arktype definitions.
    });
 
    const parser = createParser(
-     [numberLit, stringLit, trueLit, falseLit, variable, parens, ternary, eq, add, mul] as const
+     [numberLit, stringLit, booleanLit, variable, parens, ternary, eq, add, mul] as const
    );
    ```
 
@@ -184,23 +176,15 @@ all arktype definitions.
      precedence: 4,
      pattern: (p) => p.string(['"', "'"]),
    });
-   const trueLit   = defineNode({
-     name: "true",
+   // ONE node for both booleans: const ALTERNATION binds the matched text
+   const booleanLit = defineNode({
+     name: "bool",
      precedence: 4,
      pattern: (p) =>
        p
-         .constVal("true")
+         .constVal("true", "false").as("word")
          .result("boolean")
-         .eval(() => true),
-   });
-   const falseLit  = defineNode({
-     name: "false",
-     precedence: 4,
-     pattern: (p) =>
-       p
-         .constVal("false")
-         .result("boolean")
-         .eval(() => false),
+         .eval(({ word }) => word() === "true"),
    });
    const variable  = defineNode({
      name: "var",
@@ -247,7 +231,7 @@ all arktype definitions.
          .eval(({ left, right }) => left() * right()),
    });
 
-   const parser = createParser([numberLit, stringLit, trueLit, falseLit, variable, eq, add, mul] as const);
+   const parser = createParser([numberLit, stringLit, booleanLit, variable, eq, add, mul] as const);
    // ---cut---
    const [ast] = parser.parse("1+2*3", {});
    //     ^?
@@ -303,23 +287,15 @@ all arktype definitions.
      precedence: 4,
      pattern: (p) => p.string(['"', "'"]),
    });
-   const trueLit   = defineNode({
-     name: "true",
+   // ONE node for both booleans: const ALTERNATION binds the matched text
+   const booleanLit = defineNode({
+     name: "bool",
      precedence: 4,
      pattern: (p) =>
        p
-         .constVal("true")
+         .constVal("true", "false").as("word")
          .result("boolean")
-         .eval(() => true),
-   });
-   const falseLit  = defineNode({
-     name: "false",
-     precedence: 4,
-     pattern: (p) =>
-       p
-         .constVal("false")
-         .result("boolean")
-         .eval(() => false),
+         .eval(({ word }) => word() === "true"),
    });
    const variable  = defineNode({
      name: "var",
@@ -366,7 +342,7 @@ all arktype definitions.
          .eval(({ left, right }) => left() * right()),
    });
 
-   const parser = createParser([numberLit, stringLit, trueLit, falseLit, variable, eq, add, mul] as const);
+   const parser = createParser([numberLit, stringLit, booleanLit, variable, eq, add, mul] as const);
    // ---cut---
    const seven = parser.evaluate("1+2*3", {}, {});
    //    ^?

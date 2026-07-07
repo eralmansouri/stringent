@@ -85,22 +85,63 @@ export function failConstraint(
 // Error formatting
 // =============================================================================
 
-export interface StringentError {
-  code: "PARSE_ERROR" | "TYPE_MISMATCH" | "UNEXPECTED_INPUT" | "INVALID_SCHEMA";
+/** No interpretation matched the input. */
+export interface ParseErrorResult {
+  code: "PARSE_ERROR";
   message: string;
-  /** 0-based offset into the input. INVALID_SCHEMA errors are about the
-   *  schema argument, not the input — their position is always 0. */
+  /** 0-based offset into the input */
   position: number;
   /** Token descriptions that would have been valid at `position` */
-  expected?: readonly string[];
+  expected: readonly string[];
   /** The next few characters at `position` */
-  found?: string;
+  found: string;
 }
+
+/** An expression parsed, but a constraint rejected it. */
+export interface TypeMismatchResult {
+  code: "TYPE_MISMATCH";
+  message: string;
+  /** 0-based offset into the input */
+  position: number;
+  /** The one constraint description the slot expected */
+  expected: readonly string[];
+  /** The next few characters at `position` */
+  found: string;
+}
+
+/** A prefix parsed, but trailing input remains. */
+export interface UnexpectedInputResult {
+  code: "UNEXPECTED_INPUT";
+  message: string;
+  /** 0-based offset of the trailing input */
+  position: number;
+  /** The next few characters at `position` */
+  found: string;
+  /** Tokens that could have continued the parse — present only when the
+   *  parser got exactly this far */
+  expected?: readonly string[];
+}
+
+/** The SCHEMA argument's defs failed to compile — a programmer error,
+ *  normally caught at compile time by type.validate. */
+export interface InvalidSchemaResult {
+  code: "INVALID_SCHEMA";
+  message: string;
+  /** Always 0 — the error is about the schema, not the input */
+  position: 0;
+}
+
+/** Discriminated on `code`: narrow to get exact per-code fields. */
+export type StringentError =
+  | ParseErrorResult
+  | TypeMismatchResult
+  | UnexpectedInputResult
+  | InvalidSchemaResult;
 
 /** Build a StringentError for a schema whose defs failed to compile —
  *  a programmer error, but safeParse still NEVER throws (pinned in
  *  createParser.test.ts / design-claims.test.ts). */
-export function toInvalidSchemaError(cause: unknown): StringentError {
+export function toInvalidSchemaError(cause: unknown): InvalidSchemaResult {
   return {
     code: "INVALID_SCHEMA",
     message: `invalid schema — ${(cause as Error).message}. Schema leaves must be type defs resolvable in this parser's scope (add aliases via createParser(nodes, { scope: {...} })).`,
@@ -119,7 +160,7 @@ function formatExpected(expected: readonly string[]): string {
   return `${expected.slice(0, -1).join(", ")} or ${expected[expected.length - 1]}`;
 }
 
-function toMismatchError(diag: Diagnostics): StringentError {
+function toMismatchError(diag: Diagnostics): TypeMismatchResult {
   const mismatch = diag.mismatch!;
   const subject =
     mismatch.subject !== undefined
@@ -140,7 +181,7 @@ function toMismatchError(diag: Diagnostics): StringentError {
  *  A constraint mismatch wins when its SPAN reaches the furthest failure —
  *  token failures further right are usually downstream noise of the
  *  alternatives that backtracked. */
-export function toParseError(diag: Diagnostics): StringentError {
+export function toParseError(diag: Diagnostics): ParseErrorResult | TypeMismatchResult {
   if (diag.mismatch !== undefined && diag.mismatch.end >= diag.furthestOffset) {
     return toMismatchError(diag);
   }
@@ -191,19 +232,25 @@ export function toUnexpectedInputError(
   };
 }
 
-/** Error thrown by parser.parse() and evaluate() on invalid input */
+/** Error thrown by parser.parse() and evaluate() on invalid input or an
+ *  invalid schema. A class cannot be a discriminated union, so the
+ *  per-code fields are optional here; the structured union rides on
+ *  `error` for narrowing. */
 export class StringentParseError extends Error {
   readonly code: StringentError["code"];
   readonly position: number;
   readonly expected?: readonly string[];
   readonly found?: string;
+  /** The full structured error (discriminated on `code`) */
+  readonly error: StringentError;
 
   constructor(error: StringentError) {
     super(error.message);
     this.name = "StringentParseError";
+    this.error = error;
     this.code = error.code;
     this.position = error.position;
-    this.expected = error.expected;
-    this.found = error.found;
+    this.expected = "expected" in error ? error.expected : undefined;
+    this.found = "found" in error ? error.found : undefined;
   }
 }

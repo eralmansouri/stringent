@@ -14,19 +14,14 @@ const stringLit = defineNode({
   precedence: 4,
   pattern: (p) => p.string(['"', "'"]),
 });
-const trueLit  = defineNode({
-  name: "true",
-  precedence: 4,
-  pattern: (p) => p.constVal("true").result("boolean").eval(() => true),
-});
-const falseLit = defineNode({
-  name: "false",
+const booleanLit = defineNode({
+  name: "bool",
   precedence: 4,
   pattern: (p) =>
     p
-      .constVal("false")
+      .constVal("true", "false").as("word")
       .result("boolean")
-      .eval(() => false),
+      .eval(({ word }) => word() === "true"),
 });
 const variable = defineNode({
   name: "var",
@@ -100,7 +95,7 @@ const ternary = defineNode({
 });
 
 const parser = createParser(
-  [numberLit, stringLit, trueLit, falseLit, variable, parens, ternary, eq, add, mul] as const
+  [numberLit, stringLit, booleanLit, variable, parens, ternary, eq, add, mul] as const
 );
 
 const schema = {

@@ -90,23 +90,15 @@ You declare each rule once — as data. The same declaration drives a
       precedence: 4,
       pattern: (p) => p.string(['"', "'"]),
     });
-    const trueLit   = defineNode({
-      name: "true",
-      precedence: 4,
-      pattern: (p) =>
-        p
-          .constVal("true")
-          .result("boolean")
-          .eval(() => true),
-    });
-   const falseLit  = defineNode({
-     name: "false",
+   // ONE node for both booleans: const ALTERNATION binds the matched text
+   const booleanLit = defineNode({
+     name: "bool",
      precedence: 4,
      pattern: (p) =>
        p
-         .constVal("false")
+         .constVal("true", "false").as("word")
          .result("boolean")
-         .eval(() => false),
+         .eval(({ word }) => word() === "true"),
    });
     const variable  = defineNode({
       name: "var",
@@ -168,7 +160,7 @@ You declare each rule once — as data. The same declaration drives a
     });
 
     const parser = createParser(
-      [numberLit, stringLit, trueLit, falseLit, variable, ternary, eq, add, mul] as const
+      [numberLit, stringLit, booleanLit, variable, ternary, eq, add, mul] as const
     );
     // ---cut---
     const seven = parser.evaluate("1+2*3", {}, {});

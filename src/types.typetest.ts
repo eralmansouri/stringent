@@ -81,7 +81,17 @@ type _p3 = AssertTrue<
 
 type PTrue = Parse<G, "true", EmptyCtx>;
 type _k1 = AssertTrue<
-  AssertExtends<PTrue, [{ node: "true"; outputSchema: "boolean" }, ""]>
+  AssertExtends<
+    PTrue,
+    [{ node: "bool"; word: { outputSchema: "true" }; outputSchema: "boolean" }, ""]
+  >
+>;
+type PFalse = Parse<G, "false", EmptyCtx>;
+type _k1b = AssertTrue<
+  AssertExtends<
+    PFalse,
+    [{ node: "bool"; word: { outputSchema: "false" }; outputSchema: "boolean" }, ""]
+  >
 >;
 
 type PNull = Parse<G, "null", EmptyCtx>;
