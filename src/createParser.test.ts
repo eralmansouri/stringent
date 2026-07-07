@@ -123,9 +123,9 @@ describe("schemas and scope", () => {
     const p = createParser([num, variable, dateVar] as const, {
       scope: { Timestamp: "number" },
     });
-    // TODO(Phase 3): compile-time schema validation is scope-blind (runs in
-    // arktype's default scope), so custom aliases need a cast until the
-    // type engine threads the scope through type.validate.
+    // Known limitation (deferred): compile-time schema validation is
+    // scope-blind (runs in arktype's default scope), so custom aliases
+    // need a cast at compile time; runtime checks them fully.
     expect(() => p.safeParse("1", { created: "Timestamp" } as never)).not.toThrow();
     const result = p.safeParse("created > 1", { created: "Timestamp" } as never);
     expect(result.success).toBe(true);

@@ -1,10 +1,11 @@
 # Stringent v2 — API Redesign Plan
 
-Status: proposal. Decisions below came out of a design review comparing this
-repo against the archived formeddable/stringent (Jan 2026, arktype-based) and
-a discussion of v1's ergonomics. This document plans the work; DESIGN.md
-remains the contract for v1 until v2 lands, at which point the relevant
-sections get rewritten.
+Status: **Phases 0–3 implemented and green** on branch
+`claude/formeddable-stringent-review-suiwqu` (see the Session Handoff
+section at the bottom for exact state). Decisions below came out of a
+design review comparing this repo against the archived
+formeddable/stringent (Jan 2026, arktype-based) and a discussion of v1's
+ergonomics. DESIGN.md still describes v1 and needs its rewrite in Phase 7.
 
 ## Goals
 
@@ -301,3 +302,116 @@ incrementally.
    const (parens' `)`, ternary's `:`) makes the region delimiter-bounded —
    its extent is decided by tokens, not precedence — which is why `expr()`
    is safe there and only there. Final operand slots must be `lhs()`/`rhs()`.
+
+## Session handoff (2026-07-07)
+
+State for whoever picks this up. Everything below is committed on
+`claude/formeddable-stringent-review-suiwqu` in eralmansouri/stringent.
+At handoff: `pnpm typecheck`, `pnpm test` (90 tests, 3 files),
+`pnpm build`, and `pnpm check:package` are all green. Whole-project
+check: ~510k instantiations / ~2.8s.
+
+### Done (this branch, in commit order)
+
+1. `48cc8b5` — Phase 0 spike (`spike/phase0/RESULTS.md`): GO for full
+   arktype at compile time; runtime API verification; three API-shape
+   corrections (fluent `match.case`, unsatisfiable intersections throw,
+   memoize `extends`).
+2. `7dd2e99` — Phases 1–2: v2 schema layer + runtime engine. Key files:
+   `src/schema/index.ts` (elements, defineNode, eval typing),
+   `src/runtime/compile.ts` (validation + precompiled constraints/levels/
+   modes), `src/runtime/types.ts` (arktype adapter: scope, caches,
+   refinement erasure — the ONLY `.internal` touchpoint),
+   `src/runtime/parser.ts` (assignability matching, tail-shape
+   associativity, OUTPUT_TYPE symbol), `src/createParser.ts`.
+3. `5430184` — `overlapping(binding)` symmetric constraint (fixture `eq`
+   uses it); fixed a type-level inference bug (never intersect a found
+   element with the PatternSchemaBase union — gate with a conditional).
+4. `8c9cbaf`+ — Phase 3: type-level engine rebuilt
+   (`src/parse/index.ts`, `src/grammar/index.ts`), full typetest suite
+   restored (`src/types.typetest.ts`) with canaries.
+
+### The four load-bearing design rules
+
+- Semantics are data (dual engine; runtime cannot see TS types, type
+  engine cannot run functions). Every v2 feature respects this.
+- Constraints/resultTypes are arktype defs; a string that names an
+  EARLIER binding is a reference to its parsed type; `overlapping(b)` is
+  the symmetric form. Matching is assignability (runtime: memoized
+  `extends`; type level: `type.infer<A> extends type.infer<B>` over
+  literal defs so TS memoizes).
+- Associativity from tail shape (lhs tail → left fold, rhs tail → right
+  recursion, expr() only in const-delimited slots); highest precedence
+  level = leaf.
+- Refinements are validation-only: identifier/path/constraint types are
+  ERASED for typing (runtime: `eraseRefinements` via internal.transform +
+  type.schema round-trip; type level: automatic via type.infer); the full
+  schema still validates `values` at evaluate().
+
+### Gotchas that cost real time (do not rediscover)
+
+- arktype `type.validate<T>` or bare `type.infer<T>` as a SIBLING
+  parameter of the conditionally-typed input param poisons generic
+  inference (input collapses to `never`). Hence: `evaluate()` wraps
+  values in `NoInfer`, and eager leaf validation lives on `safeParse`
+  only. Probed exhaustively; don't try to "fix" this by intersecting.
+- Deep-equality test assertions see enumerable symbol props → the parsed
+  Type rides on a NON-enumerable symbol (`OUTPUT_TYPE`, set via
+  `setOutputType`).
+- vitest's `expect(() => createParser(...))` instantiates matchers over
+  the Parser type → TS2589 with pathological node types; use block-body
+  arrows `expect(() => { createParser(...); })` in throw tests.
+- Widened `number` or `never` precedence used to hang the type-level
+  digit comparator; `IsValidPrecedence` now guards both (grammar →
+  `never`).
+- `Token.Number("1..2")` consumes "1" then leaves ".2" — range-like
+  operators need whitespace or a different spelling in tests.
+- Python heredoc file edits corrupted a UTF-8 file once; prefer the Edit
+  tool or io.open(encoding='utf-8').
+
+### Deliberate divergences (documented, not bugs)
+
+- Type-level `outputSchema` carries the def AS WRITTEN; the runtime
+  displays arktype's normalized `expression`. Parity = accept/reject +
+  inferred TS types, not display strings.
+- Passthrough exemption: single-element UNNAMED patterns forbid
+  resultType (nothing to declare; `[path()]`'s type is per-parse). Named
+  single elements are constructing nodes (converter idiom:
+  `[number().as("n")], resultType: "string"`).
+- Binding refs must be the WHOLE constraint/resultType string; embedded
+  forms (`"then | else"`, `{ value: "acc" }`) deferred until union
+  output types.
+- Scope-blind compile time: schemas/constraints using createParser
+  `scope` aliases need `as never` at compile time (runtime fully
+  validates). Threading the scope through type.validate/Parse is an open
+  work item.
+- Type-level overlap ≈ non-never TS intersection — diverges from arktype
+  for object types with disjoint prop types (TS doesn't reduce those to
+  never). Corner case, noted in parse/index.ts.
+
+### Next up (in plan order)
+
+- **Phase 4**: correlated distributed-union eval bindings (kills the
+  `as any` in fixture `add`; see D5 and the earlier design discussion —
+  generate `{l: string, r: string} | {l: number, r: number}` from
+  binding links; narrowing must go through the object, destructuring
+  severs correlation). Also dev-mode `.allows()` assertion of eval
+  outputs against resultType.
+- **Phase 5**: built-in true/false/null/undefined literals with
+  keyword-prefix guards in BOTH engines + string escape processing.
+  Reference implementations and 400+-line test corpora in the
+  formeddable archive (git bundle already delivered to the user;
+  `upstream` remote may still exist locally, org deletion pending).
+- **Phase 6**: rule-as-arktype-Type (`parser.compile`) → Standard Schema
+  ecosystem (react-hook-form/tRPC/hono), ArkErrors with field paths.
+- **Phase 7**: DESIGN.md rewrite, Starlight docs + playground update,
+  benchmarks (port shapes from archive), migration notes, version 0.1.0.
+
+### Context that lives outside this repo
+
+- The formeddable GitHub org is scheduled for deletion by the user. Its
+  full history was delivered as a git bundle in chat
+  (formeddable-stringent-backup.bundle); the useful salvage list and the
+  v1-vs-archive comparison are summarized early in this plan's history.
+- Phase 0 spike scripts are runnable: `spike/phase0/` (self-contained
+  package.json).
