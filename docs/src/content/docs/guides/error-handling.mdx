@@ -17,27 +17,37 @@ each using the representation built for it:
   (`flatByPath`), produced by `evaluate()`'s values check and by
   [compiled rules](/stringent/guides/parsing-and-evaluation/#rules-as-arktype-types-compile).
 
-## `safeParse` never throws for input
+## `safeParse` never throws
 
-Its error object:
+Its error object is a **discriminated union** — narrow on `code` and each
+variant's fields are exact (no optional-field guessing):
 
 ```ts
-interface StringentError {
-  code: "PARSE_ERROR" | "TYPE_MISMATCH" | "UNEXPECTED_INPUT";
-  message: string;
-  position: number;              // 0-based offset into the input
-  expected?: readonly string[];  // what would have been valid at position
-  found?: string;                // the next few characters at position
+type StringentError =
+  | { code: "PARSE_ERROR"; message: string; position: number;
+      expected: readonly string[]; found: string }
+  | { code: "TYPE_MISMATCH"; message: string; position: number;
+      expected: readonly string[]; found: string }
+  | { code: "UNEXPECTED_INPUT"; message: string; position: number;
+      found: string; expected?: readonly string[] }
+  | { code: "INVALID_SCHEMA"; message: string; position: 0 };
+
+if (!result.success && result.error.code === "PARSE_ERROR") {
+  result.error.expected; // readonly string[] — required on this variant
 }
 ```
 
-The three codes:
+The four codes:
 
 - **`PARSE_ERROR`** — no interpretation matched the input.
 - **`TYPE_MISMATCH`** — an expression parsed, but a constraint rejected it
   (e.g. a `number`-constrained slot saw a `string`, or an identifier wasn't in
   the schema).
 - **`UNEXPECTED_INPUT`** — a prefix parsed, but trailing input remains.
+- **`INVALID_SCHEMA`** — the *schema argument*'s defs don't compile. This is
+  a programmer error (TypeScript normally catches it at compile time via
+  `type.validate`); `position` is fixed at 0 since the error is not about
+  the input.
 
 Example messages:
 
@@ -72,9 +82,8 @@ signal on mismatches lands, delimiter errors may read as type errors.
 
 | Error | Thrown by | Meaning |
 |---|---|---|
-| Schema validation error | every entry point | Schema leaf that doesn't resolve in the parser's scope — a programmer error, not an input error |
-| `StringentParseError` | `parse()` / `evaluate()` / `compile()` | Invalid input: for `parse`/`evaluate`, the compile-time check was bypassed (cast, wide schema type); for `compile`, dynamic input simply failed to parse. Carries the same fields as `StringentError` |
-| `EvaluationError` | `evaluateAst` / `evaluate` | Undefined identifier or path at evaluation, a node without `eval`, values that fail the schema (`evaluate` only), or a dev-mode result assertion failure |
+| `StringentParseError` | `parse()` / `evaluate()` / `compile()` | Invalid input or an invalid schema: for `parse`/`evaluate`, the compile-time check was bypassed (cast, wide schema type); for `compile`, dynamic input simply failed to parse. Carries the same fields as `StringentError` (all four codes) |
+| `EvaluationError` | `evaluateAst` / `evaluate` | Undefined identifier or path at evaluation, a node without `eval`, or values that fail the schema (`evaluate` only) |
 
 Compiled rules (`parser.compile`) never throw for data — they *return*
 `ArkErrors`, with the failure attributed to the field you pass as

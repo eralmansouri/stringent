@@ -87,9 +87,6 @@ export interface CompiledGrammar {
 const CONSUMING_KINDS = new Set([
   "number",
   "string",
-  "boolean",
-  "null",
-  "undefined",
   "ident",
   "path",
   "const",
@@ -193,7 +190,7 @@ export function compileGrammar(
       if (modes[i] === "leaf") {
         if (!CONSUMING_KINDS.has(first.kind)) {
           throw new Error(
-            `stringent: leaf node '${node.name}' (highest precedence level) must start with a consuming element (number, string, boolean, nullVal, undefinedVal, ident, path, const)`
+            `stringent: leaf node '${node.name}' (highest precedence level) must start with a consuming element (number, string, ident, path, const)`
           );
         }
       } else if (modes[i] === "left") {
@@ -227,7 +224,11 @@ function compileNode(node: NodeSchema, env: TypeEnv): CompiledNode {
   const constraints: (CompiledConstraint | null)[] = [];
 
   node.pattern.forEach((element, index) => {
-    if (element.kind === "const" && (element as { value: string }).value === "") {
+    const constValues =
+      element.kind === "const"
+        ? (element as { values: readonly string[] }).values
+        : undefined;
+    if (constValues !== undefined && (constValues.length === 0 || constValues.some((v) => v === ""))) {
       throw new Error(
         `stringent: node '${node.name}' uses constVal("") — empty constants match zero width and cannot terminate`
       );

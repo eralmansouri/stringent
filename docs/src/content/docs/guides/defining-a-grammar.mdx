@@ -11,15 +11,15 @@ with `createParser`. A node is a pattern of elements, a precedence, and
 
 ```ts
 const mul = defineNode({
-  name: "mul",                    // unique node name (appears in the AST)
-  pattern: [                      // what to match, in order
-    operand("number").as("left"),
-    constVal("*"),
-    operand("number").as("right"),
-  ],
-  precedence: 3,                  // binding strength; highest level = leaves
-  resultType: "number",           // the type this node produces (an arktype def)
-  eval: ({ left, right }) => left * right,
+  name: "mul",
+  precedence: 3,
+  pattern: (p) =>
+    p
+      .operand("number").as("left")
+      .constVal("*")
+      .operand("number").as("right")
+      .result("number")
+      .eval(({ left, right }) => left() * right()),
 });
 ```
 
@@ -29,12 +29,9 @@ const mul = defineNode({
 |---------|-------------|
 | `number()` | Numeric literals |
 | `string(quotes)` | Quoted strings, e.g. `string(['"', "'"])` — escapes are processed (`\n \t \\ \" \' \xHH \uHHHH`, …) |
-| `boolean()` | The keyword literals `true` / `false` |
-| `nullVal()` | The keyword literal `null` |
-| `undefinedVal()` | The keyword literal `undefined` |
 | `ident()` | Single identifier, type resolved from schema |
 | `path()` | Identifier or dotted path (`values.password`), resolved via nested schema |
-| `constVal(value)` | Exact string (operators, keywords, delimiters) |
+| `constVal(...values)` | Exact strings as an ordered alternation — first match wins (operators, keywords, delimiters). Identifier-like values match whole identifiers only |
 | `operand(constraint?)` | Subexpression at the **next tighter** precedence level |
 | `rest(constraint?)` | Subexpression at the **current** level |
 | `expr(constraint?)` | Full expression — resets to the whole grammar (parens, ternary branches) |
@@ -46,9 +43,21 @@ The roles name the parse *level*, not a left/right position: `operand()`
 parses at the next tighter level (which is what prevents left recursion),
 `rest()` stays at the current level, and `expr()` resets to the full grammar.
 
-Keyword literals (`boolean()`, `nullVal()`, `undefinedVal()`) match as *whole
-identifiers* — `nullable` is one identifier, never `null` + `able`. Within a
-level, keyword nodes must come **before** `ident()`/`path()` nodes, or `true`
+Keyword literals are ordinary **const-pattern nodes** — there is no special
+keyword element:
+
+```ts
+const nullLit = defineNode({
+  name: "null",
+  precedence: 4,
+  pattern: (p) => p.constVal("null").result("null").eval(() => null),
+});
+```
+
+This works because identifier-like const values match as *whole identifiers*
+— `nullable` is one identifier, never `null` + `able` (the word-boundary
+rule; non-identifier values like `"+"` match as raw text). Within a level,
+keyword-const nodes must come **before** `ident()`/`path()` nodes, or `true`
 parses as an identifier. The `\xHH`/`\uHHHH` string escapes decode at runtime
 only; in literal mode (`parse`/`evaluate`) they are rejected — use
 `safeParse` for strings that need them.
@@ -75,19 +84,27 @@ only; in literal mode (`parse`/`evaluate`) they are rejected — use
 // operand() tail → LEFT-associative: a-b-c = (a-b)-c
 const sub = defineNode({
   name: "sub",
-  pattern: [operand("number").as("left"), constVal("-"), operand("number").as("right")],
   precedence: 2,
-  resultType: "number",
-  eval: ({ left, right }) => left - right,
+  pattern: (p) =>
+    p
+      .operand("number").as("left")
+      .constVal("-")
+      .operand("number").as("right")
+      .result("number")
+      .eval(({ left, right }) => left() - right()),
 });
 
 // rest() tail → RIGHT-associative: 2^3^2 = 2^(3^2)
 const pow = defineNode({
   name: "pow",
-  pattern: [operand("number").as("left"), constVal("^"), rest("number").as("right")],
   precedence: 3,
-  resultType: "number",
-  eval: ({ left, right }) => left ** right,
+  pattern: (p) =>
+    p
+      .operand("number").as("left")
+      .constVal("^")
+      .rest("number").as("right")
+      .result("number")
+      .eval(({ left, right }) => left() ** right()),
 });
 ```
 
@@ -101,6 +118,42 @@ the full grammar, so it is only sound in delimiter-bounded regions (parens'
 `)`, ternary's `:`). An undelimited `expr()` tail would swallow operators
 looser than the node's own precedence and break associativity; final operand
 slots must be `operand()`/`rest()`.
+
+### Why there is no `associativity` property (history)
+
+Earlier versions of stringent had both an `associativity` property and
+`lhs()`/`rhs()` element factories. That design had two defects, and the
+current shape-derived rule is the fix for both:
+
+1. **The property could lie.** Associativity is not a free choice — it is a
+   consequence of which grammar *level* the tail slot parses at. A tail
+   that parses at the next tighter level can only fold left; a tail that
+   re-enters the current level can only recurse right. The old runtime
+   quietly *reinterpreted* a left level's `rhs()` tail to parse at the next
+   level regardless of the declared property, so a pattern's label and its
+   actual behavior could disagree, and the property read as configuration
+   while actually being (ignored) documentation.
+2. **`lhs`/`rhs` named the wrong thing.** They read as left/right
+   *position*, but what they encoded was the parse *level* — tighter
+   versus same. `operand()` ("parse a tighter-level operand") and `rest()`
+   ("parse the rest of this level") say what they do, and the level is
+   exactly the property associativity derives from.
+
+Deriving associativity from the tail makes the pattern the single source
+of truth — the same three tokens with a different tail role are different
+math, which is the demonstration (pinned in `design-claims.test.ts`
+"associativity by tail shape"):
+
+```ts
+// sub with an operand() tail folds left:
+leftParser.evaluate("10-5-2", {}, {});  // 3 — (10-5)-2
+// an otherwise-identical sub with a rest() tail recurses right:
+rightParser.evaluate("10-5-2", {}, {}); // 7 — 10-(5-2)
+```
+
+Because the shape now *is* the semantics, a level whose patterns disagree
+on tail shape has no coherent reading — which is why mixing them became a
+construction error.
 
 ## Result types
 
@@ -120,29 +173,30 @@ and a static definition is for nodes that mint a new type (like an `eq` node
 producing `"boolean"`). `eval`'s return type is checked against the declared
 `resultType` at the `defineNode` call site.
 
-## Lazy nodes
+## Evaluation is lazy
 
-`lazy: true` makes `eval` receive memoized thunks (`() => value`) instead of
-values — this is how ternaries and short-circuiting `&&`/`||` avoid evaluating
-untaken branches:
+`eval` receives each binding as a **memoized thunk** (`() => value`) — call a
+binding to evaluate it. Untaken branches never run, which is how ternaries
+and short-circuiting `&&`/`||` work with no opt-in:
 
 ```ts
 const ternary = defineNode({
   name: "ternary",
-  pattern: [
-    operand("boolean").as("cond"), constVal("?"),
-    expr().as("then"), constVal(":"),
-    rest("then").as("else"),
-  ],
   precedence: 0,
-  resultType: "then",
-  lazy: true,                         // eval receives thunks
-  eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
+  pattern: (p) =>
+    p
+      .operand("boolean").as("cond")
+      .constVal("?")
+      .expr().as("then")
+      .constVal(":")
+      .rest("then").as("else")
+      .result("then")
+      .eval(({ cond, then, else: alt }) => (cond() ? then() : alt())),
 });
 ```
 
-Eager is the default; laziness is per-node and visible in `eval`'s parameter
-types.
+Memoization means a binding evaluates at most once, no matter how many times
+its thunk is called.
 
 ## Construction-time validation
 

@@ -170,42 +170,6 @@ function parseString(
   return [node, rest];
 }
 
-/**
- * Parse a keyword literal (true/false/null/undefined) as a WHOLE
- * identifier — `nullable` is one identifier, not `null` + `able`, so it
- * never matches (the keyword-prefix guard, mirrored by the type engine).
- */
-function parseKeyword(
-  kind: "boolean" | "null" | "undefined",
-  input: string,
-  env: ParseEnv
-): ParseResult {
-  const result = Token.Ident(input) as [] | [string, string];
-  const expected =
-    kind === "boolean" ? "'true' or 'false'" : `'${kind}'`;
-  if (result.length === 0) {
-    fail(env.diag, input, expected);
-    return [];
-  }
-  const [word, rest] = result;
-  const matches =
-    kind === "boolean" ? word === "true" || word === "false" : word === kind;
-  if (!matches) {
-    fail(env.diag, input, expected);
-    return [];
-  }
-  const value =
-    kind === "boolean" ? word === "true" : kind === "null" ? null : undefined;
-  const node = {
-    node: "literal",
-    raw: word,
-    value,
-    outputSchema: kind,
-  } as ASTNode & { raw: string; value: unknown };
-  setOutputType(node, env.compiled.env.compileDef(kind));
-  return [node, rest];
-}
-
 function parseIdent(input: string, env: ParseEnv): ParseResult {
   const result = Token.Ident(input) as [] | [string, string];
   if (result.length === 0) {
@@ -273,13 +237,47 @@ function parsePath(input: string, env: ParseEnv): ParseResult {
   return [node, rest];
 }
 
-function parseConst(value: string, input: string, env: ParseEnv): ParseResult {
-  const result = Token.Const(value, input) as [] | [string, string];
-  if (result.length === 0) {
-    fail(env.diag, input, `"${value}"`);
-    return [];
+/** Is the value one WHOLE identifier per parsebox's tokenizer? Memoized —
+ *  classification depends only on the const's value. */
+const identifierLikeCache = new Map<string, boolean>();
+function isIdentifierLike(value: string): boolean {
+  let known = identifierLikeCache.get(value);
+  if (known === undefined) {
+    const result = Token.Ident(value) as [] | [string, string];
+    known = result.length === 2 && result[0] === value && result[1] === "";
+    identifierLikeCache.set(value, known);
   }
-  return [{ node: "const", outputSchema: value }, result[1]];
+  return known;
+}
+
+/**
+ * Parse a constant: an ORDERED alternation of values — the first member
+ * that matches wins. IDENTIFIER-LIKE members match only as a WHOLE
+ * identifier in the input — `nullable` is one identifier, so it never
+ * matches a `constVal("null")` (word-boundary rule; pinned in
+ * parser.test.ts and design-claims). Other members match as raw text.
+ * Mirrors ParseConstPrimitive in src/parse/index.ts.
+ */
+function parseConst(
+  values: readonly string[],
+  input: string,
+  env: ParseEnv
+): ParseResult {
+  for (const value of values) {
+    if (isIdentifierLike(value)) {
+      const result = Token.Ident(input) as [] | [string, string];
+      if (result.length === 2 && result[0] === value) {
+        return [{ node: "const", outputSchema: value }, result[1]];
+      }
+    } else {
+      const result = Token.Const(value, input) as [] | [string, string];
+      if (result.length === 2) {
+        return [{ node: "const", outputSchema: value }, result[1]];
+      }
+    }
+    fail(env.diag, input, `"${value}"`);
+  }
+  return [];
 }
 
 // =============================================================================
@@ -407,16 +405,12 @@ function parseElement(
       return parseNumber(input, env);
     case "string":
       return parseString((element as StringSchema).quotes, input, env);
-    case "boolean":
-    case "null":
-    case "undefined":
-      return parseKeyword(element.kind, input, env);
     case "ident":
       return parseIdent(input, env);
     case "path":
       return parsePath(input, env);
     case "const":
-      return parseConst((element as ConstSchema).value, input, env);
+      return parseConst((element as ConstSchema).values, input, env);
     default:
       return [];
   }

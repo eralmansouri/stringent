@@ -1,75 +1,101 @@
 import { useMemo, useState } from "react";
-import {
-  createParser,
-  defineNode,
-  number,
-  string,
-  boolean,
-  path,
-  operand,
-  rest,
-  expr,
-  constVal,
-  overlapping,
-} from "stringent";
+import { createParser, defineNode, overlapping } from "stringent";
 
-// Leaf nodes live at the HIGHEST precedence level; keyword literals
-// (true/false) must come before path(), or `true` parses as an identifier.
-const numberLit = defineNode({ name: "num", pattern: [number()], precedence: 4 });
-const stringLit = defineNode({ name: "str", pattern: [string(['"', "'"])], precedence: 4 });
-const boolLit = defineNode({ name: "bool", pattern: [boolean()], precedence: 4 });
-const variable = defineNode({ name: "var", pattern: [path()], precedence: 4 });
+// Leaf nodes live at the HIGHEST precedence level; keyword-literal const
+// nodes (true/false) must come before path(), or `true` parses as an
+// identifier. Identifier-like const values match whole identifiers only.
+const numberLit = defineNode({
+  name: "num",
+  precedence: 4,
+  pattern: (p) => p.number(),
+});
+const stringLit = defineNode({
+  name: "str",
+  precedence: 4,
+  pattern: (p) => p.string(['"', "'"]),
+});
+const booleanLit = defineNode({
+  name: "bool",
+  precedence: 4,
+  pattern: (p) =>
+    p
+      .constVal("true", "false").as("word")
+      .result("boolean")
+      .eval(({ word }) => word() === "true"),
+});
+const variable = defineNode({
+  name: "var",
+  precedence: 4,
+  pattern: (p) => p.path(),
+});
 
 const parens = defineNode({
   name: "parens",
-  pattern: [constVal("("), expr().as("inner"), constVal(")")],
   precedence: 4,
-  resultType: "inner",
-  eval: ({ inner }) => inner,
+  pattern: (p) =>
+    p
+      .constVal("(")
+      .expr().as("inner")
+      .constVal(")")
+      .result("inner")
+      .eval(({ inner }) => inner()),
 });
 
 const eq = defineNode({
   name: "eq",
-  pattern: [operand().as("left"), constVal("=="), rest(overlapping("left")).as("right")],
   precedence: 1,
-  resultType: "boolean",
-  eval: ({ left, right }) => left === right,
+  pattern: (p) =>
+    p
+      .operand().as("left")
+      .constVal("==")
+      .rest(overlapping("left")).as("right")
+      .result("boolean")
+      .eval(({ left, right }) => left() === right()),
 });
 
 const add = defineNode({
   name: "add",
-  pattern: [operand("number | string").as("left"), constVal("+"), operand("left").as("right")],
   precedence: 2,
-  resultType: "left",
-  eval: (b) =>
-    typeof b.left === "string" ? `${b.left}${b.right}` : Number(b.left) + Number(b.right),
+  pattern: (p) =>
+    p
+      .operand("number | string").as("left")
+      .constVal("+")
+      .operand("left").as("right")
+      .result("left")
+      .eval((b) => {
+    const l = b.left(), r = b.right();
+    return typeof l === "string" ? `${l}${String(r)}` : Number(l) + Number(r);
+  }),
 });
 
 const mul = defineNode({
   name: "mul",
-  pattern: [operand("number").as("left"), constVal("*"), operand("number").as("right")],
   precedence: 3,
-  resultType: "number",
-  eval: ({ left, right }) => left * right,
+  pattern: (p) =>
+    p
+      .operand("number").as("left")
+      .constVal("*")
+      .operand("number").as("right")
+      .result("number")
+      .eval(({ left, right }) => left() * right()),
 });
 
 const ternary = defineNode({
   name: "ternary",
-  pattern: [
-    operand("boolean").as("cond"),
-    constVal("?"),
-    expr().as("then"),
-    constVal(":"),
-    rest("then").as("else"),
-  ],
   precedence: 0,
-  resultType: "then",
-  lazy: true,
-  eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
+  pattern: (p) =>
+    p
+      .operand("boolean").as("cond")
+      .constVal("?")
+      .expr().as("then")
+      .constVal(":")
+      .rest("then").as("else")
+      .result("then")
+      .eval(({ cond, then, else: alt }) => (cond() ? then() : alt())),
 });
 
 const parser = createParser(
-  [numberLit, stringLit, boolLit, variable, parens, ternary, eq, add, mul] as const
+  [numberLit, stringLit, booleanLit, variable, parens, ternary, eq, add, mul] as const
 );
 
 const schema = {

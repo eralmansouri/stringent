@@ -7,15 +7,8 @@
 import { describe, expect, it } from "vitest";
 import {
   EvaluationError,
-  constVal,
   createParser,
   defineNode,
-  expr,
-  ident,
-  operand,
-  number,
-  path,
-  rest,
 } from "./index.js";
 import { fixtureParser as parser, formSchema } from "./__fixtures__/grammar.js";
 
@@ -107,7 +100,7 @@ describe("evaluate", () => {
     expect(parser.evaluate("1==2 ? 1 : 2==2 ? 4 : 5", {}, {})).toBe(4);
   });
 
-  it("short-circuits lazy nodes: untaken branches are never evaluated", () => {
+  it("short-circuits: untaken branches are never evaluated", () => {
     // x is not in values — evaluating the else branch would throw
     const result = parser.safeParse("1==1 ? 2 : x", { x: "number" });
     expect(result.success).toBe(true);
@@ -171,9 +164,8 @@ describe("evaluate", () => {
   it("throws EvaluationError for nodes without eval", () => {
     const noEval = defineNode({
       name: "wrap",
-      pattern: [path().as("inner")],
       precedence: 1,
-      resultType: "unknown",
+      pattern: (p) => p.path().as("inner").result("unknown"),
     });
     const p = createParser([noEval] as const);
     const parsed = p.safeParse("foo", { foo: "number" });
@@ -185,69 +177,57 @@ describe("evaluate", () => {
     }
   });
 
-  describe("dev-mode result assertions", () => {
-    const badNodes = [
-      defineNode({ name: "n", pattern: [number()], precedence: 2 }),
-      defineNode({
-        name: "cat",
-        pattern: [operand("number").as("a"), constVal("&"), rest("number").as("b")],
-        precedence: 1,
-        resultType: "number",
-        // deliberately returns the WRONG shape (a string)
-        eval: ({ a, b }) => String(a + b) as never,
-      }),
-    ] as const;
-
-    it("throws when an eval output does not satisfy the node's result type", () => {
-      const p = createParser(badNodes, { dev: true });
-      expect(() => {
-        p.evaluate("1 & 2", {}, {});
-      }).toThrow(/eval for node 'cat' returned a string, which does not satisfy the node's result type 'number'/);
-    });
-
-    it("skips the assertion when dev is off", () => {
-      const p = createParser(badNodes, { dev: false });
-      expect(p.evaluate("1 & 2", {}, {})).toBe("3");
-    });
-
-    it("checks binding-reference result types against the per-parse resolved type", () => {
+  describe("uniform laziness", () => {
+    it("memoizes binding thunks: a side-effecting child evaluates once", () => {
+      let evaluations = 0;
       const nodes = [
-        defineNode({ name: "n", pattern: [number()], precedence: 2 }),
         defineNode({
-          name: "wrap",
-          pattern: [constVal("["), expr().as("inner"), constVal("]")],
+          name: "n",
           precedence: 2,
-          resultType: "inner",
-          eval: ({ inner }) => String(inner) as never,
+          pattern: (p) => p.number(),
+        }),
+        defineNode({
+          name: "tick",
+          precedence: 2,
+          pattern: (p) =>
+            p
+              .constVal("tick(")
+              .expr("number").as("inner")
+              .constVal(")")
+              .result("number")
+              .eval(({ inner }) => {
+            evaluations += 1;
+            return inner();
+          }),
+        }),
+        defineNode({
+          name: "twice",
+          precedence: 1,
+          pattern: (p) =>
+            p
+              .operand("number").as("a")
+              .constVal("&")
+              .rest("number").as("b")
+              .result("number")
+              .eval(({ a, b }) => a() + a() + b() + b()),
         }),
       ] as const;
-      const p = createParser(nodes, { dev: true });
-      expect(() => {
-        p.evaluate("[1]", {}, {});
-      }).toThrow(/does not satisfy the node's result type 'number'/);
-    });
-
-    it("skips ASTs without attached parse Types (e.g. deserialized)", () => {
-      const p = createParser(badNodes, { dev: true });
-      const parsed = p.safeParse("1 & 2", {});
-      expect(parsed.success).toBe(true);
-      if (parsed.success) {
-        const roundTripped = JSON.parse(JSON.stringify(parsed.ast));
-        expect(p.evaluateAst(roundTripped, {})).toBe("3");
-      }
+      const p = createParser(nodes);
+      expect(p.evaluate("tick(3) & tick(4)", {}, {})).toBe(14);
+      expect(evaluations).toBe(2);
     });
   });
 
   it("evaluates single-segment ident() elements", () => {
     const numberLit = defineNode({
       name: "n",
-      pattern: [number()],
       precedence: 1,
+      pattern: (p) => p.number(),
     });
     const variable = defineNode({
       name: "v",
-      pattern: [ident()],
       precedence: 1,
+      pattern: (p) => p.ident(),
     });
     const p = createParser([numberLit, variable] as const);
     const parsed = p.safeParse("y", { y: "number" });

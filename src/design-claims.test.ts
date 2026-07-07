@@ -11,36 +11,37 @@ import { describe, expect, it } from "vitest";
 import { type } from "arktype";
 import { match } from "arktype";
 import {
+  type PatternBuilder,
   EvaluationError,
   StringentParseError,
-  boolean,
-  constVal,
   createParser,
   defineNode,
-  expr,
-  number,
-  operand,
-  path,
-  rest,
 } from "./index.js";
 import { fixtureParser as parser, formSchema } from "./__fixtures__/grammar.js";
 
 describe("DESIGN: validation layers — schema typos", () => {
-  it("a typo'd schema leaf on evaluate() is NOT a compile error, but throws at runtime", () => {
-    // safeParse carries type.validate (leaf typos are compile errors there —
-    // see design-claims.typetest.ts); evaluate cannot (inference poisoning),
-    // so the same typo surfaces at runtime instead:
+  it("a typo'd schema leaf throws at runtime when the compile-time check is bypassed", () => {
+    // every entry point carries type.validate now (leaf typos are compile
+    // errors — see design-claims.typetest.ts); the casts bypass it to
+    // exercise the runtime check that protects plain-JS callers:
     expect(() => {
       parser.evaluate("1+1" as never, { x: "numbr" } as never, { x: 1 } as never);
     }).toThrow(/invalid schema/);
   });
 
   it("a typo'd constraint is a construction error, not a dead grammar rule", () => {
+    // operand("nmbr") is a COMPILE error at the chained call (pinned in
+    // design-claims.typetest.ts); the cast exercises the construction
+    // check that protects plain-JS users
     const typo = defineNode({
       name: "typo",
-      pattern: [operand("numbr").as("a"), constVal("!"), rest("number").as("b")],
       precedence: 1,
-      resultType: "number",
+      pattern: ((p: PatternBuilder) =>
+        p
+          .operand("numbr" as never).as("a")
+          .constVal("!")
+          .rest("number").as("b")
+          .result("number")) as never,
     });
     expect(() => {
       createParser([typo] as const);
@@ -101,42 +102,66 @@ describe("DESIGN: refinements are validation-only", () => {
   });
 });
 
-describe("DESIGN: eval typing — correlated bindings", () => {
-  it("a bare arktype matcher as eval crashes: eval's 2nd arg lands in arktype's context slot", () => {
-    const addPattern = [
-      operand("number | string").as("l"),
-      constVal("&"),
-      operand("l").as("r"),
-    ] as const;
+describe("DESIGN: eval typing — flat bindings + match", () => {
+  it("eval receives THUNKS, so a bare arktype matcher cannot be an eval: evaluate the bindings, then match", () => {
+    // (see also the arktype-generics alternative pinned below)
     const matcher = match
-      .in<{ l: number; r: number } | { l: string; r: string }>()
+      .in<{ l: number | string; r: number | string }>()
       .case({ l: "number", r: "number" }, (b) => b.l + b.r)
       .case({ l: "string", r: "string" }, (b) => b.l + b.r)
       .default("assert");
 
-    const num = defineNode({ name: "n", pattern: [number()], precedence: 2 });
+    const num = defineNode({
+      name: "n",
+      precedence: 2,
+      pattern: (p) => p.number(),
+    });
     const bare = defineNode({
       name: "bare",
-      pattern: addPattern,
       precedence: 1,
-      resultType: "l",
-      eval: matcher as never, // ✗ the runtime calls eval(bindings, runtimeValues)
+      pattern: (p) =>
+        p
+          .operand("number | string").as("l")
+          .constVal("&")
+          .operand("l").as("r")
+          .result("l")
+          .eval(matcher as never), // ✗ bindings are thunks; no case matches
     });
     const wrapped = defineNode({
       name: "bare",
-      pattern: addPattern,
       precedence: 1,
-      resultType: "l",
-      eval: (b) => matcher(b as never), // ✓ wrap it
+      pattern: (p) =>
+        p
+          .operand("number | string").as("l")
+          .constVal("&")
+          .operand("l").as("r")
+          .result("l")
+          .eval((b) => matcher({ l: b.l(), r: b.r() })), // ✓ evaluate, then match
     });
 
     expect(() => {
       createParser([num, bare] as const).evaluate("1 & 2", {}, {});
-    }).toThrow(); // "Cannot read properties of undefined (reading 'push')"
+    }).toThrow(); // .default("assert") rejects thunk-shaped input
     expect(createParser([num, wrapped] as const).evaluate("1 & 2", {}, {})).toBe(3);
   });
 
-  it("the documented soundness hole: a union-typed identifier can straddle branches", () => {
+  it("arktype GENERICS are an alternative correlated-pair guard", () => {
+    // (owner suggestion, PR #7) — instead of enumerating match cases, a
+    // generic type expresses "both sides are the same t" once and
+    // instantiates per member; eval picks the instantiation and lets the
+    // Type validate the correlated pair:
+    const samePair = type("<t extends string | number>", { l: "t", r: "t" });
+    const numPair = samePair("number");
+    const strPair = samePair("string");
+
+    expect(numPair({ l: 1, r: 2 }) instanceof type.errors).toBe(false);
+    expect(strPair({ l: "a", r: "b" }) instanceof type.errors).toBe(false);
+    // a mixed pair fails the instantiated Type — same backstop role as
+    // match's .default("assert"), with the correlation stated ONCE
+    expect(numPair({ l: 1, r: "x" }) instanceof type.errors).toBe(true);
+  });
+
+  it("flat bindings are honest: values may straddle the accepted combinations at runtime", () => {
     // x parses AS "string | number", so both slots accept `x + 1` — but at
     // runtime x may hold a string while the right operand is a number. The
     // fixture's match eval uses .default('assert'), so this throws instead
@@ -154,31 +179,51 @@ describe("DESIGN: parsing model — associativity by tail shape", () => {
     expect(parser.evaluate("10-5-2", {}, {})).toBe(3);
 
     // an otherwise-identical sub with a rest() tail recurses right:
-    const num = defineNode({ name: "n", pattern: [number()], precedence: 2 });
+    const num = defineNode({
+      name: "n",
+      precedence: 2,
+      pattern: (p) => p.number(),
+    });
     const subR = defineNode({
       name: "subR",
-      pattern: [operand("number").as("l"), constVal("-"), rest("number").as("r")],
       precedence: 1,
-      resultType: "number",
-      eval: ({ l, r }) => l - r,
+      pattern: (p) =>
+        p
+          .operand("number").as("l")
+          .constVal("-")
+          .rest("number").as("r")
+          .result("number")
+          .eval(({ l, r }) => l() - r()),
     });
     const right = createParser([num, subR] as const);
     expect(right.evaluate("10-5-2", {}, {})).toBe(7); // 10-(5-2)
   });
 
   it("mixing tail shapes within one precedence level is a construction error", () => {
-    const num = defineNode({ name: "n", pattern: [number()], precedence: 2 });
+    const num = defineNode({
+      name: "n",
+      precedence: 2,
+      pattern: (p) => p.number(),
+    });
     const left = defineNode({
       name: "l",
-      pattern: [operand("number").as("a"), constVal("+"), operand("number").as("b")],
       precedence: 1,
-      resultType: "number",
+      pattern: (p) =>
+        p
+          .operand("number").as("a")
+          .constVal("+")
+          .operand("number").as("b")
+          .result("number"),
     });
     const right = defineNode({
       name: "r",
-      pattern: [operand("number").as("a"), constVal("-"), rest("number").as("b")],
       precedence: 1,
-      resultType: "number",
+      pattern: (p) =>
+        p
+          .operand("number").as("a")
+          .constVal("-")
+          .rest("number").as("b")
+          .result("number"),
     });
     expect(() => {
       createParser([num, left, right] as const);
@@ -189,12 +234,20 @@ describe("DESIGN: parsing model — associativity by tail shape", () => {
     // If this compiled, `10 - 5 == 2` would parse as `10 - (5 == 2)`:
     // expr() resets to the FULL grammar, so with nothing bounding it, the
     // eq at a looser precedence gets consumed inside sub's operand.
-    const num = defineNode({ name: "n", pattern: [number()], precedence: 2 });
+    const num = defineNode({
+      name: "n",
+      precedence: 2,
+      pattern: (p) => p.number(),
+    });
     const bad = defineNode({
       name: "bad",
-      pattern: [operand("number").as("a"), constVal("-"), expr().as("b")],
       precedence: 1,
-      resultType: "number",
+      pattern: (p) =>
+        p
+          .operand("number").as("a")
+          .constVal("-")
+          .expr().as("b")
+          .result("number"),
     });
     expect(() => {
       createParser([num, bad] as const);
@@ -202,18 +255,160 @@ describe("DESIGN: parsing model — associativity by tail shape", () => {
   });
 });
 
-describe("DESIGN: keyword literals — alternation order matters", () => {
-  it("a path() node BEFORE boolean() swallows `true` as an identifier", () => {
-    const variable = defineNode({ name: "var", pattern: [path()], precedence: 1 });
-    const boolLit = defineNode({ name: "bool", pattern: [boolean()], precedence: 1 });
+describe("DESIGN: identifier-like consts — word boundaries & alternation order", () => {
+  it("identifier-like const values match WHOLE identifiers only", () => {
+    // constVal("null") must not match the PREFIX of `nullable` — the
+    // word-boundary rule. Without it, "nullable" would parse as the
+    // keyword `null` followed by dangling text "able".
+    const variable = defineNode({
+      name: "var",
+      precedence: 1,
+      pattern: (p) => p.path(),
+    });
+    const nullLit = defineNode({
+      name: "null",
+      precedence: 1,
+      pattern: (p) =>
+        p
+          .constVal("null")
+          .result("null")
+          .eval(() => null),
+    });
+    const p = createParser([nullLit, variable] as const);
+
+    const keyword = p.safeParse("null", {});
+    expect(keyword.success && keyword.ast).toMatchObject({
+      node: "null",
+      outputSchema: "null",
+    });
+
+    // `nullable` is ONE identifier — the null node never matches it
+    const identifier = p.safeParse("nullable", { nullable: "number" });
+    expect(identifier.success && identifier.ast).toMatchObject({
+      node: "path",
+      path: ["nullable"],
+      outputSchema: "number",
+    });
+
+    // the rule also guards infix words: `andy` never matches constVal("and")
+    const num = defineNode({
+      name: "n",
+      precedence: 2,
+      pattern: (p) => p.number(),
+    });
+    const conj = defineNode({
+      name: "and",
+      precedence: 1,
+      pattern: (p) =>
+        p
+          .operand("number").as("l")
+          .constVal("and")
+          .rest("number").as("r")
+          .result("number")
+          .eval(({ l, r }) => l() && r()),
+    });
+    const infix = createParser([num, conj] as const);
+    expect(infix.safeParse("1 and 2", {}).success).toBe(true);
+    expect(infix.safeParse("1 andy 2", {}).success).toBe(false);
+  });
+
+  it("UNIT keyword resultTypes work end-to-end (resultType 'true')", () => {
+    // a node may mint an arktype unit keyword; it satisfies base-type slots
+    const num = defineNode({
+      name: "n",
+      precedence: 2,
+      pattern: (p) => p.number(),
+    });
+    const yes = defineNode({
+      name: "yes",
+      precedence: 2,
+      pattern: (p) =>
+        p
+          .constVal("yes")
+          .result("true")
+          .eval(() => true as const),
+    });
+    const tern = defineNode({
+      name: "tern",
+      precedence: 1,
+      pattern: (p) =>
+        p
+          .operand("boolean").as("cond")
+          .constVal("?")
+          .operand("number").as("then")
+          .constVal(":")
+          .rest("number").as("else")
+          .result("number")
+          .eval(({ cond, then, else: alt }) => (cond() ? then() : alt())),
+    });
+    const p = createParser([num, yes, tern] as const);
+    const parsed = p.safeParse("yes ? 1 : 2", {});
+    expect(parsed.success && parsed.ast).toMatchObject({ node: "tern" });
+    expect(p.evaluate("yes ? 1 : 2", {}, {})).toBe(1);
+  });
+
+  it("const alternation: ONE node matches several keywords; members try in order", () => {
+    // constVal("true", "false") is an ordered alternation — the named
+    // element binds the MATCHED text, so one node covers both booleans:
+    const num = defineNode({ name: "n", precedence: 2, pattern: (p) => p.number() });
+    const boolLit = defineNode({
+      name: "bool",
+      precedence: 2,
+      pattern: (p) =>
+        p
+          .constVal("true", "false").as("word")
+          .result("boolean")
+          .eval(({ word }) => word() === "true"),
+    });
+    const p = createParser([num, boolLit] as const);
+    expect(p.evaluate("true", {}, {})).toBe(true);
+    expect(p.evaluate("false", {}, {})).toBe(false);
+    // word boundary holds PER MEMBER: `truex` is one identifier
+    expect(p.safeParse("truex", {}).success).toBe(false);
+
+    // members are tried IN ORDER — a prefix member declared first wins,
+    // so list longer members first when they overlap:
+    const eqFirst = defineNode({
+      name: "op",
+      precedence: 2,
+      pattern: (p) => p.constVal("==", "=").as("op").result("string").eval(({ op }) => op()),
+    });
+    const eqLast = defineNode({
+      name: "op",
+      precedence: 2,
+      pattern: (p) => p.constVal("=", "==").as("op").result("string").eval(({ op }) => op()),
+    });
+    const longestFirst = createParser([eqFirst] as const).safeParse("==", {});
+    expect(longestFirst.success && longestFirst.ast).toMatchObject({
+      op: { outputSchema: "==" },
+    });
+    const prefixFirst = createParser([eqLast] as const).safeParse("==", {});
+    // "=" matched first, leaving "=" unconsumed → UNEXPECTED_INPUT
+    expect(prefixFirst.success).toBe(false);
+  });
+
+  it("a path() node BEFORE a keyword const swallows `true` as an identifier", () => {
+    const variable = defineNode({
+      name: "var",
+      precedence: 1,
+      pattern: (p) => p.path(),
+    });
+    const boolLit = defineNode({
+      name: "true",
+      precedence: 1,
+      pattern: (p) =>
+        p
+          .constVal("true")
+          .result("boolean")
+          .eval(() => true),
+    });
 
     const keywordsFirst = createParser([boolLit, variable] as const);
     const variableFirst = createParser([variable, boolLit] as const);
 
     const good = keywordsFirst.safeParse("true", {});
     expect(good.success && good.ast).toMatchObject({
-      node: "literal",
-      value: true,
+      node: "true",
       outputSchema: "boolean",
     });
 
@@ -261,7 +456,7 @@ describe("DESIGN: dual-engine divergences", () => {
   });
 });
 
-describe("DESIGN: evaluation model — security & dev assertions", () => {
+describe("DESIGN: evaluation model — security", () => {
   it("prototype members never resolve: expressions are untrusted input", () => {
     expect(() => parser.evaluateAst(
       { node: "identifier", name: "constructor", outputSchema: "unknown" },
@@ -272,37 +467,32 @@ describe("DESIGN: evaluation model — security & dev assertions", () => {
       { x: {} }
     )).toThrow("'x.__proto__' is not defined");
   });
-
-  it("dev-mode result assertions catch evals that lie about their resultType", () => {
-    const num = defineNode({ name: "n", pattern: [number()], precedence: 2 });
-    const liar = defineNode({
-      name: "liar",
-      pattern: [operand("number").as("a"), constVal("!"), rest("number").as("b")],
-      precedence: 1,
-      resultType: "number",
-      eval: ({ a, b }) => String(a + b) as never, // returns a string
-    });
-    expect(() => {
-      createParser([num, liar] as const, { dev: true }).evaluate("1 ! 2", {}, {});
-    }).toThrow(EvaluationError);
-    expect(
-      createParser([num, liar] as const, { dev: false }).evaluate("1 ! 2", {}, {})
-    ).toBe("3");
-  });
 });
 
 describe("review findings (Fable, 2026-07-07) — regression pins", () => {
   it("F1: morph-typed schema leaves cannot crash or corrupt the caches", () => {
     const f = type("string").pipe((s) => s.length);
     const g = type("string").pipe((s) => s + "!");
-    const num = defineNode({ name: "n", pattern: [number()], precedence: 2 });
-    const vary = defineNode({ name: "v", pattern: [path()], precedence: 2 });
+    const num = defineNode({
+      name: "n",
+      precedence: 2,
+      pattern: (p) => p.number(),
+    });
+    const vary = defineNode({
+      name: "v",
+      precedence: 2,
+      pattern: (p) => p.path(),
+    });
     const coalesce = defineNode({
       name: "coalesce",
-      pattern: [operand().as("x"), constVal("??"), rest("x | null").as("y")],
       precedence: 1,
-      resultType: "x",
-      eval: ({ x }) => x as never,
+      pattern: (p) =>
+        p
+          .operand().as("x")
+          .constVal("??")
+          .rest("x | null").as("y")
+          .result("x")
+          .eval(({ x }) => x() as never),
     });
     // distinct morphs share an .expression — before the fix, "a ?? a"
     // seeded the caches and "b ?? a" silently reused the verdict; on a
@@ -317,12 +507,20 @@ describe("review findings (Fable, 2026-07-07) — regression pins", () => {
   });
 
   it("F2: the '~resolved' carrier key is enforced as reserved", () => {
-    const num = defineNode({ name: "n", pattern: [number()], precedence: 2 });
+    const num = defineNode({
+      name: "n",
+      precedence: 2,
+      pattern: (p) => p.number(),
+    });
     const sneaky = defineNode({
       name: "sneaky",
-      pattern: [operand("number").as("a"), constVal("!"), rest("number").as("b")],
       precedence: 1,
-      resultType: { "~resolved": "number" } as never,
+      pattern: (p) =>
+        p
+          .operand("number").as("a")
+          .constVal("!")
+          .rest("number").as("b")
+          .result({ "~resolved": "number" } as never),
     });
     expect(() => {
       createParser([num, sneaky] as const);
@@ -330,12 +528,23 @@ describe("review findings (Fable, 2026-07-07) — regression pins", () => {
   });
 
   it("F3: refinement-on-reference templates get an honest construction error", () => {
-    const num = defineNode({ name: "n", pattern: [number()], precedence: 2 });
+    const num = defineNode({
+      name: "n",
+      precedence: 2,
+      pattern: (p) => p.number(),
+    });
+    // "left > 5" is a COMPILE error at the chained call — refinements on
+    // an unknown-typed alias are rejected by arktype itself (pinned in
+    // design-claims.typetest.ts); the cast exercises the runtime twin
     const refined = defineNode({
       name: "refined",
-      pattern: [operand("number").as("left"), constVal("!"), rest("left > 5").as("r")],
       precedence: 1,
-      resultType: "number",
+      pattern: ((p: PatternBuilder) =>
+        p
+          .operand("number").as("left")
+          .constVal("!")
+          .rest("left > 5" as never).as("r")
+          .result("number")) as never,
     });
     expect(() => {
       createParser([num, refined] as const);

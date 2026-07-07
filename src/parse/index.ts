@@ -28,9 +28,11 @@
  *   normalized `expression` string instead — behavioral parity is over
  *   accept/reject decisions and inferred TS types, not display strings.
  *
- * Scope caveat (documented): defs resolve in arktype's DEFAULT scope at
- * the type level, so grammars using createParser's `scope` aliases lose
- * literal-mode checking for those defs (use safeParse, or cast).
+ * Parser-scope aliases resolve at the type level too, at exactly ONE
+ * point: ident/path leaf defs resolve in the parser's scope when parsed
+ * (ResolveLeafDef → a "~resolved" carrier), so schema leaves like
+ * { created: "Timestamp" } type correctly in literal mode while the def
+ * algebra itself stays scope-free (see InferOfDef).
  */
 
 import type { Token } from "@sinclair/parsebox";
@@ -44,9 +46,6 @@ import type {
   NamedSchema,
   NumberSchema,
   StringSchema,
-  BooleanSchema,
-  NullSchema,
-  UndefinedSchema,
   IdentSchema,
   PathSchema,
   ConstSchema,
@@ -57,9 +56,6 @@ import type {
 import type {
   NumberNode,
   StringNode,
-  BooleanNode,
-  NullNode,
-  UndefinedNode,
   IdentNode,
   PathNode,
   ConstNode,
@@ -107,7 +103,17 @@ export interface ResolvedDef<T = unknown> {
 
 /** The TS type of a def (string expression, object def, or resolved
  *  carrier). Refinements erase automatically (type.infer<"number > 0">
- *  = number). */
+ *  = number).
+ *
+ *  Deliberately UNSCOPED: parser-scope aliases never reach this as raw
+ *  strings — schema leaf defs resolve ONCE at ident/path parse time into
+ *  a ResolvedDef carrier (ResolveLeafDef below), and constraint/result
+ *  defs are builder-validated against the default scope. Keeping every
+ *  def interpretation scope-free means constraint-check instantiations
+ *  are IDENTICAL for scoped and unscoped parsers (one shared memoization
+ *  set), which is what keeps deep chains inside the recursion budget
+ *  across TypeScript versions (5.7 has less headroom than 5.9 —
+ *  canary-pinned in types.typetest.ts). */
 export type InferOfDef<D> = D extends ResolvedDef<infer T>
   ? T
   : D extends string
@@ -124,10 +130,13 @@ export type InferOfDef<D> = D extends ResolvedDef<infer T>
  * wrap their resolved type in a carrier. Costs ~10 instantiations per
  * resolution (measured; spike/union-defs).
  */
-type ResolveDefIn<D, S> = type.infer<D, S> extends infer Scoped
+type ResolveDefIn<D, S> = keyof S extends never
+  ? // no bindings in scope — the def cannot be binding-dependent
+    D
+  : type.infer<D, S> extends infer Scoped
   ? [type.infer<D>] extends [Scoped]
     ? [Scoped] extends [type.infer<D>]
-      ? D // scope-independent — keep the literal def
+      ? D // binding-independent — keep the literal def
       : { "~resolved": Scoped }
     : { "~resolved": Scoped }
   : never;
@@ -138,7 +147,9 @@ type ResolveDefIn<D, S> = type.infer<D, S> extends infer Scoped
 type ScopeOfBindings<Bindings> = {
   [K in keyof Bindings as Bindings[K] extends { node: "const" }
     ? never
-    : K]: Bindings[K] extends { outputSchema: infer O } ? InferOfDef<O> : unknown;
+    : K]: Bindings[K] extends { outputSchema: infer O }
+    ? InferOfDef<O>
+    : unknown;
 };
 
 /** Assignability over defs — the type-level twin of TypeEnv.isAssignable.
@@ -252,26 +263,20 @@ type ParseStringPrimitive<
   : [];
 
 /**
- * Parse a keyword literal (true/false/null/undefined) as a WHOLE
- * identifier — `nullable` is one identifier, so it never matches the
- * `null` keyword (prefix guard). Mirrors parseKeyword in
- * src/runtime/parser.ts.
+ * Resolve a schema-leaf def at PARSE TIME: defs the default scope cannot
+ * resolve (parser-scope aliases like "Money") are inferred once in the
+ * parser's scope and carried as a ResolvedDef, so every downstream
+ * constraint check is a shallow carrier extraction instead of a repeated
+ * deep scoped inference (load-bearing: the fold re-checks the left
+ * operand each iteration — the scoped 30-term canary in
+ * types.typetest.ts pins the consequence). Mirrors the runtime, where
+ * ident/path nodes carry their resolved Type.
  */
-type ParseKeywordPrimitive<
-  TKind extends "boolean" | "null" | "undefined",
-  TInput extends string
-> = Token.TIdent<TInput> extends [
-  infer V extends string,
-  infer R extends string
-]
-  ? TKind extends "boolean"
-    ? V extends "true" | "false"
-      ? [BooleanNode<V>, R]
-      : []
-    : V extends TKind
-    ? [TKind extends "null" ? NullNode : UndefinedNode, R]
-    : []
-  : [];
+type ResolveLeafDef<D, $> = [D] extends ["unknown"]
+  ? D
+  : [type.infer<D>] extends [never]
+  ? { "~resolved": type.infer<D, $> }
+  : D;
 
 type ParseIdentPrimitive<
   TInput extends string,
@@ -281,7 +286,7 @@ type ParseIdentPrimitive<
   infer R extends string
 ]
   ? V extends keyof TContext["data"]
-    ? [IdentNode<V, TContext["data"][V]>, R]
+    ? [IdentNode<V, ResolveLeafDef<TContext["data"][V], TContext["scope"]>>, R]
     : [IdentNode<V, "unknown">, R]
   : [];
 
@@ -324,15 +329,50 @@ type ParsePathSegments<
       ]
     ? ParsePathSegments<R, [...TSegs, Seg], TContext>
     : [] // dangling dot "values." → fail whole element
-  : [PathNode<TSegs, ResolvePath<TContext["data"], TSegs>>, TInput];
+  : [
+      PathNode<
+        TSegs,
+        ResolveLeafDef<ResolvePath<TContext["data"], TSegs>, TContext["scope"]>
+      >,
+      TInput
+    ];
 
+/**
+ * Parse a constant: an ORDERED alternation of values — the first member
+ * that matches wins. IDENTIFIER-LIKE members (the value is one whole
+ * identifier per parsebox's tokenizer) match only as a WHOLE identifier
+ * in the input — `nullable` is one identifier, so it never matches a
+ * `constVal("null")` (word-boundary rule; pinned in parser.test.ts and
+ * design-claims). Other members match as raw text. Mirrors parseConst in
+ * src/runtime/parser.ts.
+ */
 type ParseConstPrimitive<
+  TValues extends readonly string[],
+  TInput extends string
+> = TValues extends readonly [
+  infer V extends string,
+  ...infer Rest extends readonly string[]
+]
+  ? ParseConstMember<V, TInput> extends [
+      infer N extends ConstNode,
+      infer R extends string
+    ]
+    ? [N, R]
+    : ParseConstPrimitive<Rest, TInput>
+  : [];
+
+/** Match one alternation member (word-boundary rule per member). */
+type ParseConstMember<
   TValue extends string,
   TInput extends string
-> = Token.TConst<TValue, TInput> extends [
-  infer _V extends string,
-  infer R extends string
-]
+> = Token.TIdent<TValue> extends [TValue, ""]
+  ? Token.TIdent<TInput> extends [TValue, infer R extends string]
+    ? [ConstNode<TValue>, R]
+    : []
+  : Token.TConst<TValue, TInput> extends [
+      infer _V extends string,
+      infer R extends string
+    ]
   ? [ConstNode<TValue>, R]
   : [];
 
@@ -441,12 +481,6 @@ type ParseElement<
   ? ParseNumberPrimitive<TInput>
   : TElement extends StringSchema<infer Q>
   ? ParseStringPrimitive<Q, TInput>
-  : TElement extends BooleanSchema
-  ? ParseKeywordPrimitive<"boolean", TInput>
-  : TElement extends NullSchema
-  ? ParseKeywordPrimitive<"null", TInput>
-  : TElement extends UndefinedSchema
-  ? ParseKeywordPrimitive<"undefined", TInput>
   : TElement extends IdentSchema
   ? ParseIdentPrimitive<TInput, TContext>
   : TElement extends PathSchema
@@ -592,6 +626,14 @@ type ExtractBindings<
  * resultType is an OPTIONAL property, so undefined must be stripped before
  * matching.
  */
+/** NOTE: deliberately UNSCOPED — threading the parser scope through the
+ *  fold-accumulated result chain doubles the per-level forcing depth and
+ *  breaks the 30-term canary (measured; see the scoped canary in
+ *  types.typetest.ts). Result defs cannot reference parser aliases (the
+ *  builder validates them against the default scope + bindings), so the
+ *  only conservative corner is a TEMPLATE result over an alias-typed
+ *  operand, which degrades toward unknown; the runtime resolves it
+ *  fully. */
 type ResultSchemaOf<TNode extends NodeSchema, Bindings> = Exclude<
   TNode["resultType"],
   undefined

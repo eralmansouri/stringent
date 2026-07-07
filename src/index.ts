@@ -10,29 +10,16 @@
 // Main API: defineNode & createParser
 // =============================================================================
 
-export {
-  defineNode,
-  number,
-  string,
-  boolean,
-  nullVal,
-  undefinedVal,
-  ident,
-  path,
-  constVal,
-  operand,
-  rest,
-  expr,
-  overlapping,
-} from "./schema/index.js";
+export { defineNode, overlapping } from "./schema/index.js";
 export type {
   NodeSchema,
   PatternSchema,
+  PatternBuilder,
+  NameableBuilder,
+  ResultedBuilder,
+  EvaledBuilder,
   NumberSchema,
   StringSchema,
-  BooleanSchema,
-  NullSchema,
-  UndefinedSchema,
   IdentSchema,
   PathSchema,
   ConstSchema,
@@ -65,7 +52,13 @@ export type { ScopeAliases } from "./runtime/types.js";
 // =============================================================================
 
 export { StringentParseError } from "./runtime/diagnostics.js";
-export type { StringentError } from "./runtime/diagnostics.js";
+export type {
+  StringentError,
+  ParseErrorResult,
+  TypeMismatchResult,
+  UnexpectedInputResult,
+  InvalidSchemaResult,
+} from "./runtime/diagnostics.js";
 export { EvaluationError } from "./runtime/evaluate.js";
 
 // =============================================================================
@@ -86,9 +79,6 @@ export type {
   LiteralNode,
   NumberNode,
   StringNode,
-  BooleanNode,
-  NullNode,
-  UndefinedNode,
   IdentNode,
   PathNode,
   ConstNode,

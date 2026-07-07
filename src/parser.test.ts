@@ -10,14 +10,8 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  constVal,
   createParser,
   defineNode,
-  nullVal,
-  number,
-  operand,
-  rest,
-  string,
 } from "./index.js";
 import { fixtureParser as parser, formSchema } from "./__fixtures__/grammar.js";
 
@@ -80,38 +74,29 @@ describe("atoms", () => {
   });
 });
 
-describe("keyword literals", () => {
-  it("parses true/false with boolean values", () => {
+describe("keyword literals (const-pattern nodes)", () => {
+  it("parses true/false through ONE alternation node, binding the matched text", () => {
     expect(parseOk("true")).toEqual({
-      node: "literal",
-      raw: "true",
-      value: true,
+      node: "bool",
+      word: { node: "const", outputSchema: "true" },
       outputSchema: "boolean",
     });
     expect(parseOk(" false ")).toEqual({
-      node: "literal",
-      raw: "false",
-      value: false,
+      node: "bool",
+      word: { node: "const", outputSchema: "false" },
       outputSchema: "boolean",
     });
   });
 
   it("parses null and undefined", () => {
-    expect(parseOk("null")).toEqual({
-      node: "literal",
-      raw: "null",
-      value: null,
-      outputSchema: "null",
-    });
+    expect(parseOk("null")).toEqual({ node: "null", outputSchema: "null" });
     expect(parseOk("undefined")).toEqual({
-      node: "literal",
-      raw: "undefined",
-      value: undefined,
+      node: "undefined",
       outputSchema: "undefined",
     });
   });
 
-  it("keyword-prefix guard: 'nullable' is an identifier, not null + 'able'", () => {
+  it("word-boundary rule: 'nullable' is an identifier, not null + 'able'", () => {
     expect(parseOk("nullable", { nullable: "number" })).toEqual(
       pathNode(["nullable"], "number")
     );
@@ -385,16 +370,20 @@ describe("member access (paths)", () => {
 describe("embedded binding references (scoped defs)", () => {
   // A def that EMBEDS a binding name resolves per-parse in a scope
   // extended with the parsed operand types (spike/union-defs).
-  const num = defineNode({ name: "num", pattern: [number()], precedence: 2 });
+  const num = defineNode({
+    name: "num",
+    precedence: 2,
+    pattern: (p) => p.number(),
+  });
   const str = defineNode({
     name: "str",
-    pattern: [string(["'"])],
     precedence: 2,
+    pattern: (p) => p.string(["'"]),
   });
   const nullLit = defineNode({
     name: "null",
-    pattern: [nullVal()],
     precedence: 2,
+    pattern: (p) => p.constVal("null").result("null").eval(() => null),
   });
 
   /** postfix `x?`: resultType is a TEMPLATE over the operand. The operand
@@ -402,28 +391,38 @@ describe("embedded binding references (scoped defs)", () => {
    *  chaining then exercises the fixed point. */
   const maybe = defineNode({
     name: "maybe",
-    pattern: [operand("number | string | null").as("v"), constVal("?")],
     precedence: 1,
-    resultType: "v | null",
-    eval: ({ v }) => v as never,
+    pattern: (p) =>
+      p
+        .operand("number | string | null").as("v")
+        .constVal("?")
+        .result("v | null")
+        .eval(({ v }) => v()),
   });
 
   /** `l ~ r` where r must be l-or-null: a TEMPLATE constraint */
   const pair = defineNode({
     name: "pair",
-    pattern: [operand("number | string").as("l"), constVal("~"), rest("l | null").as("r")],
     precedence: 0,
-    resultType: "boolean",
-    eval: ({ l, r }) => l === r,
+    pattern: (p) =>
+      p
+        .operand("number | string").as("l")
+        .constVal("~")
+        .rest("l | null").as("r")
+        .result("boolean")
+        .eval(({ l, r }) => l() === r()),
   });
 
   /** object resultType embedding a reference */
   const box = defineNode({
     name: "box",
-    pattern: [operand("number | string").as("v"), constVal("!")],
     precedence: 1,
-    resultType: { value: "v | null" },
-    eval: ({ v }) => ({ value: v }) as never,
+    pattern: (p) =>
+      p
+        .operand("number | string").as("v")
+        .constVal("!")
+        .result({ value: "v | null" })
+        .eval(({ v }) => ({ value: v() })),
   });
 
   const p = createParser([num, str, nullLit, maybe, pair, box] as const);
@@ -474,7 +473,9 @@ describe("embedded binding references (scoped defs)", () => {
 describe("diagnostics", () => {
   it("reports expected tokens at end of input", () => {
     const error = parseErr("1+");
+    // the union narrows on code — per-code fields are REQUIRED thereafter
     expect(error.code).toBe("PARSE_ERROR");
+    if (error.code !== "PARSE_ERROR") throw new Error("narrowed above");
     expect(error.position).toBe(2);
     expect(error.found).toBe("end of input");
     expect(error.expected).toContain("number");
@@ -497,6 +498,7 @@ describe("diagnostics", () => {
   it("reports trailing input with expected continuations", () => {
     const error = parseErr("1+2 junk!!");
     expect(error.code).toBe("UNEXPECTED_INPUT");
+    if (error.code !== "UNEXPECTED_INPUT") throw new Error("narrowed above");
     expect(error.position).toBe(4);
     expect(error.expected).toContain('"*"');
   });

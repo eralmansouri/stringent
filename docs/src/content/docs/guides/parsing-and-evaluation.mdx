@@ -1,6 +1,6 @@
 ---
 title: Parsing & Evaluation
-description: The parse, safeParse, evaluate, evaluateAst and compile entry points, lazy evaluation, and type-level limits.
+description: The parse, safeParse, evaluate, evaluateAst and compile entry points, the lazy evaluation model, and type-level limits.
 sidebar:
   order: 4
 ---
@@ -95,25 +95,19 @@ additionally get precise compile-time typing.
 ## Evaluation model
 
 `evaluate`/`evaluateAst` walk the AST post-order: literals yield their values,
-identifiers and paths look up the values object, named-binding children
-evaluate first, then the node's `eval(bindings, values)` runs. The parsed
-output type types the result, so evaluation is typed end-to-end for literal
-inputs.
+identifiers and paths look up the values object, and the node's
+`eval(bindings)` runs with each binding delivered as a **memoized thunk**.
+The parsed output type types the result, so evaluation is typed end-to-end
+for literal inputs.
 
-Nodes with `lazy: true` receive **memoized thunks** in `eval`, so untaken
-ternary branches (and the right side of a short-circuiting `&&`) are never
-evaluated.
+Evaluation is uniformly lazy: untaken ternary branches (and the right side
+of a short-circuiting `&&`) are never evaluated, and memoization means each
+child evaluates at most once.
 
 All identifier and path lookups — in the evaluator *and* in parse-time schema
 resolution — use own-property checks (`Object.hasOwn`). `constructor`,
 `__proto__`, `x.constructor` and the like resolve to "not defined", never to
 prototype internals.
-
-**Dev-mode result assertions**: `createParser(nodes, { dev })` — on by
-default outside `NODE_ENV=production` — asserts each user node's eval output
-against the node's per-parse resolved type (~16ns/node). This is the runtime
-complement of the compile-time eval-return check, for plain-JS users. Failure
-messages describe the value's *shape* only, never the value itself.
 
 ## Limits & rules
 

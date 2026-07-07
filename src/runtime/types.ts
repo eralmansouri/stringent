@@ -245,6 +245,12 @@ export function eraseRefinements(t: Type): Type {
   let erased = erasureCache.get(t);
   if (erased === undefined) {
     try {
+      // Only round-trip through the serialized schema when a refinement
+      // was actually stripped: the round-trip is LOSSY for unit types
+      // whose values do not survive JSON (the `undefined` keyword comes
+      // back as the STRING literal "undefined" — pinned in parser.test.ts
+      // "parses null and undefined").
+      let strippedAny = false;
       const stripped = (
         t as unknown as {
           internal: {
@@ -253,12 +259,18 @@ export function eraseRefinements(t: Type): Type {
             ) => { json: unknown };
           };
         }
-      ).internal.transform((kind, inner) =>
-        REFINEMENT_KINDS.has(kind) ? null : inner
-      );
-      erased = (type as unknown as { schema: (json: unknown) => Type }).schema(
-        stripped.json
-      );
+      ).internal.transform((kind, inner) => {
+        if (REFINEMENT_KINDS.has(kind)) {
+          strippedAny = true;
+          return null;
+        }
+        return inner;
+      });
+      erased = strippedAny
+        ? (type as unknown as { schema: (json: unknown) => Type }).schema(
+            stripped.json
+          )
+        : t;
     } catch {
       erased = t;
     }

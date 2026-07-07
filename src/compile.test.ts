@@ -9,7 +9,9 @@
 
 import { describe, expect, it } from "vitest";
 import { type } from "arktype";
-import { StringentParseError } from "./index.js";
+import {
+  StringentParseError,
+} from "./index.js";
 import { fixtureParser as parser, formSchema } from "./__fixtures__/grammar.js";
 
 const matching = {
