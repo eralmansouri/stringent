@@ -422,7 +422,7 @@ tracked by **PR #5** (https://github.com/eralmansouri/stringent/pull/5).
 Phase 4 + the plan-review corrections continue on
 `claude/v2-plan-review-e13a11` (a superset of the suiwqu history) — the
 owner decides whether to point PR #5 at it or open a fresh PR.
-At handoff: `pnpm typecheck`, `pnpm test` (118 tests, 4 files),
+At handoff: `pnpm typecheck`, `pnpm test` (144 tests, 5 files),
 `pnpm build`, and `pnpm check:package` are all green. Whole-project
 check: ~678k instantiations / ~2.7s.
 
@@ -472,6 +472,18 @@ check: ~678k instantiations / ~2.7s.
    the owner was right to push back), runtime `compileDefIn`/`resolvesWith`
    + template constraint/result kinds, type-level `ResolveDefIn` +
    `ResolvedDef` carrier, tests in both engines.
+10. (on `claude/v2-plan-review-e13a11`) — executable claims audit (owner
+    directive: no hand-waving): every demonstrable claim in DESIGN.md now
+    carries a snippet, pinned by `src/design-claims.test.ts` (runtime) +
+    `src/design-claims.typetest.ts` (compile time). The audit surfaced and
+    documented: (a) the object-overlap corner is the one NON-conservative
+    engine divergence (compiles, then throws — DESIGN's "all conservative"
+    wording was wrong); (b) unknowns in `overlapping()` slots diverge the
+    other way (`zz == yy`: runtime parses, literal mode rejects); (c) an
+    unknown identifier LEADING a left-fold level reports UNEXPECTED_INPUT,
+    not TYPE_MISMATCH (the fold never starts) — filed under the ranking
+    weakness; (d) writing the literal directive string inside a prose
+    comment ACTIVATES it (tsc matches it anywhere in a comment).
 
 ### The four load-bearing design rules
 

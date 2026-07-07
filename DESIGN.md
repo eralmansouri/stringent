@@ -5,6 +5,12 @@ the contract the codebase is held to; if behavior and this document disagree,
 one of them is a bug. (The v1→v2 redesign is chronicled in V2-PLAN.md; this
 document describes the result.)
 
+**No hand-waving rule:** every demonstrable claim, limit, and odd behavior
+below comes with a snippet, and each snippet is pinned by an executable
+twin — `src/design-claims.test.ts` (runtime, vitest) and
+`src/design-claims.typetest.ts` (compile time, tsc). If a snippet here and
+those files disagree, the files win and this document is wrong.
+
 ## Vision
 
 One grammar definition, two engines, identical semantics:
@@ -68,11 +74,42 @@ Validation happens at three layers:
    dynamically-built schemas. Schema errors throw — they are programmer
    errors, distinct from input errors, which never throw.
 
+```ts
+// layer 1 — a typo'd constraint kills createParser, not a grammar rule:
+createParser([defineNode({ pattern: [operand("numbr").as("a"), …] })]);
+// ✗ throws: "constraint 'numbr' … 'numbr' is unresolvable"
+
+// layer 2 — the same typo in a schema leaf is a COMPILE error on safeParse:
+parser.safeParse("1+1", { x: "numbr" });
+//                            ~~~~~~~ ✗ Type '"numbr"' is not assignable
+//                                      to '"'numbr' is unresolvable"'
+// …but NOT on evaluate (the inference-poisoning limit) — layer 3 catches it:
+parser.evaluate("1+1" as never, { x: "numbr" } as never, { x: 1 } as never);
+// ✗ throws at runtime: "stringent: invalid schema — 'numbr' is unresolvable…"
+```
+
 `"unknown"` is the type of unresolved identifiers/paths. Constrained slots
 reject it, which is how "identifier not in schema" surfaces as a type
-mismatch naming the offender. Unconstrained slots (and symmetric checks
-against unconstrained operands) accept unknown operands; grammars that want
-unresolved identifiers rejected structurally should constrain their slots.
+mismatch naming the offender:
+
+```ts
+parser.safeParse("1 + zz", {});
+// ✗ TYPE_MISMATCH: … 'zz' is not in the schema … expected number | string
+
+// position nuance: an unknown LEADING a left-fold level makes the fold
+// never start, so the prefix parses alone and the leftover input wins:
+parser.safeParse("zz + 1", {}); // ✗ UNEXPECTED_INPUT (not TYPE_MISMATCH)
+```
+
+At runtime, UNCONSTRAINED slots accept unknown operands — `zz == yy`
+parses (eq's left slot is `operand()`, and `overlapping()` against an
+unknown is permissive) and fails only at evaluation with
+`'zz' is not defined`. Literal mode is stricter: the type engine rejects
+`"unknown"` candidates in every constrained slot, `overlapping()`
+included, so `parse("zz == yy", {})` is a compile error — a conservative
+engine divergence (see Dual-engine parity). Grammars that want unresolved
+identifiers rejected structurally at runtime too should constrain their
+slots.
 
 ### Constraint satisfaction is assignability
 
@@ -121,6 +158,18 @@ Refinements do their real job at the values boundary: `evaluate()` and
 compiled rules validate the values object against the full, un-erased
 schema.
 
+```ts
+// erased for typing: `age` is just a number, so this parses (both engines) —
+// refinement-level expression typing isn't even well-defined: what would
+// the refinement of `age + 1` be?
+parser.safeParse("age + 1", { age: "number > 0" }); // ✓ parses
+
+// enforced on values: the SAME schema rejects a bad values object
+parser.evaluate("age + 1", { age: "number > 0" }, { age: 41 }); // 42
+parser.evaluate("age + 1", { age: "number > 0" }, { age: -5 });
+// ✗ throws: values do not match the schema: age must be positive (was -5)
+```
+
 ### Result types (what a node produces)
 
 | Form | Meaning |
@@ -168,11 +217,34 @@ const addImpl = match
 eval: (b) => addImpl(b)
 ```
 
+The two claims above, demonstrated:
+
+```ts
+// TS 5.9 narrows the CHECKED property, never its siblings:
+declare const b: { left: number; right: number } | { left: string; right: string };
+if (typeof b.left === "string") {
+  b.left.toUpperCase();  // ✓ narrowed
+  b.right.toUpperCase(); // ✗ error: still string | number
+}
+
+// a BARE matcher as eval crashes inside arktype — the runtime calls
+// eval(bindings, runtimeValues), and arktype treats a second argument as
+// its internal traversal context:
+eval: addImpl        // ✗ "Cannot read properties of undefined (reading 'push')"
+eval: (b) => addImpl(b) // ✓
+```
+
 Known hole (documented, accepted): runtime values can straddle branches
-when a union-typed schema identifier fills either side (`x + 1` with
-`x: "string | number"` holding a string). Same pragmatic unsoundness TS
-accepts for correlated unions; `.default("assert")` turns it into a runtime
-error.
+when a union-typed schema identifier fills either side. Same pragmatic
+unsoundness TS accepts for correlated unions; `.default("assert")` turns
+it into a runtime error:
+
+```ts
+// x parses AS "string | number", satisfying both slots of add —
+parser.evaluate("x + 1", { x: "string | number" }, { x: 1 });    // 2
+parser.evaluate("x + 1", { x: "string | number" }, { x: "hi" });
+// ✗ throws (match .default("assert")) instead of silently making "hi1"
+```
 
 `eval`'s **return type** is verified against the declared `resultType` at
 the `defineNode` call site (binding references and object defs included).
@@ -186,13 +258,27 @@ At runtime, dev mode (below) re-asserts it for plain-JS users.
   must start with a consuming element. Duplicate precedences share a level;
   nodes within a level are tried in definition order with backtracking —
   keyword-literal nodes must precede identifier/path nodes, or `true`
-  parses as an identifier.
+  parses as an identifier:
+
+  ```ts
+  createParser([boolLit, variable]).safeParse("true", {}).ast;
+  // { node: "literal", value: true, outputSchema: "boolean" }   ✓
+  createParser([variable, boolLit]).safeParse("true", {}).ast;
+  // { node: "path", path: ["true"], outputSchema: "unknown" }   ✗ trap
+  ```
 - **Roles** name the grammar level a slot parses at: `operand()` parses at
   the next tighter level (prevents left recursion); `rest()` parses at the
   current level; `expr()` resets to the full grammar. `expr()` must be
   followed by a `constVal` in the same pattern — it is only sound in
   delimiter-bounded regions (parens' `)`, ternary's `:`); an undelimited
-  `expr()` tail would swallow looser operators and break precedence.
+  `expr()` tail would swallow looser operators (`10 - 5 == 2` would parse
+  as `10 - (5 == 2)`), so it refuses to build:
+
+  ```ts
+  defineNode({ name: "bad", pattern: [operand("number").as("a"), constVal("-"), expr().as("b")], … });
+  createParser([num, bad]);
+  // ✗ "node 'bad' has an expr() element with no constVal after it — …"
+  ```
 - **Associativity is derived from the pattern's tail shape**; there is no
   `associativity` property. A level whose patterns end in `operand()` (or a
   consuming element) folds **left**: seed an operand from the next level,
@@ -203,6 +289,16 @@ At runtime, dev mode (below) re-asserts it for plain-JS users.
   result every iteration, so heterogeneous operators can share a level; the
   type-level fold is written in tail position, so long left chains grow
   TS's iteration budget (~1000), not its instantiation depth (~50).
+
+  ```ts
+  // same tokens, different tail role, different math:
+  // sub with an operand() tail → left fold → (10-5)-2
+  parser.evaluate("10-5-2", {}, {}); // 3
+  // an otherwise-identical sub with a rest() tail → right recursion
+  rightParser.evaluate("10-5-2", {}, {}); // 7 — 10-(5-2)
+  // and mixing both shapes in one level refuses to build:
+  createParser([leftTailSub, rightTailAdd]); // ✗ "precedence 1 mixes tail shapes"
+  ```
 - **Built-in literals**: `number()`, `string(quotes)`, `boolean()`
   (true/false), `nullVal()`, `undefinedVal()`, `ident()`, `path()`,
   `constVal(text)`. Keyword literals match as *whole identifiers*
@@ -247,12 +343,27 @@ schema (refinements included) before evaluating.
   compile-time eval-return check, for plain-JS users. Failure messages
   describe the value's *shape* only (never the value — it may be a secret).
   Deserialized ASTs carry no attached Types and skip the check.
+
+  ```ts
+  // an eval that lies about its resultType ("number" but returns a string):
+  createParser([num, liar], { dev: true }).evaluate("1 ! 2", {}, {});
+  // ✗ EvaluationError: eval for node 'liar' returned a string, which does
+  //   not satisfy the node's result type 'number'
+  createParser([num, liar], { dev: false }).evaluate("1 ! 2", {}, {}); // "3"
+  ```
 - **Security posture**: expressions are untrusted input. All identifier and
   path lookups — in the evaluator *and* in parse-time schema resolution —
   use own-property checks (`Object.hasOwn`). `constructor`, `__proto__`,
   `x.constructor` etc. resolve to "not defined", never to prototype
   internals. User node names may not shadow the built-in node kinds
   (reserved-name validation), so `eval` dispatch cannot be hijacked.
+
+  ```ts
+  parser.evaluateAst({ node: "identifier", name: "constructor", … }, {});
+  // ✗ EvaluationError: 'constructor' is not defined
+  parser.evaluateAst({ node: "path", path: ["x", "__proto__"], … }, { x: {} });
+  // ✗ EvaluationError: 'x.__proto__' is not defined
+  ```
 
 ## Rules as arktype Types (`parser.compile`)
 
@@ -273,6 +384,19 @@ rule drops directly into react-hook-form, tRPC, hono, oRPC:
   in config); invalid input throws `StringentParseError`. Literal inputs
   additionally get precise compile-time typing (`Type<values>` for
   predicates, `Type<(In: values) => Out<result>>` for morphs).
+
+```ts
+const rule = parser.compile("values.password == values.confirmPassword",
+  formSchema, { path: ["values", "confirmPassword"], message: "passwords to match" });
+
+const out = rule({ x: 0, values: { password: "hunter2", confirmPassword: "oops" } });
+out instanceof type.errors;              // true
+Object.keys(out.flatByPath);             // ["values.confirmPassword"]
+out.summary.includes("hunter2");         // false — secrets never leak
+
+rule.in.toJsonSchema();                  // ✗ throws ToJsonSchemaError (predicate node)
+rule.in.toJsonSchema({ fallback: { predicate: (ctx) => ctx.base } }); // ✓
+```
 
 ## Error model
 
@@ -301,10 +425,21 @@ the token story wins.
 Known ranking weakness (tracked): unclosed delimiters (`"(1"`, `"(1))"`)
 can report a speculative constraint mismatch (a low-precedence rule probing
 its condition) instead of the missing/stray delimiter, because the mismatch
-span ties the delimiter failure at end-of-input. A proper fix needs a
+span ties the delimiter failure at end-of-input:
+
+```ts
+parser.safeParse("(1", {}).error;
+// TYPE_MISMATCH @1: "Expected a boolean expression at position 1, got number"
+// — the ternary probing `1` as its condition, NOT the missing ")"
+```
+
+A related shape (found writing the claims files): an unknown identifier
+LEADING a left-fold level reports `UNEXPECTED_INPUT` on the leftover text
+(`"zz + 1"`) rather than the constraint mismatch, because the fold never
+starts and the prefix `zz` parses alone. A proper fix for both needs a
 credibility signal on mismatches (e.g. only prefer one whose pattern also
 matched its following token); until then delimiter errors may read as type
-errors.
+errors and leading-operand mismatches as trailing-input errors.
 
 ## Dual-engine parity
 
@@ -320,16 +455,35 @@ Parity is over **accept/reject decisions and inferred TypeScript types**,
 not display strings: type-level `outputSchema` carries the definition as
 written, while the runtime displays arktype's normalized `expression`.
 
-Deliberate engine divergences (all conservative — the type level rejects
-things the runtime accepts, never vice versa):
+Deliberate engine divergences — conservative (the type level rejects
+things the runtime accepts) in every case but the last, which is the one
+known exception in the other direction:
+
+- Unknown operands in reference/`overlapping()` slots: the runtime treats
+  an unresolved referenced operand as unconstrained (`zz == yy` parses,
+  failing at evaluation), while literal mode rejects `"unknown"`
+  candidates in every constrained slot — `parse("zz == yy", {})` is a
+  compile error.
 
 - `\xHH`/`\uHHHH` string escapes decode at runtime only; hex cannot be
   decoded at the type level, so literal-mode parsing rejects them (use
-  `safeParse`).
+  `safeParse`):
+
+  ```ts
+  parser.parse('"\\x41"', {});     // ✗ compile error — hex is runtime-only
+  parser.safeParse('"\\x41"', {}); // ✓ evaluates to "A"
+  parser.parse('"a\\"b"', {});     // ✓ simple escapes work in BOTH engines
+  ```
 - Definitions using `createParser`'s `scope` aliases resolve at runtime
   only; compile-time validation and literal-mode parsing use arktype's
   default scope, so scope-alias grammars need `as never` at compile time
-  (threading the scope through `type.validate` is an open work item).
+  (threading the scope through `type.validate` is an open work item):
+
+  ```ts
+  const p = createParser(nodes, { scope: { Money: "number" } });
+  p.safeParse("x", { x: "Money" });          // ✗ compile error (default scope)
+  p.safeParse("x", { x: "Money" } as never); // ✓ runtime resolves Money fully
+  ```
 - Type-level input length: left-associative chains handle 30+ terms
   (tail-recursive fold; canary at 30). Everything that recurses per level
   pays instantiation depth proportional to the level count: on the 6-level
@@ -344,9 +498,25 @@ things the runtime accepts, never vice versa):
   structural-typing limit. Similarly, a `__proto__` key in a schema object
   literal is visible to the type engine but creates no own property at
   runtime. Use literal schemas with `parse()`; use `safeParse()` otherwise.
-- Type-level overlap is approximated as a non-never TS intersection, which
-  diverges from arktype for object types with disjoint property types (TS
-  does not reduce those to `never`). Corner case, noted in
+
+  ```ts
+  declare const wide: Record<string, "number">;
+  parser.parse("nope + 1", wide); // compiles — every identifier "resolves"
+  // ✗ runtime: StringentParseError ('nope' is not in the schema)
+  ```
+- **The non-conservative corner**: type-level overlap is approximated as
+  a non-never TS intersection, which diverges from arktype for object
+  types with disjoint property types — TS does not reduce
+  `{ v: string } & { v: number }` to `never`, arktype knows no value
+  inhabits both. So this *compiles and then throws*:
+
+  ```ts
+  const objSchema = { a: { v: "string" }, b: { v: "number" } } as const;
+  parser.parse("a == b", objSchema); // compiles (TS: {v: never} ≠ never)
+  // ✗ runtime: TYPE_MISMATCH → StringentParseError (arktype: disjoint)
+  ```
+
+  Fixing it needs a deep never-leaf scan at the type level; tracked in
   `src/parse/index.ts`.
 
 ## Limits & non-goals (current)
