@@ -55,6 +55,8 @@ export type {
   SafeParseResult,
   AnyAstNode,
   InferValues,
+  CompileRuleOptions,
+  CompiledRule,
 } from "./createParser.js";
 export type { ScopeAliases } from "./runtime/types.js";
 

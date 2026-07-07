@@ -14,7 +14,7 @@
  * against the schema Type before evaluation.
  */
 
-import type { type, Type } from "arktype";
+import type { type, Type, Out } from "arktype";
 import type { NodeSchema } from "./schema/index.js";
 import type { InferDef } from "./schema/index.js";
 import type { ComputeGrammar, Grammar } from "./grammar/index.js";
@@ -22,7 +22,7 @@ import type { InferOfDef, Parse } from "./parse/index.js";
 import type { Context, SchemaShape } from "./context.js";
 import { compileGrammar, type CompiledGrammar } from "./runtime/compile.js";
 import type { ScopeAliases } from "./runtime/types.js";
-import { isArkErrors } from "./runtime/types.js";
+import { isArkErrors, outputTypeOf } from "./runtime/types.js";
 import { parseWithDiagnostics } from "./runtime/parser.js";
 import {
   type StringentError,
@@ -82,6 +82,38 @@ type EvaluateResult<
 ]
   ? InferOfDef<N["outputSchema"]>
   : unknown;
+
+/** Options for parser.compile() — predicate-rule error attribution */
+export interface CompileRuleOptions {
+  /**
+   * Field path a predicate failure is attributed to (e.g.
+   * ["values", "confirmPassword"]). Defaults to the root path, which
+   * surfaces as a form-level error.
+   */
+  readonly path?: readonly PropertyKey[];
+  /** The "expected ..." phrasing of the failure message */
+  readonly message?: string;
+}
+
+/**
+ * The arktype Type produced by parser.compile():
+ * - a rule with boolean output is a PREDICATE — the Type validates the
+ *   values object and rejects when the rule evaluates false (values in,
+ *   values out)
+ * - any other rule is a MORPH — values in, evaluated result out
+ * - dynamic (non-literal) input: morph to unknown; the runtime decides
+ */
+export type CompiledRule<
+  TGrammar extends Grammar,
+  TInput extends string,
+  TSchema extends SchemaShape
+> = string extends TInput
+  ? Type<(In: InferValues<TSchema>) => Out<unknown>>
+  : EvaluateResult<TGrammar, TInput, TSchema> extends infer R
+  ? [R] extends [boolean]
+    ? Type<InferValues<TSchema>>
+    : Type<(In: InferValues<TSchema>) => Out<R>>
+  : never;
 
 type TrimWs<S extends string> = S extends
   | ` ${infer R}`
@@ -180,6 +212,29 @@ export interface Parser<
     ast: TAst,
     values: EvaluationValues
   ): InferOfDef<TAst["outputSchema"]>;
+
+  /**
+   * Compile a rule into an arktype Type (D12) — the ecosystem bridge.
+   *
+   * A boolean-output rule becomes a PREDICATE Type: it validates the
+   * values object against the schema (refinements included), evaluates
+   * the rule, and rejects with an ArkErrors entry at `options.path` when
+   * the rule is false. Any other rule becomes a MORPH Type: values in,
+   * evaluated result out. Either way the result is a real arktype Type —
+   * a Standard Schema — so it plugs into react-hook-form, tRPC, hono, …
+   * `.in` is the values contract; predicate rules carry a predicate node,
+   * so JSON Schema export needs the fallback:
+   * `rule.in.toJsonSchema({ fallback: { predicate: (ctx) => ctx.base } })`.
+   *
+   * Unlike parse/evaluate, dynamic strings ARE accepted (rules often live
+   * in config); invalid input throws StringentParseError at compile time
+   * — literal inputs additionally get precise compile-time typing.
+   */
+  compile<TInput extends string, const TSchema extends SchemaShape>(
+    input: TInput,
+    schema: type.validate<TSchema>,
+    options?: CompileRuleOptions
+  ): CompiledRule<TGrammar, TInput, TSchema>;
 
   /** The node schemas used to create this parser */
   readonly nodes: TNodes;
@@ -299,6 +354,35 @@ export function createParser<const TNodes extends readonly NodeSchema[]>(
 
     evaluateAst(ast: unknown, values: EvaluationValues) {
       return evaluateAst(ast, nodesByName, values, evalOptions) as never;
+    },
+
+    compile(input: string, schema: object, options?: CompileRuleOptions) {
+      const result = safeParseImpl(input, schema);
+      if (!result.success) {
+        throw new StringentParseError(result.error);
+      }
+      const { ast, schemaType } = result;
+
+      const outType = outputTypeOf(ast);
+      const isPredicate =
+        outType !== undefined &&
+        compiled.env.isAssignable(outType, compiled.env.compileDef("boolean"));
+
+      if (isPredicate) {
+        const expected = options?.message ?? `a value satisfying \`${input}\``;
+        const path = [...(options?.path ?? [])];
+        return schemaType.narrow(
+          (data, ctx) =>
+            evaluateAst(ast, nodesByName, data as EvaluationValues, evalOptions) ===
+              true ||
+            // actual: "" keeps runtime values (possibly secrets) out of messages
+            ctx.reject({ expected, actual: "", path: path as never })
+        ) as never;
+      }
+
+      return schemaType.pipe((data) =>
+        evaluateAst(ast, nodesByName, data as EvaluationValues, evalOptions)
+      ) as never;
     },
 
     nodes,

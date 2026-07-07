@@ -1,6 +1,6 @@
 # Stringent v2 — API Redesign Plan
 
-Status: **Phases 0–5 implemented and green**. Phases 0–3 landed on
+Status: **Phases 0–6 implemented and green**. Phases 0–3 landed on
 `claude/formeddable-stringent-review-suiwqu` (PR #5); Phases 4–5, the
 D16 rename, and a plan review continue on `claude/v2-plan-review-e13a11`,
 which contains the
@@ -310,12 +310,30 @@ The archive corpus was not available in this repo (bundle lives in chat;
 org deleted) — a fresh corpus pins the owner's two required observables:
 escaped-quote termination and real-character escape values.
 
-**Phase 6 — Rule-as-Type integration (D12/D13).** `parser.compile()`
-returning an arktype Type; predicate rules via `narrow` + `ctx.reject({
-path })`; ArkErrors surfacing (`flatByPath`); `.in`/`.in.toJsonSchema()`
-introspection; Standard Schema conformance test against react-hook-form's
-`arktypeResolver`. Independent of Phases 1–5's internals; can develop in
-parallel once Phase 1's API lands.
+**Phase 6 — Rule-as-Type integration (D12/D13). ✅ DONE**
+(`src/createParser.ts`, `src/compile.test.ts`).
+`parser.compile(input, schema, { path?, message? })` → arktype Type:
+boolean-output rules lower to PREDICATES (`schemaType.narrow` +
+`ctx.reject({ expected, actual: "", path })` — `actual: ""` keeps secret
+values out of messages per D13); everything else is a MORPH
+(`schemaType.pipe(evaluate)`). Values are validated against the FULL
+(refined) schema before the rule runs. `CompiledRule` typing: literal
+predicate → `Type<values>`, literal morph → `Type<(In: values) =>
+Out<result>>`, dynamic string → morph-to-unknown. Standard Schema
+conformance is tested against the `~standard` interface directly (no
+react-hook-form dependency needed — arktype Types are Standard Schemas
+natively). Deviations/discoveries:
+- Unlike parse/evaluate, `compile` ACCEPTS dynamic strings (rules live in
+  config); invalid input throws `StringentParseError`.
+- `.in.toJsonSchema()` THROWS for predicate rules (the narrow's predicate
+  node isn't JSON-Schema-representable) — the D12 claim needs the
+  fallback: `rule.in.toJsonSchema({ fallback: { predicate: (ctx) =>
+  ctx.base } })`. Morph rules export directly.
+- Standard-schema issue paths are arktype `ReadonlyPath` instances (an
+  Array subclass with a `cache` own property) — spread before deep-equal
+  assertions.
+- "Which variables does a rule read" (AST-walk introspection) deferred;
+  `.in` covers the schema-level contract.
 
 **Phase 7 — Docs, tests, release.** Rewrite affected DESIGN.md sections;
 update Starlight guides + playground fixture (playground gains identifier
@@ -389,9 +407,9 @@ tracked by **PR #5** (https://github.com/eralmansouri/stringent/pull/5).
 Phase 4 + the plan-review corrections continue on
 `claude/v2-plan-review-e13a11` (a superset of the suiwqu history) — the
 owner decides whether to point PR #5 at it or open a fresh PR.
-At handoff: `pnpm typecheck`, `pnpm test` (108 tests, 3 files),
+At handoff: `pnpm typecheck`, `pnpm test` (118 tests, 4 files),
 `pnpm build`, and `pnpm check:package` are all green. Whole-project
-check: ~552k instantiations / ~2.3s.
+check: ~678k instantiations / ~2.7s.
 
 ### Done (this branch, in commit order)
 
@@ -426,6 +444,9 @@ check: ~552k instantiations / ~2.3s.
    (whole-identifier prefix guard, both engines), escape-aware string
    scanner (`scanString` ↔ `ScanString`), fresh escape/keyword corpus in
    parser.test.ts + evaluate.test.ts + typetest.
+7. (on `claude/v2-plan-review-e13a11`) — Phase 6: `parser.compile()`
+   (predicate narrow / morph pipe, CompiledRule typing, Standard Schema
+   + JSON-Schema-fallback tests in `src/compile.test.ts`).
 
 ### The four load-bearing design rules
 
@@ -522,8 +543,8 @@ check: ~552k instantiations / ~2.3s.
   producing real characters in evaluated values). Reference
   implementation + 405-line corpus in the formeddable archive (git
   bundle delivered to the user in chat; org deletion pending).
-- **Phase 6**: rule-as-arktype-Type (`parser.compile`) → Standard Schema
-  ecosystem (react-hook-form/tRPC/hono), ArkErrors with field paths.
+- ~~**Phase 6**~~ DONE (see the Phases section) — `parser.compile` →
+  predicate/morph Types, Standard Schema, ArkErrors with field paths.
 - Toolbox reminder (owner): arktype's `Type.distribute(mapper)` maps
   over union branches — useful for diagnostics that list every accepted
   operand form. (Phase 4 ended up NOT needing it: correlation runs at

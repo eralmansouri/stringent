@@ -288,6 +288,28 @@ fixtureParser.parse("1+2" as string, {});
 fixtureParser.evaluate("x == 1", { x: "number" }, { x: "no" });
 
 // =============================================================================
+// compile(): rule-as-Type call-site typing (Phase 6)
+// =============================================================================
+
+// predicate rule (boolean output): values in, values out
+const pwRule = fixtureParser.compile(
+  "values.password == values.confirmPassword",
+  formSchema
+);
+const pwOut = pwRule({} as never);
+type _cp1 = AssertTrue<
+  AssertEqual<
+    Exclude<typeof pwOut, type.errors>,
+    InferValues<typeof formSchema>
+  >
+>;
+
+// morph rule (non-boolean output): values in, evaluated result out
+const morphRule = fixtureParser.compile("x * 2 + 1", { x: "number" });
+const morphOut = morphRule({ x: 1 });
+type _cp2 = AssertTrue<AssertEqual<Exclude<typeof morphOut, type.errors>, number>>;
+
+// =============================================================================
 // Eval binding inference (Phase 1 assertions, still pinned)
 // =============================================================================
 
