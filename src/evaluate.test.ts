@@ -131,7 +131,7 @@ describe("evaluate", () => {
     const noEval = defineNode({
       name: "wrap",
       pattern: [path().as("inner")],
-      precedence: "atom",
+      precedence: 1,
       resultType: "unknown",
     });
     const p = createParser([noEval] as const);
@@ -148,12 +148,12 @@ describe("evaluate", () => {
     const numberLit = defineNode({
       name: "n",
       pattern: [number()],
-      precedence: "atom",
+      precedence: 1,
     });
     const variable = defineNode({
       name: "v",
       pattern: [ident()],
-      precedence: "atom",
+      precedence: 1,
     });
     const p = createParser([numberLit, variable] as const);
     const parsed = p.safeParse("y", { y: "number" });

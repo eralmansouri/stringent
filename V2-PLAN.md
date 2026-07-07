@@ -181,26 +181,45 @@ internally memoized (~0.6µs raw) — backtracking memoizes verdicts per
 (candidate, constraint) pair (~160ns). Constraint checks in the type engine
 must be expressed over literal def strings so TS memoization applies.
 
-**Phase 1 — Schema layer** (`src/schema/index.ts`, `src/createParser.ts`).
-New element factories (drop `sameAs`/`fromBinding`), binding-reference
-constraints, always-required `resultType` as type expression, scope/collision
-validation, tail-shape coherence check, numeric-only precedence with
-max-level-is-leaf validation.
+**Phase 1 — Schema layer. ✅ DONE** (`src/schema/index.ts`,
+`src/runtime/compile.ts`, `src/createParser.ts`). New element factories
+(`sameAs`/`fromBinding`/`associativity`/`"atom"` deleted), binding-reference
+constraints, required `resultType` (string or object def), scope/collision
+validation, tail-shape coherence, numeric precedence with
+max-level-is-leaf. Deviations recorded during implementation:
+- Single-element passthrough patterns (e.g. `[number()]`) *forbid*
+  `resultType` — they forward a child rather than construct a result, so
+  there is nothing to declare (the one principled exception to D3).
+- Array constraints (`lhs(["number","string"])`) dropped in favor of union
+  defs (`lhs("number | string")`).
+- A binding reference must currently be the WHOLE constraint/resultType
+  string (`"then"`); references embedded in larger defs (`"then | else"`,
+  `{ value: "acc" }`) are deferred until union output types.
+- Binding-reference constraints are DIRECTIONAL (candidate ⊆ referenced
+  binding's type), replacing v1's symmetric exact-equality `sameAs`.
 
-**Phase 2 — Runtime engine** (`src/runtime/parser.ts`,
-`src/runtime/diagnostics.ts`). Assignability-based `constraintAccepts` with
-validator cache; per-parse resultType resolution; associativity-by-shape
-dispatch; leaf-level handling; diagnostics say `expected 'number', got
-'string | number'` with type expressions.
+**Phase 2 — Runtime engine. ✅ DONE** (`src/runtime/parser.ts`,
+`src/runtime/types.ts`). Assignability-based constraint matching with
+memoized verdicts; per-parse resultType resolution; associativity-by-shape
+dispatch; leaf-level handling; parsed Types ride on a non-enumerable
+symbol (AST stays serializable); diagnostics carry type expressions.
+Refinement erasure (D-semantics) is implemented in the `types.ts` adapter
+via `internal.transform` + `type.schema(json)` round-trip — the one
+`.internal` touchpoint, per the stability rule.
 
-**Phase 3 — Type engine** (`src/parse/index.ts`). Mirror Phase 2 per the
-Phase 0 strategy. Update canaries; document new depth limits in DESIGN.md.
+**Phase 3 — Type engine** (`src/parse/index.ts`, currently a placeholder:
+literal-mode `parse()` accepts any string and returns a loose AST type).
+Mirror the runtime engine per the Phase 0 strategy. Also: scope-aware
+compile-time schema validation (type.validate is currently scope-blind, so
+custom aliases need a cast), literal input validation, result-type
+inference for `evaluate()`, and the recursion canaries.
 
-**Phase 4 — Eval typing** (`src/schema/index.ts`,
-`src/runtime/evaluate.ts`). Distributed-union bindings type; eval-return
-verification against `resultType`; dev-mode `.allows()` assertion on node
-outputs. Evaluator mechanics (lazy thunks, `Object.hasOwn` guards)
-unchanged.
+**Phase 4 — Eval typing** (`src/schema/index.ts`). Distributed-union
+correlated bindings (the `as any` in the fixture's polymorphic add still
+stands until then). ~~Eval-return verification against resultType~~ —
+landed early in Phase 1 (`EvalReturn` + `NoInfer`), including
+binding-reference and object resultTypes. Dev-mode `.allows()` assertion
+on node outputs still pending.
 
 **Phase 5 — Built-in literals & escapes.** `true`/`false`/`null`/`undefined`
 leaf nodes with keyword-prefix guards in both engines; escape processing in

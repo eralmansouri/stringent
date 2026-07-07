@@ -1,6 +1,6 @@
 /**
  * createParser API tests: parse() throwing behavior, safeParse result
- * shapes, vocabulary validation, and grammar validation at construction.
+ * shapes, scope/schema validation, and grammar validation at construction.
  */
 
 import { describe, expect, it } from "vitest";
@@ -9,22 +9,22 @@ import {
   constVal,
   createParser,
   defineNode,
-  fromBinding,
   lhs,
   number,
+  path as pathEl,
   rhs,
-  sameAs,
+  expr,
 } from "./index.js";
 import { fixtureParser as parser } from "./__fixtures__/grammar.js";
 
 const num = defineNode({
   name: "n",
   pattern: [number()],
-  precedence: "atom",
+  precedence: 9,
 });
 
 describe("parse", () => {
-  it("returns the [ast, \"\"] tuple for valid literals", () => {
+  it('returns the [ast, ""] tuple for valid literals', () => {
     const [ast, rest] = parser.parse("1+2", {});
     expect(rest).toBe("");
     expect(ast).toMatchObject({ node: "add", outputSchema: "number" });
@@ -36,7 +36,7 @@ describe("parse", () => {
     expect(rest).toBe(" ");
   });
 
-  it("throws StringentParseError when the compile-time check is bypassed", () => {
+  it("throws StringentParseError for invalid input", () => {
     expect(() => parser.parse("@invalid" as never, {})).toThrow(StringentParseError);
     try {
       parser.parse("1+2 junk" as never, {});
@@ -73,26 +73,28 @@ describe("safeParse", () => {
   });
 });
 
-describe("type vocabulary", () => {
-  it("exposes the grammar's type names", () => {
-    expect(parser.typeNames.has("number")).toBe(true);
-    expect(parser.typeNames.has("boolean")).toBe(true);
-    expect(parser.typeNames.has("numbr")).toBe(false);
-  });
-
-  it("rejects schema leaves outside the vocabulary (runtime)", () => {
+describe("schemas and scope", () => {
+  it("rejects schema leaves that are not resolvable defs (runtime)", () => {
     expect(() => parser.safeParse("x", { x: "numbr" } as never)).toThrow(
-      /schema key 'x' has unknown type 'numbr'/
+      /invalid schema/
     );
   });
 
-  it("names the offending nested key", () => {
+  it("rejects invalid nested schema leaves", () => {
     expect(() =>
       parser.safeParse("x", { a: { b: "numbr" } } as never)
-    ).toThrow(/schema key 'a\.b'/);
+    ).toThrow(/invalid schema/);
   });
 
-  it("rejects constraint strings outside the vocabulary at construction", () => {
+  it("accepts arktype expressions and keywords as schema leaves", () => {
+    const result = parser.safeParse("x == y", {
+      x: "string.email",
+      y: "string.email",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects constraint defs outside the scope at construction", () => {
     const bad = defineNode({
       name: "bad",
       pattern: [lhs("numbr").as("l"), constVal("!"), rhs().as("r")],
@@ -100,20 +102,51 @@ describe("type vocabulary", () => {
       resultType: "number",
     });
     expect(() => createParser([num, bad] as const)).toThrow(
-      /constraint 'numbr' which matches no known type/
+      /neither a type in scope nor an earlier binding/
     );
   });
 
-  it("extends the vocabulary via the types option", () => {
+  it("extends the scope via the scope option", () => {
     const dateVar = defineNode({
       name: "later",
-      pattern: [lhs("date").as("l"), constVal(">"), rhs("date").as("r")],
+      pattern: [lhs("Timestamp").as("l"), constVal(">"), rhs("Timestamp").as("r")],
       precedence: 1,
       resultType: "boolean",
     });
-    const p = createParser([num, dateVar] as const, { types: ["date"] });
-    expect(p.typeNames.has("date")).toBe(true);
-    expect(() => p.safeParse("1", { created: "date" })).not.toThrow();
+    const variable = defineNode({
+      name: "v",
+      pattern: [pathEl()],
+      precedence: 9,
+    });
+    const p = createParser([num, variable, dateVar] as const, {
+      scope: { Timestamp: "number" },
+    });
+    // TODO(Phase 3): compile-time schema validation is scope-blind (runs in
+    // arktype's default scope), so custom aliases need a cast until the
+    // type engine threads the scope through type.validate.
+    expect(() => p.safeParse("1", { created: "Timestamp" } as never)).not.toThrow();
+    const result = p.safeParse("created > 1", { created: "Timestamp" } as never);
+    expect(result.success).toBe(true);
+  });
+
+  it("matches constraints by assignability, not name equality", () => {
+    const variable = defineNode({
+      name: "v",
+      pattern: [pathEl()],
+      precedence: 9,
+    });
+    const positive = defineNode({
+      name: "isPos",
+      pattern: [lhs("number").as("v"), constVal("!")],
+      precedence: 1,
+      resultType: "boolean",
+      eval: ({ v }) => v > 0,
+    });
+    const p = createParser([num, variable, positive] as const);
+    // schema leaf is a REFINED number; the slot wants plain number —
+    // assignability accepts (number > 0 ⊆ number)
+    const result = p.safeParse("x !", { x: "number > 0" });
+    expect(result.success).toBe(true);
   });
 });
 
@@ -126,12 +159,12 @@ describe("grammar validation", () => {
     const reserved = defineNode({
       name: "literal",
       pattern: [number()],
-      precedence: "atom",
+      precedence: 9,
     });
     expect(() => createParser([reserved] as const)).toThrow(/reserved/);
   });
 
-  it("rejects negative and fractional precedence", () => {
+  it("rejects negative, fractional, and non-numeric precedence", () => {
     const make = (precedence: number) =>
       defineNode({
         name: "bad",
@@ -145,45 +178,51 @@ describe("grammar validation", () => {
     expect(() => createParser([num, make(1.5)] as const)).toThrow(
       /non-negative safe integer/
     );
+    expect(() =>
+      createParser([num, make("atom" as never)] as const)
+    ).toThrow(/non-negative safe integer/);
   });
 
-  it("rejects mixed associativity within one precedence level", () => {
-    const left = defineNode({
-      name: "left",
-      pattern: [lhs().as("l"), constVal("+"), rhs().as("r")],
+  it("rejects mixed tail shapes within one precedence level", () => {
+    const leftTail = defineNode({
+      name: "leftTail",
+      pattern: [lhs().as("l"), constVal("+"), lhs().as("r")],
       precedence: 1,
-      associativity: "left",
       resultType: "number",
     });
-    const right = defineNode({
-      name: "right",
+    const rightTail = defineNode({
+      name: "rightTail",
       pattern: [lhs().as("l"), constVal("-"), rhs().as("r")],
       precedence: 1,
-      associativity: "right",
       resultType: "number",
     });
-    expect(() => createParser([num, left, right] as const)).toThrow(
-      /mix left and right associativity/
+    expect(() => createParser([num, leftTail, rightTail] as const)).toThrow(
+      /mixes tail shapes/
     );
   });
 
-  it("rejects left-associative nodes whose pattern does not start with lhs", () => {
-    const bad = defineNode({
-      name: "bad",
-      pattern: [constVal("-"), rhs().as("operand")],
+  it("rejects nodes on a left-associative level that do not start with lhs", () => {
+    const fold = defineNode({
+      name: "fold",
+      pattern: [lhs().as("l"), constVal("+"), lhs().as("r")],
       precedence: 1,
-      associativity: "left",
       resultType: "number",
     });
-    expect(() => createParser([num, bad] as const)).toThrow(
-      /must have a pattern starting with lhs/
+    const prefix = defineNode({
+      name: "prefix",
+      pattern: [constVal("-"), lhs().as("operand")],
+      precedence: 1,
+      resultType: "number",
+    });
+    expect(() => createParser([num, fold, prefix] as const)).toThrow(
+      /must start with lhs/
     );
   });
 
   it("rejects rhs/expr at position 0 (left recursion → stack overflow)", () => {
     const postfix = defineNode({
       name: "postfix",
-      pattern: [rhs("number").as("v"), constVal("!")],
+      pattern: [rhs("number").as("v"), constVal("!"), rhs().as("r")],
       precedence: 1,
       resultType: "number",
     });
@@ -192,15 +231,28 @@ describe("grammar validation", () => {
     );
   });
 
-  it("rejects atoms starting with expression elements", () => {
+  it("rejects leaf nodes starting with expression elements", () => {
     const bad = defineNode({
       name: "bad",
-      pattern: [lhs().as("v")],
-      precedence: "atom",
+      pattern: [lhs().as("v"), constVal("!")],
+      precedence: 9,
+      resultType: "number",
+    });
+    // both nodes sit on the (single) leaf level
+    expect(() => createParser([num, bad] as const)).toThrow(
+      /must start with a consuming element/
+    );
+  });
+
+  it("rejects expr() elements with no closing constVal", () => {
+    const bad = defineNode({
+      name: "bad",
+      pattern: [lhs("number").as("l"), constVal("-"), expr().as("r")],
+      precedence: 1,
       resultType: "number",
     });
     expect(() => createParser([num, bad] as const)).toThrow(
-      /atoms must start with a consuming element/
+      /expr\(\) element with no constVal after it/
     );
   });
 
@@ -214,23 +266,15 @@ describe("grammar validation", () => {
     expect(() => createParser([num, bad] as const)).toThrow(/constVal\(""\)/);
   });
 
-  it("rejects sameAs references to unknown or later bindings", () => {
-    const bad = defineNode({
-      name: "bad",
-      pattern: [lhs(sameAs("nope") as never).as("l"), constVal("!"), rhs().as("r")],
-      precedence: 1,
-      resultType: "number",
-    });
-    expect(() => createParser([num, bad] as const)).toThrow(/sameAs/);
-
+  it("rejects constraints that are neither defs nor earlier bindings", () => {
     const forward = defineNode({
       name: "fwd",
-      pattern: [lhs().as("l"), constVal("!"), rhs(sameAs("later")).as("later")],
+      pattern: [lhs().as("l"), constVal("!"), rhs("later").as("later")],
       precedence: 1,
       resultType: "number",
     });
     expect(() => createParser([num, forward] as const)).toThrow(
-      /no earlier element is named 'later'/
+      /neither an earlier binding name nor a valid type/
     );
   });
 
@@ -248,6 +292,18 @@ describe("grammar validation", () => {
     }
   });
 
+  it("rejects binding names that shadow types in scope", () => {
+    const bad = defineNode({
+      name: "bad",
+      pattern: [lhs().as("number"), constVal("!"), rhs().as("r")],
+      precedence: 1,
+      resultType: "number",
+    });
+    expect(() => createParser([num, bad] as const)).toThrow(
+      /must not shadow types/
+    );
+  });
+
   it("rejects duplicate binding names within one pattern", () => {
     const bad = defineNode({
       name: "bad",
@@ -260,49 +316,37 @@ describe("grammar validation", () => {
     );
   });
 
-  it("rejects sameAs/fromBinding targeting const elements", () => {
-    const sameAsConst = defineNode({
+  it("rejects constraints and resultTypes targeting const elements", () => {
+    const constraintOnConst = defineNode({
       name: "bad1",
-      pattern: [lhs().as("l"), constVal("!").as("b"), rhs(sameAs("b")).as("r")],
+      pattern: [lhs().as("l"), constVal("!").as("b"), rhs("b").as("r")],
       precedence: 1,
       resultType: "number",
     });
-    expect(() => createParser([num, sameAsConst] as const)).toThrow(
-      /sameAs\('b'\) on a const element/
+    expect(() => createParser([num, constraintOnConst] as const)).toThrow(
+      /binding 'b', which is a const element/
     );
 
-    const fromConst = defineNode({
+    const resultFromConst = defineNode({
       name: "bad2",
-      pattern: [constVal("!").as("b")],
-      precedence: "atom",
-      resultType: fromBinding("b"),
+      pattern: [lhs().as("l"), constVal("!").as("b")],
+      precedence: 1,
+      resultType: "b",
     });
-    expect(() => createParser([num, fromConst] as const)).toThrow(
-      /fromBinding\('b'\) on a const element/
+    expect(() => createParser([num, resultFromConst] as const)).toThrow(
+      /binding 'b', which is a const element/
     );
   });
 
-  it("rejects empty constraint lists", () => {
-    const bad = defineNode({
-      name: "bad",
-      pattern: [lhs([]).as("l"), constVal("!"), rhs().as("r")],
+  it("rejects unsatisfiable constraint intersections at construction", () => {
+    const impossible = defineNode({
+      name: "impossible",
+      pattern: [lhs("number & string").as("l"), constVal("!")],
       precedence: 1,
-      resultType: "number",
+      resultType: "boolean",
     });
-    expect(() => createParser([num, bad] as const)).toThrow(
-      /empty constraint list/
-    );
-  });
-
-  it("rejects fromBinding references to unknown bindings", () => {
-    const bad = defineNode({
-      name: "bad",
-      pattern: [lhs().as("l"), constVal("!"), rhs().as("r")],
-      precedence: 1,
-      resultType: fromBinding("nope"),
-    });
-    expect(() => createParser([num, bad] as const)).toThrow(
-      /fromBinding\('nope'\)/
+    expect(() => createParser([num, impossible] as const)).toThrow(
+      /neither an earlier binding name nor a valid type|unsatisfiable/
     );
   });
 
@@ -310,16 +354,43 @@ describe("grammar validation", () => {
     const bad = defineNode({
       name: "bad",
       pattern: [number().as("n")],
-      precedence: "atom",
+      precedence: 9,
     });
     expect(() => createParser([bad] as const)).toThrow(/needs a resultType/);
   });
 
-  it("allows const-only atoms with a declared resultType", () => {
+  it("rejects resultType on single-element passthrough patterns", () => {
+    const bad = defineNode({
+      name: "bad",
+      pattern: [number()],
+      precedence: 9,
+      resultType: "number",
+    });
+    expect(() => createParser([bad] as const)).toThrow(/passthrough/);
+  });
+
+  it("supports object resultTypes", () => {
+    const pair = defineNode({
+      name: "pair",
+      pattern: [lhs("number").as("min"), constVal(".."), rhs("number").as("max")],
+      precedence: 1,
+      resultType: { min: "number", max: "number" },
+      eval: ({ min, max }) => ({ min, max }),
+    });
+    const p = createParser([num, pair] as const);
+    const result = p.safeParse("1 .. 2", {});
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.ast.outputSchema).toBe("{ max: number, min: number }");
+      expect(p.evaluateAst(result.ast, {})).toEqual({ min: 1, max: 2 });
+    }
+  });
+
+  it("allows const-only leaf nodes with a declared resultType", () => {
     const boolTrue = defineNode({
       name: "true",
       pattern: [constVal("true")],
-      precedence: "atom",
+      precedence: 9,
       resultType: "boolean",
       eval: () => true,
     });
@@ -330,5 +401,21 @@ describe("grammar validation", () => {
       expect(result.ast).toEqual({ node: "true", outputSchema: "boolean" });
       expect(p.evaluateAst(result.ast, {})).toBe(true);
     }
+  });
+});
+
+describe("values validation on evaluate", () => {
+  it("rejects values that do not match the schema", () => {
+    expect(() =>
+      parser.evaluate("x == x", { x: "number" }, { x: "not a number" } as never)
+    ).toThrow(/values do not match the schema/);
+  });
+
+  it("enforces refinements on values even though typing is erased", () => {
+    expect(() =>
+      parser.evaluate("x + 1", { x: "number > 0" }, { x: -5 } as never)
+    ).toThrow(/values do not match the schema/);
+    // typing is erased (x parses as plain number), values stay refined
+    expect(parser.evaluate("x + 1", { x: "number > 0" }, { x: 5 })).toBe(6);
   });
 });

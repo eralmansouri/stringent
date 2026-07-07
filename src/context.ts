@@ -14,9 +14,9 @@
 // =============================================================================
 
 /**
- * The shape of a schema: leaf values are type-name strings ("number",
- * "string", ...), and nested records describe objects addressable with
- * dotted paths.
+ * The shape of a schema: an ARKTYPE OBJECT DEF. Leaf values are arktype
+ * defs ("number", "string.email", "number > 0", nested objects…),
+ * addressable with dotted paths via the path() pattern element.
  *
  * @example
  * ```ts
@@ -26,7 +26,7 @@
  * } satisfies SchemaShape;
  * ```
  */
-export type SchemaShape = { readonly [key: string]: string | SchemaShape };
+export type SchemaShape = { readonly [key: string]: unknown };
 
 // =============================================================================
 // Context Interface

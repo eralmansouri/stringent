@@ -4,7 +4,6 @@
  * Main entry points:
  * - defineNode: Create grammar node schemas
  * - createParser: Build a type-safe parser from nodes
- * - Parse<Grammar, Input, Context>: Type-level parsing
  */
 
 // =============================================================================
@@ -21,8 +20,6 @@ export {
   lhs,
   rhs,
   expr,
-  sameAs,
-  fromBinding,
 } from "./schema/index.js";
 export type {
   NodeSchema,
@@ -35,14 +32,11 @@ export type {
   ExprSchema,
   ExprRole,
   Precedence,
-  Associativity,
   ConstraintSpec,
   ResultSpec,
-  SameAsRef,
-  FromBindingRef,
   EvalFn,
   Thunked,
-  SchemaToType,
+  InferDef,
   InferBindings,
   InferEvaluatedBindings,
 } from "./schema/index.js";
@@ -53,9 +47,8 @@ export type {
   SafeParseResult,
   AnyAstNode,
   InferValues,
-  VocabOf,
-  SchemaShapeOf,
 } from "./createParser.js";
+export type { ScopeAliases } from "./runtime/types.js";
 
 // =============================================================================
 // Errors
@@ -69,7 +62,7 @@ export { EvaluationError } from "./runtime/evaluate.js";
 // Types: Parse, Grammar, Context
 // =============================================================================
 
-export type { Parse, BinaryNode, ResolvePath } from "./parse/index.js";
+export type { Parse, LooseAstNode } from "./parse/index.js";
 export type { ComputeGrammar, Grammar } from "./grammar/index.js";
 export type { Context, EmptyContext, SchemaShape } from "./context.js";
 export { emptyContext } from "./context.js";

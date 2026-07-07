@@ -1,18 +1,29 @@
 /**
- * Schema Types
+ * Schema Types (v2)
  *
  * Pattern element schemas for defineNode. These are pure type descriptors
  * that preserve literal types for compile-time grammar computation.
  *
- * The key insight: defineNode returns a schema object whose TYPE carries
- * all the information needed for type-level parsing. No runtime magic —
- * every semantic construct (constraints, result derivation, associativity)
+ * v2 type system: operand constraints and result types are ARKTYPE
+ * definitions. A constraint string that names an earlier binding in the
+ * same pattern is a BINDING REFERENCE ("assignable to whatever that
+ * operand parsed as"); anything else is compiled as an arktype def in the
+ * parser's scope. resultType follows the same rule and may also be an
+ * object def for nodes producing structured values.
+ *
+ * Every semantic construct (constraints, result derivation, associativity)
  * is declarative DATA so the type-level and runtime engines can interpret
  * it identically. This is why result types cannot be inferred from eval's
  * TypeScript return type: types drive parsing (backtracking) in BOTH
  * engines, and the runtime engine cannot see TypeScript types.
+ *
+ * Associativity is derived from the pattern's tail shape:
+ * - tail parses at the CURRENT level (rhs)  → right-associative
+ * - tail parses at a TIGHTER level (lhs)    → left-associative (fold)
+ * - expr() is for delimited slots only and must be followed by a constVal
  */
 
+import type { type } from "arktype";
 import type {
   NumberNode,
   StringNode,
@@ -51,110 +62,34 @@ export interface ConstSchema<TValue extends string = string>
 }
 
 // =============================================================================
-// Constraints & Result Derivation
+// Constraints & Result Types
 // =============================================================================
 
 /**
- * Reference to another named binding in the same pattern: "this operand's
- * type must equal whatever the referenced operand parsed as".
+ * A constraint on an expression slot is a string that is either:
+ * - the name of an EARLIER binding in the same pattern — "assignable to
+ *   whatever that operand parsed as" (e.g. rhs("left"))
+ * - an arktype definition compiled in the parser's scope
+ *   (e.g. lhs("number"), lhs("string | number"), lhs("string.email"))
  *
- * @example
- * // right operand must have the same type as the left one
- * pattern: [lhs(["number", "string"]).as("left"), constVal("+"), rhs(sameAs("left")).as("right")]
+ * createParser decides which one it is: binding names shadow nothing
+ * because a binding name that is also a resolvable def is a construction
+ * error.
  */
-export interface SameAsRef<TBinding extends string = string> {
-  readonly kind: "sameAs";
-  readonly binding: TBinding;
-}
-
-/** Create a same-type-as constraint referencing an earlier named binding */
-export const sameAs = <const TBinding extends string>(
-  binding: TBinding
-): SameAsRef<TBinding> => ({ kind: "sameAs", binding });
+export type ConstraintSpec = string;
 
 /**
- * Derive a node's result type from a named operand: "this node's type is
- * whatever the referenced operand parsed as".
+ * A node's result type:
+ * - the name of a binding — the node's type is whatever that operand
+ *   parsed as (polymorphic passthrough, e.g. resultType: "then")
+ * - an arktype string def (e.g. "boolean")
+ * - an arktype object def (e.g. { min: "number", max: "number" })
  *
- * @example
- * // a polymorphic parenthesization rule
- * defineNode({
- *   name: "parens",
- *   pattern: [constVal("("), expr().as("inner"), constVal(")")],
- *   precedence: "atom",
- *   resultType: fromBinding("inner"),
- *   eval: ({ inner }) => inner,
- * })
+ * Required for every node that CONSTRUCTS a result. The only exemption is
+ * a single-element passthrough pattern (e.g. [number()]), which forwards
+ * its child unchanged and therefore has nothing to declare.
  */
-export interface FromBindingRef<TBinding extends string = string> {
-  readonly kind: "fromBinding";
-  readonly binding: TBinding;
-}
-
-/** Create a result-type derivation referencing a named binding */
-export const fromBinding = <const TBinding extends string>(
-  binding: TBinding
-): FromBindingRef<TBinding> => ({ kind: "fromBinding", binding });
-
-/**
- * A constraint on an expression slot:
- * - a type name: exact match ("number")
- * - a list of type names: any of them (["number", "string"])
- * - sameAs(binding): same type as an earlier operand
- */
-export type ConstraintSpec = string | readonly string[] | SameAsRef;
-
-/** A node's result type: a static type name, or derived from an operand */
-export type ResultSpec = string | FromBindingRef;
-
-/** Runtime type guards for the marker objects */
-export function isSameAs(value: unknown): value is SameAsRef {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as { kind?: unknown }).kind === "sameAs"
-  );
-}
-
-export function isFromBinding(value: unknown): value is FromBindingRef {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as { kind?: unknown }).kind === "fromBinding"
-  );
-}
-
-/**
- * Normalize a constraint's TYPE:
- * - absent / wide (unconstrained factory call) → undefined
- * - sameAs marker → SameAsRef<B> (resolved later against parsed siblings)
- * - list of names → the tuple
- * - single name → the literal
- *
- * The constraint property is OPTIONAL on ExprSchema, so it must be matched
- * with `constraint?:` — matching a required property never succeeds and
- * silently disables constraint checking (this was a real bug).
- */
-export type NormalizeConstraint<C> = [Exclude<C, undefined>] extends [never]
-  ? undefined
-  : [ConstraintSpec] extends [Exclude<C, undefined>]
-  ? undefined // fully wide: unconstrained lhs()/rhs()/expr() call
-  : [Exclude<C, undefined>] extends [SameAsRef<infer B>]
-  ? SameAsRef<B>
-  : [Exclude<C, undefined>] extends [readonly string[]]
-  ? [readonly string[]] extends [Exclude<C, undefined>]
-    ? undefined // widened array type → unconstrained
-    : Exclude<C, undefined>
-  : [Exclude<C, undefined>] extends [string]
-  ? [string] extends [Exclude<C, undefined>]
-    ? undefined // widened string type → unconstrained
-    : Exclude<C, undefined>
-  : undefined;
-
-/** Extract the raw constraint property from an element (possibly NamedSchema) */
-export type ExtractSpecOf<T> = T extends { constraint?: infer C }
-  ? C
-  : undefined;
+export type ResultSpec = string | object;
 
 /** Expression role determines which grammar level is used */
 export type ExprRole = "lhs" | "rhs" | "expr";
@@ -240,8 +175,8 @@ export const ident = () => withAs<IdentSchema>({ kind: "ident" });
  * Create a member-access path pattern element.
  *
  * Matches `ident(.ident)*` — e.g. `values.password` — and resolves the
- * type by walking the (possibly nested) schema. Whitespace around the
- * dots is not allowed: `values . password` parses as just `values`.
+ * type by walking the schema. Whitespace around the dots is not allowed:
+ * `values . password` parses as just `values`.
  */
 export const path = () => withAs<PathSchema>({ kind: "path" });
 
@@ -250,13 +185,15 @@ export const constVal = <const TValue extends string>(value: TValue) =>
   withAs<ConstSchema<TValue>>({ kind: "const", value });
 
 /**
- * Create a LEFT-HAND SIDE expression element.
+ * Create a TIGHTER-LEVEL expression element.
  *
- * Uses the next-higher grammar level to avoid left-recursion.
- * Must be at position 0 in an operator pattern.
+ * Parses at the next-higher grammar level, avoiding left-recursion.
+ * A pattern whose final operand is lhs() makes its level LEFT-associative
+ * (the engine folds repetitions: `a-b-c` → `(a-b)-c`).
  *
- * Constraint forms: lhs("number"), lhs(["number", "string"]), lhs()
- * (sameAs is not valid here — there is no earlier operand to reference).
+ * Constraint forms: lhs("number"), lhs("string | number"), lhs("left")
+ * (a binding reference — not valid at position 0, where no earlier
+ * operand exists), lhs().
  */
 export const lhs = <const TConstraint extends ConstraintSpec>(
   constraint?: TConstraint
@@ -268,13 +205,13 @@ export const lhs = <const TConstraint extends ConstraintSpec>(
   });
 
 /**
- * Create a RIGHT-HAND SIDE expression element.
+ * Create a CURRENT-LEVEL expression element.
  *
- * On right-associative levels it parses at the same level (1+2+3 = 1+(2+3));
- * on left-associative levels the fold parses it at the next level up.
+ * Parses at the same level. A pattern whose final operand is rhs() makes
+ * its level RIGHT-associative (`a ** b ** c` → `a ** (b ** c)`).
  *
- * Constraint forms: rhs("number"), rhs(["number", "string"]),
- * rhs(sameAs("left")), rhs().
+ * Constraint forms: rhs("number"), rhs("string | number"), rhs("left"),
+ * rhs().
  */
 export const rhs = <const TConstraint extends ConstraintSpec>(
   constraint?: TConstraint
@@ -288,8 +225,10 @@ export const rhs = <const TConstraint extends ConstraintSpec>(
 /**
  * Create a FULL expression element.
  *
- * Resets to the full grammar (precedence 0). Used for delimited contexts
- * like parentheses, ternary branches, function arguments.
+ * Resets to the full grammar (precedence 0). Only for DELIMITED contexts —
+ * every expr() must be followed by at least one constVal in the same
+ * pattern (parentheses' ")", ternary's ":"), otherwise it would swallow
+ * looser operators and break precedence.
  */
 export const expr = <const TConstraint extends ConstraintSpec>(
   constraint?: TConstraint
@@ -304,11 +243,10 @@ export const expr = <const TConstraint extends ConstraintSpec>(
 // Node Definition Schema
 // =============================================================================
 
-/** Precedence type: non-negative integer for operators, "atom" for atoms */
-export type Precedence = number | "atom";
-
-/** Associativity for operator nodes. Defaults to "right". */
-export type Associativity = "left" | "right";
+/** Precedence: a non-negative safe integer. Lower binds looser; the
+ *  HIGHEST level present in a grammar is the leaf level (literals,
+ *  parens), whose patterns must start with a consuming element. */
+export type Precedence = number;
 
 /**
  * A node definition schema.
@@ -317,23 +255,20 @@ export type Associativity = "left" | "right";
  * grammar computation:
  * - TName: The unique node name (e.g., "add", "ternary")
  * - TPattern: The pattern elements as a tuple type
- * - TPrecedence: The precedence (number for operators, "atom" for atoms)
- * - TResultType: static type name, fromBinding(...) derivation, or
+ * - TPrecedence: The precedence level (non-negative integer)
+ * - TResultType: binding name, arktype string def, object def, or
  *   undefined (allowed only for passthrough patterns)
- * - TAssoc: The associativity ("left" or "right", default "right")
  */
 export interface NodeSchema<
   TName extends string = string,
   TPattern extends readonly PatternSchema[] = readonly PatternSchema[],
   TPrecedence extends Precedence = Precedence,
-  TResultType extends ResultSpec | undefined = ResultSpec | undefined,
-  TAssoc extends Associativity = Associativity
+  TResultType extends ResultSpec | undefined = ResultSpec | undefined
 > {
   readonly name: TName;
   readonly pattern: TPattern;
   readonly precedence: TPrecedence;
   readonly resultType?: TResultType;
-  readonly associativity: TAssoc;
 
   /**
    * When true, eval receives THUNKS (() => value) instead of eagerly
@@ -371,20 +306,24 @@ export type EvalFn = (
 export type Thunked<T> = { [K in keyof T]: () => T[K] };
 
 /**
- * The eval return type: SchemaToType of the static result type, the
- * referenced binding's evaluated type for fromBinding, unknown otherwise.
+ * The eval return type, verified against the declared resultType:
+ * - binding name → the referenced binding's evaluated type
+ * - arktype def (string or object) → its inferred type
+ * - omitted (passthrough) → unknown
  */
 export type EvalReturn<
   TResultType extends ResultSpec | undefined,
   TPattern extends readonly PatternSchema[]
 > = TResultType extends string
-  ? SchemaToType<TResultType>
-  : TResultType extends FromBindingRef<infer B>
-  ? InferEvaluatedBindings<TPattern> extends infer EB
-    ? B extends keyof EB
-      ? EB[B]
+  ? [FindNamedElement<TPattern, TResultType>] extends [never]
+    ? InferDef<TResultType>
+    : InferEvaluatedBindings<TPattern> extends infer EB
+    ? TResultType extends keyof EB
+      ? EB[TResultType]
       : unknown
     : unknown
+  : TResultType extends object
+  ? type.infer<TResultType>
   : unknown;
 
 /**
@@ -392,9 +331,10 @@ export type EvalReturn<
  *
  * The `const` modifier on generics ensures literal types are preserved.
  * resultType may be:
- * - a static type name ("number") — the node mints a type
- * - fromBinding("x") — derived per-parse from a named operand
- * - omitted — only for passthrough patterns (single unnamed non-const element)
+ * - an arktype def ("boolean", { min: "number", max: "number" }) — the
+ *   node mints a type
+ * - a binding name ("then") — derived per-parse from that operand
+ * - omitted — only for single-element passthrough patterns
  *
  * @example A polymorphic, short-circuiting ternary:
  * const ternary = defineNode({
@@ -402,10 +342,10 @@ export type EvalReturn<
  *   pattern: [
  *     lhs("boolean").as("cond"), constVal("?"),
  *     expr().as("then"), constVal(":"),
- *     rhs(sameAs("then")).as("else"),
+ *     rhs("then").as("else"),
  *   ],
  *   precedence: 0,
- *   resultType: fromBinding("then"),
+ *   resultType: "then",
  *   lazy: true,
  *   eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
  * });
@@ -415,26 +355,21 @@ export function defineNode<
   const TPattern extends readonly PatternSchema[],
   const TPrecedence extends Precedence,
   const TResultType extends ResultSpec | undefined = undefined,
-  const TAssoc extends Associativity = "right",
   const TLazy extends boolean = false
 >(config: {
   readonly name: TName;
   readonly pattern: TPattern;
   readonly precedence: TPrecedence;
   readonly resultType?: TResultType;
-  readonly associativity?: TAssoc;
   readonly lazy?: TLazy;
   readonly eval?: (
     values: TLazy extends true
       ? Thunked<InferEvaluatedBindings<TPattern>>
       : InferEvaluatedBindings<TPattern>,
     runtimeValues: Record<string, unknown>
-  ) => EvalReturn<TResultType, TPattern>;
-}): NodeSchema<TName, TPattern, TPrecedence, TResultType, TAssoc> {
-  return {
-    ...config,
-    associativity: config.associativity ?? ("right" as TAssoc),
-  } as NodeSchema<TName, TPattern, TPrecedence, TResultType, TAssoc>;
+  ) => EvalReturn<NoInfer<TResultType>, TPattern>;
+}): NodeSchema<TName, TPattern, TPrecedence, TResultType> {
+  return config as NodeSchema<TName, TPattern, TPrecedence, TResultType>;
 }
 
 // =============================================================================
@@ -442,14 +377,13 @@ export function defineNode<
 // =============================================================================
 
 /**
- * Map a schema type string to its TypeScript runtime type.
- * Used for eval return types and evaluated bindings.
+ * Infer the TypeScript type of an arktype string def, falling back to
+ * unknown for defs arktype cannot statically resolve (e.g. custom scope
+ * aliases, which are validated at runtime instead).
  */
-export type SchemaToType<T extends string> =
-  T extends "number" ? number
-  : T extends "string" ? string
-  : T extends "boolean" ? boolean
-  : unknown;
+export type InferDef<T extends string> = [type.infer<T>] extends [never]
+  ? unknown
+  : type.infer<T>;
 
 /**
  * Infer the AST node type from a pattern schema.
@@ -462,26 +396,6 @@ export type InferNodeType<TSchema extends PatternSchemaBase> =
   : TSchema extends PathSchema ? PathNode
   : TSchema extends ConstSchema<infer V> ? ConstNode<V>
   : TSchema extends { kind: "expr" } ? { outputSchema: string }
-  : never;
-
-/**
- * Evaluated type of a single element, WITHOUT sameAs resolution
- * (sameAs resolves to unknown here; use InferEvaluatedTypeInPattern).
- */
-export type InferEvaluatedType<TSchema extends PatternSchemaBase> =
-  TSchema extends NumberSchema ? number
-  : TSchema extends StringSchema ? string
-  : TSchema extends IdentSchema ? unknown
-  : TSchema extends PathSchema ? unknown
-  : TSchema extends ConstSchema<infer V> ? V // the matched text
-  : TSchema extends { kind: "expr" }
-  ? NormalizeConstraint<ExtractSpecOf<TSchema>> extends infer N
-    ? N extends readonly string[]
-      ? SchemaToType<N[number]>
-      : N extends string
-      ? SchemaToType<N>
-      : unknown // unconstrained or sameAs (unresolved)
-    : never
   : never;
 
 /** Find a named element in a pattern */
@@ -497,19 +411,57 @@ type FindNamedElement<
     : FindNamedElement<R, B>
   : never;
 
+/** Extract the raw constraint property from an element (possibly NamedSchema) */
+type ExtractSpecOf<T> = T extends { constraint?: infer C } ? C : undefined;
+
 /**
- * Evaluated type of an element WITH one-hop sameAs resolution against
- * the rest of the pattern.
+ * Normalize a constraint's TYPE: absent or widened-to-string (an
+ * unconstrained factory call) → undefined; otherwise the literal.
+ */
+type NormalizeConstraint<C> = [Exclude<C, undefined>] extends [never]
+  ? undefined
+  : [string] extends [Exclude<C, undefined>]
+  ? undefined // widened string type → unconstrained
+  : Exclude<C, undefined>;
+
+/**
+ * Evaluated type of a single element, WITHOUT binding-reference resolution
+ * (references resolve to unknown here; use InferEvaluatedTypeInPattern).
+ */
+export type InferEvaluatedType<TSchema extends PatternSchemaBase> =
+  TSchema extends NumberSchema ? number
+  : TSchema extends StringSchema ? string
+  : TSchema extends IdentSchema ? unknown
+  : TSchema extends PathSchema ? unknown
+  : TSchema extends ConstSchema<infer V> ? V // the matched text
+  : TSchema extends { kind: "expr" }
+  ? NormalizeConstraint<ExtractSpecOf<TSchema>> extends infer N
+    ? N extends string
+      ? InferDef<N>
+      : unknown // unconstrained
+    : never
+  : never;
+
+/**
+ * Evaluated type of an element WITH one-hop binding-reference resolution
+ * against the rest of the pattern: a constraint that names an earlier
+ * binding takes that element's type; otherwise the constraint is an
+ * arktype def.
+ *
+ * TODO(Phase 4): correlate linked bindings via distributed unions so
+ * narrowing one binding narrows the others.
  */
 type InferEvaluatedTypeInPattern<
   TPattern extends readonly PatternSchema[],
   TSchema extends PatternSchemaBase
 > = TSchema extends { kind: "expr" }
-  ? NormalizeConstraint<ExtractSpecOf<TSchema>> extends SameAsRef<infer B>
-    ? FindNamedElement<TPattern, B> extends infer Target extends PatternSchemaBase
-      ? InferEvaluatedType<Target>
+  ? NormalizeConstraint<ExtractSpecOf<TSchema>> extends infer N
+    ? N extends string
+      ? [FindNamedElement<TPattern, N>] extends [never]
+        ? InferDef<N>
+        : InferEvaluatedType<FindNamedElement<TPattern, N> & PatternSchemaBase>
       : unknown
-    : InferEvaluatedType<TSchema>
+    : never
   : InferEvaluatedType<TSchema>;
 
 /**
@@ -532,15 +484,15 @@ export type InferBindings<TPattern extends readonly PatternSchema[]> = {
 /**
  * Infer evaluated bindings from a pattern (runtime values).
  * Used for eval() — receives already-evaluated values (or thunks of these
- * types when lazy: true). sameAs constraints resolve to the referenced
- * operand's type.
+ * types when lazy: true). Binding-reference constraints resolve to the
+ * referenced operand's type.
  *
  * @example
  * ```ts
  * type Pattern = [
- *   NamedSchema<ExprSchema<["number", "string"], "lhs">, "left">,
+ *   NamedSchema<ExprSchema<"number | string", "lhs">, "left">,
  *   ConstSchema<"+">,
- *   NamedSchema<ExprSchema<SameAsRef<"left">, "rhs">, "right">
+ *   NamedSchema<ExprSchema<"left", "rhs">, "right">
  * ];
  * type EvalBindings = InferEvaluatedBindings<Pattern>;
  * // { left: number | string; right: number | string }

@@ -154,7 +154,7 @@ describe("polymorphic nodes (union + sameAs + fromBinding)", () => {
     expect(error.code).toBe("TYPE_MISMATCH");
     expect(error.message).toContain("number");
     expect(error.message).toContain("string");
-    expect(error.message).toContain("same type as 'left'");
+    expect(error.message).toContain("type of 'left'");
   });
 
   it("eq requires same-typed operands", () => {
@@ -207,7 +207,7 @@ describe("ternary", () => {
   it("rejects disagreeing branches (sameAs)", () => {
     const error = parseErr("1==1 ? 1 : 'no'");
     expect(error.code).toBe("TYPE_MISMATCH");
-    expect(error.message).toContain("same type as 'then'");
+    expect(error.message).toContain("type of 'then'");
   });
 });
 
@@ -237,8 +237,10 @@ describe("member access (paths)", () => {
     );
   });
 
-  it("resolves a bare identifier for a nested record to 'unknown'", () => {
-    expect(parseOk("values", formSchema)).toEqual(pathNode(["values"], "unknown"));
+  it("resolves a bare identifier for a nested record to its object type", () => {
+    expect(parseOk("values", formSchema)).toEqual(
+      pathNode(["values"], "{ confirmPassword: string, password: string }")
+    );
   });
 
   it("does not traverse the prototype chain during type resolution", () => {

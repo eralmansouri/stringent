@@ -1,13 +1,14 @@
 /**
  * Shared fixture grammar for tests.
  *
- * Exercises the full design: passthrough atoms without resultType,
- * a polymorphic parens rule (fromBinding), a lazy short-circuiting ternary
- * (sameAs + fromBinding), same-type equality, an overloaded add
- * (union constraint + sameAs + fromBinding = numeric add AND string
- * concat), numeric left-associative operators, and a right-associative pow.
+ * Exercises the full v2 design: passthrough atoms without resultType, a
+ * polymorphic parens rule (binding-reference resultType), a lazy
+ * short-circuiting ternary (binding-reference constraint + resultType),
+ * same-type equality, an overloaded add (union constraint + binding
+ * reference = numeric add AND string concat), numeric LEFT-associative
+ * operators (lhs(...) tails), and a RIGHT-associative pow (rhs(...) tail).
  *
- * Levels: ternary(0) < eq(1) < add,sub(2) < mul,div(3) < pow(4) < atoms
+ * Levels: ternary(0) < eq(1) < add,sub(2) < mul,div(3) < pow(4) < leaf(5)
  */
 
 import {
@@ -19,35 +20,33 @@ import {
   rhs,
   expr,
   constVal,
-  sameAs,
-  fromBinding,
   createParser,
 } from "../index.js";
 
 export const numberLit = defineNode({
   name: "num",
   pattern: [number()],
-  precedence: "atom",
+  precedence: 5,
 });
 
 export const stringLit = defineNode({
   name: "str",
   pattern: [string(['"', "'"])],
-  precedence: "atom",
+  precedence: 5,
 });
 
 export const variable = defineNode({
   name: "var",
   pattern: [path()],
-  precedence: "atom",
+  precedence: 5,
 });
 
 /** Polymorphic parenthesization: type = whatever is inside */
 export const parens = defineNode({
   name: "parens",
   pattern: [constVal("("), expr().as("inner"), constVal(")")],
-  precedence: "atom",
-  resultType: fromBinding("inner"),
+  precedence: 5,
+  resultType: "inner",
   eval: ({ inner }) => inner,
 });
 
@@ -59,10 +58,10 @@ export const ternary = defineNode({
     constVal("?"),
     expr().as("then"),
     constVal(":"),
-    rhs(sameAs("then")).as("else"),
+    rhs("then").as("else"),
   ],
   precedence: 0,
-  resultType: fromBinding("then"),
+  resultType: "then",
   lazy: true,
   eval: ({ cond, then, else: alt }) => (cond() ? then() : alt()),
 });
@@ -70,58 +69,57 @@ export const ternary = defineNode({
 /** Same-type equality: 1 == 'a' is a parse-time type error */
 export const eq = defineNode({
   name: "eq",
-  pattern: [lhs().as("left"), constVal("=="), rhs(sameAs("left")).as("right")],
+  pattern: [lhs().as("left"), constVal("=="), rhs("left").as("right")],
   precedence: 1,
   resultType: "boolean",
   eval: ({ left, right }) => left === right,
 });
 
-/** Overloaded add: number+number → number, string+string → string */
+/** Overloaded add: number+number → number, string+string → string.
+ *  lhs(...) tail → the level folds left-associatively.
+ *  TODO(Phase 4): correlated bindings remove the casts. */
 export const add = defineNode({
   name: "add",
   pattern: [
-    lhs(["number", "string"]).as("left"),
+    lhs("number | string").as("left"),
     constVal("+"),
-    rhs(sameAs("left")).as("right"),
+    lhs("left").as("right"),
   ],
   precedence: 2,
-  associativity: "left",
-  resultType: fromBinding("left"),
+  resultType: "left",
   eval: ({ left, right }) => (left as any) + (right as any),
 });
 
 export const sub = defineNode({
   name: "sub",
-  pattern: [lhs("number").as("left"), constVal("-"), rhs("number").as("right")],
+  pattern: [lhs("number").as("left"), constVal("-"), lhs("number").as("right")],
   precedence: 2,
-  associativity: "left",
   resultType: "number",
   eval: ({ left, right }) => left - right,
 });
 
 export const mul = defineNode({
   name: "mul",
-  pattern: [lhs("number").as("left"), constVal("*"), rhs("number").as("right")],
+  pattern: [lhs("number").as("left"), constVal("*"), lhs("number").as("right")],
   precedence: 3,
-  associativity: "left",
   resultType: "number",
   eval: ({ left, right }) => left * right,
 });
 
 export const div = defineNode({
   name: "div",
-  pattern: [lhs("number").as("left"), constVal("/"), rhs("number").as("right")],
+  pattern: [lhs("number").as("left"), constVal("/"), lhs("number").as("right")],
   precedence: 3,
-  associativity: "left",
   resultType: "number",
   eval: ({ left, right }) => left / right,
 });
 
+/** rhs(...) tail → right-associative: 2^3^2 = 2^(3^2) */
 export const pow = defineNode({
   name: "pow",
   pattern: [lhs("number").as("left"), constVal("^"), rhs("number").as("right")],
   precedence: 4,
-  resultType: "number", // right-associative (default)
+  resultType: "number",
   eval: ({ left, right }) => left ** right,
 });
 
