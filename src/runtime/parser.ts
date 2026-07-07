@@ -284,8 +284,8 @@ function parseElement(
  * Parse an expression element based on its role.
  *
  * Role determines which grammar slice is used:
- * - "lhs": nextLevels (a tighter expression; avoids left-recursion)
- * - "rhs": currentLevels (same level → right-associative recursion)
+ * - "operand": nextLevels (a tighter expression; avoids left-recursion)
+ * - "rest": currentLevels (same level → right-associative recursion)
  * - "expr": fullGrammar (full reset; only in delimited contexts)
  */
 function parseElementWithLevel(
@@ -302,8 +302,8 @@ function parseElementWithLevel(
     const constraint = resolveConstraint(constraintSpec, done, children);
     const role = (element as ExprSchema).role;
     const levels =
-      role === "lhs" ? nextLevels
-      : role === "rhs" ? currentLevels
+      role === "operand" ? nextLevels
+      : role === "rest" ? currentLevels
       : env.compiled.levels;
     return parseExprWithConstraint(levels, input, constraint, env);
   }
@@ -314,7 +314,7 @@ function parseElementWithLevel(
  * Parse a pattern tuple.
  *
  * seedDone/seedChildren pre-populate the consumed prefix (used by the
- * left-fold to make binding references like rhs("left") resolvable inside
+ * left-fold to make binding references like rest("left") resolvable inside
  * operator tails). The returned children INCLUDE the seeded prefix,
  * aligned with the node's full pattern.
  */
@@ -502,7 +502,7 @@ function parseNodes(
  * then fold `op operand` repetitions into left-nested nodes.
  * "5-2-1" → sub(sub(5, 2), 1)
  *
- * Tail operands are lhs(...) elements, so they parse at the next level via
+ * Tail operands are operand(...) elements, so they parse at the next level via
  * their role — the fold itself is what makes the level left-associative.
  * Mirrors ParseLeftLevel/ParseLeftFold in src/parse/index.ts.
  */
@@ -519,7 +519,7 @@ function parseLeftLevel(levels: Levels, input: string, env: ParseEnv): ParseResu
     for (const node of nodes) {
       const compiledNode = env.compiled.byNode.get(node)!;
 
-      // Check the folded-so-far node against the lhs constraint. Record
+      // Check the folded-so-far node against the operand constraint. Record
       // mismatches so schema typos surface in errors (the seed's start
       // offset is the operand's position).
       const constraint = resolveConstraint(compiledNode.constraints[0], [], []);

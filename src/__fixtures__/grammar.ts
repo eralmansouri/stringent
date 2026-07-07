@@ -6,7 +6,7 @@
  * short-circuiting ternary (binding-reference constraint + resultType),
  * same-type equality, an overloaded add (union constraint + binding
  * reference = numeric add AND string concat), numeric LEFT-associative
- * operators (lhs(...) tails), and a RIGHT-associative pow (rhs(...) tail).
+ * operators (operand(...) tails), and a RIGHT-associative pow (rest(...) tail).
  *
  * Levels: ternary(0) < eq(1) < add,sub(2) < mul,div(3) < pow(4) < leaf(5)
  */
@@ -17,8 +17,8 @@ import {
   number,
   string,
   path,
-  lhs,
-  rhs,
+  operand,
+  rest,
   expr,
   constVal,
   overlapping,
@@ -57,11 +57,11 @@ export const parens = defineNode({
 export const ternary = defineNode({
   name: "ternary",
   pattern: [
-    lhs("boolean").as("cond"),
+    operand("boolean").as("cond"),
     constVal("?"),
     expr().as("then"),
     constVal(":"),
-    rhs("then").as("else"),
+    rest("then").as("else"),
   ],
   precedence: 0,
   resultType: "then",
@@ -73,14 +73,14 @@ export const ternary = defineNode({
  *  operand order never matters (x == 1 and 1 == x both parse). */
 export const eq = defineNode({
   name: "eq",
-  pattern: [lhs().as("left"), constVal("=="), rhs(overlapping("left")).as("right")],
+  pattern: [operand().as("left"), constVal("=="), rest(overlapping("left")).as("right")],
   precedence: 1,
   resultType: "boolean",
   eval: ({ left, right }) => left === right,
 });
 
 /** Overloaded add: number+number → number, string+string → string.
- *  lhs(...) tail → the level folds left-associatively.
+ *  operand(...) tail → the level folds left-associatively.
  *
  *  The binding reference correlates the operands, so eval's parameter is
  *  the distributed union { left: number; right: number } | { left: string;
@@ -88,9 +88,9 @@ export const eq = defineNode({
  *  check, so the idiomatic polymorphic eval is arktype's match: one case
  *  per union branch, no casts. */
 const addPattern = [
-  lhs("number | string").as("left"),
+  operand("number | string").as("left"),
   constVal("+"),
-  lhs("left").as("right"),
+  operand("left").as("right"),
 ] as const;
 
 const addImpl = match
@@ -112,7 +112,7 @@ export const add = defineNode({
 
 export const sub = defineNode({
   name: "sub",
-  pattern: [lhs("number").as("left"), constVal("-"), lhs("number").as("right")],
+  pattern: [operand("number").as("left"), constVal("-"), operand("number").as("right")],
   precedence: 2,
   resultType: "number",
   eval: ({ left, right }) => left - right,
@@ -120,7 +120,7 @@ export const sub = defineNode({
 
 export const mul = defineNode({
   name: "mul",
-  pattern: [lhs("number").as("left"), constVal("*"), lhs("number").as("right")],
+  pattern: [operand("number").as("left"), constVal("*"), operand("number").as("right")],
   precedence: 3,
   resultType: "number",
   eval: ({ left, right }) => left * right,
@@ -128,16 +128,16 @@ export const mul = defineNode({
 
 export const div = defineNode({
   name: "div",
-  pattern: [lhs("number").as("left"), constVal("/"), lhs("number").as("right")],
+  pattern: [operand("number").as("left"), constVal("/"), operand("number").as("right")],
   precedence: 3,
   resultType: "number",
   eval: ({ left, right }) => left / right,
 });
 
-/** rhs(...) tail → right-associative: 2^3^2 = 2^(3^2) */
+/** rest(...) tail → right-associative: 2^3^2 = 2^(3^2) */
 export const pow = defineNode({
   name: "pow",
-  pattern: [lhs("number").as("left"), constVal("^"), rhs("number").as("right")],
+  pattern: [operand("number").as("left"), constVal("^"), rest("number").as("right")],
   precedence: 4,
   resultType: "number",
   eval: ({ left, right }) => left ** right,

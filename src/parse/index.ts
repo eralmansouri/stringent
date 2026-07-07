@@ -13,7 +13,7 @@
  * 3. Base case: the leaf level (last element, plain alternation)
  *
  * v2 semantics, mirroring src/runtime/parser.ts function-for-function:
- * - Associativity derives from each level's TAIL SHAPE: any rhs(...) tail
+ * - Associativity derives from each level's TAIL SHAPE: any rest(...) tail
  *   → right-associative recursion; otherwise → left-associative fold.
  * - Constraints are arktype defs; matching is ASSIGNABILITY, computed as
  *   `type.infer<candidate> extends type.infer<constraint>` over literal
@@ -321,14 +321,14 @@ type ParseElement<
 /**
  * Parse a tuple of pattern elements.
  *
- * TCurrentLevels - grammar from current level onward (for rhs)
- * TNextLevels - grammar from next level onward (for lhs, avoids left-recursion)
+ * TCurrentLevels - grammar from current level onward (for rest)
+ * TNextLevels - grammar from next level onward (for operand, avoids left-recursion)
  * TFullGrammar - complete grammar (for expr role, full reset)
  * TAcc - children parsed so far (also feeds binding-reference resolution)
  * TDone - pattern elements consumed so far (aligned with TAcc)
  *
  * The left-fold seeds TAcc/TDone with the already-parsed left operand so
- * references like rhs("left") resolve inside operator tails.
+ * references like rest("left") resolve inside operator tails.
  *
  * Returns [children, rest] where children INCLUDES any seeded prefix.
  */
@@ -372,8 +372,8 @@ type ParsePatternTuple<
  * Parse an expression element based on its role.
  *
  * Role determines which grammar slice is used:
- * - "lhs": TNextLevels (a tighter expression; avoids left-recursion)
- * - "rhs": TCurrentLevels (same level → right-associative recursion)
+ * - "operand": TNextLevels (a tighter expression; avoids left-recursion)
+ * - "rest": TCurrentLevels (same level → right-associative recursion)
  * - "expr": TFullGrammar (full reset; only in delimited contexts)
  */
 type ParseElementWithLevel<
@@ -386,9 +386,9 @@ type ParseElementWithLevel<
   TDone extends readonly PatternSchema[],
   TAcc extends readonly unknown[]
 > = TElement extends { kind: "expr"; role: infer Role }
-  ? Role extends "lhs"
+  ? Role extends "operand"
     ? ParseExprWithConstraint<TNextLevels, TInput, TContext, ResolveSpec<TElement, TDone, TAcc>, TFullGrammar>
-    : Role extends "rhs"
+    : Role extends "rest"
     ? ParseExprWithConstraint<TCurrentLevels, TInput, TContext, ResolveSpec<TElement, TDone, TAcc>, TFullGrammar>
     : ParseExprWithConstraint<TFullGrammar, TInput, TContext, ResolveSpec<TElement, TDone, TAcc>, TFullGrammar>
   : ParseElement<TElement, TInput, TContext>;
@@ -564,48 +564,48 @@ type ParseNodes<
 // Left-Associative Level Parsing
 // =============================================================================
 
-/** Does the pattern's final element parse at the current level (rhs)? */
-type TailIsRhs<N extends NodeSchema> = N["pattern"] extends readonly [
+/** Does the pattern's final element parse at the current level (rest)? */
+type TailIsRest<N extends NodeSchema> = N["pattern"] extends readonly [
   ...infer _Init,
   infer Last extends PatternSchema
 ]
-  ? Last extends { kind: "expr"; role: "rhs" }
+  ? Last extends { kind: "expr"; role: "rest" }
     ? true
     : false
   : false;
 
 /**
- * A level is right-associative when ANY of its nodes has an rhs(...) tail;
- * otherwise (lhs tails / closed patterns) it folds left-associatively.
- * createParser validates that a level never mixes lhs and rhs tails.
+ * A level is right-associative when ANY of its nodes has an rest(...) tail;
+ * otherwise (operand tails / closed patterns) it folds left-associatively.
+ * createParser validates that a level never mixes operand and rest tails.
  * Mirrors the mode computation in src/runtime/compile.ts.
  */
-type HasRhsTail<TNodes extends readonly NodeSchema[]> = TNodes extends readonly [
+type HasRestTail<TNodes extends readonly NodeSchema[]> = TNodes extends readonly [
   infer First extends NodeSchema,
   ...infer Rest extends readonly NodeSchema[]
 ]
-  ? TailIsRhs<First> extends true
+  ? TailIsRest<First> extends true
     ? true
-    : HasRhsTail<Rest>
+    : HasRestTail<Rest>
   : false;
 
-/** Check TLeft against the constraint of the pattern's leading lhs element.
+/** Check TLeft against the constraint of the pattern's leading operand element.
  *  (Binding references are invalid at position 0 — createParser rejects
  *  them.) */
-type LhsConstraintOk<LhsEl extends PatternSchema, TLeft> = LhsEl extends {
+type OperandConstraintOk<OperandEl extends PatternSchema, TLeft> = OperandEl extends {
   kind: "expr";
 }
   ? TLeft extends { outputSchema: infer O }
-    ? CheckConstraint<O, ResolveSpec<LhsEl, [], []>>
+    ? CheckConstraint<O, ResolveSpec<OperandEl, [], []>>
     : false
   : false;
 
 /**
- * Try one node's tail (pattern minus the leading lhs element) against the
+ * Try one node's tail (pattern minus the leading operand element) against the
  * input, folding TLeft into a new left-nested node on success.
  *
  * TAcc/TDone are seeded with the left operand so binding references
- * resolve inside the tail. Tail operands are lhs(...) elements, so they
+ * resolve inside the tail. Tail operands are operand(...) elements, so they
  * parse at the next level via their role — the fold itself is what makes
  * the level left-associative.
  */
@@ -618,10 +618,10 @@ type ParseLeftTail<
   TContext extends Context,
   TFull extends Grammar
 > = N["pattern"] extends readonly [
-  infer LhsEl extends PatternSchema,
+  infer OperandEl extends PatternSchema,
   ...infer Tail extends readonly PatternSchema[]
 ]
-  ? LhsConstraintOk<LhsEl, TLeft> extends true
+  ? OperandConstraintOk<OperandEl, TLeft> extends true
     ? ParsePatternTuple<
         Tail,
         TInput,
@@ -630,7 +630,7 @@ type ParseLeftTail<
         Next,
         TFull,
         [TLeft],
-        [LhsEl]
+        [OperandEl]
       > extends [infer Children extends unknown[], infer Rest extends string]
       ? [BuildNodeResult<N, Children>, Rest]
       : []
@@ -704,7 +704,7 @@ type ParseLeftLevel<
  *
  * TLevels is the remaining levels to try, starting from current.
  * - The single remaining level is the LEAF level: plain alternation
- * - Levels with an rhs(...) tail: recursive descent (right-associative)
+ * - Levels with an rest(...) tail: recursive descent (right-associative)
  * - Otherwise: the iterative left fold
  */
 type ParseLevels<
@@ -718,7 +718,7 @@ type ParseLevels<
       infer CurrentNodes extends readonly NodeSchema[],
       ...infer NextNodes extends Grammar
     ]
-  ? HasRhsTail<CurrentNodes> extends true
+  ? HasRestTail<CurrentNodes> extends true
     ? ParseNodes<
         CurrentNodes,
         TInput,

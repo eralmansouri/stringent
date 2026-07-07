@@ -17,8 +17,8 @@ export {
   ident,
   path,
   constVal,
-  lhs,
-  rhs,
+  operand,
+  rest,
   expr,
   overlapping,
 } from "./schema/index.js";

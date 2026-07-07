@@ -9,10 +9,10 @@ import {
   constVal,
   createParser,
   defineNode,
-  lhs,
+  operand,
   number,
   path as pathEl,
-  rhs,
+  rest,
   expr,
 } from "./index.js";
 import { fixtureParser as parser } from "./__fixtures__/grammar.js";
@@ -97,7 +97,7 @@ describe("schemas and scope", () => {
   it("rejects constraint defs outside the scope at construction", () => {
     const bad = defineNode({
       name: "bad",
-      pattern: [lhs("numbr").as("l"), constVal("!"), rhs().as("r")],
+      pattern: [operand("numbr").as("l"), constVal("!"), rest().as("r")],
       precedence: 1,
       resultType: "number",
     });
@@ -111,7 +111,7 @@ describe("schemas and scope", () => {
   it("extends the scope via the scope option", () => {
     const dateVar = defineNode({
       name: "later",
-      pattern: [lhs("Timestamp").as("l"), constVal(">"), rhs("Timestamp").as("r")],
+      pattern: [operand("Timestamp").as("l"), constVal(">"), rest("Timestamp").as("r")],
       precedence: 1,
       resultType: "boolean",
     });
@@ -139,7 +139,7 @@ describe("schemas and scope", () => {
     });
     const positive = defineNode({
       name: "isPos",
-      pattern: [lhs("number").as("v"), constVal("!")],
+      pattern: [operand("number").as("v"), constVal("!")],
       precedence: 1,
       resultType: "boolean",
       eval: ({ v }) => v > 0,
@@ -174,7 +174,7 @@ describe("grammar validation", () => {
     const make = (precedence: number) =>
       defineNode({
         name: "bad",
-        pattern: [lhs().as("l"), constVal("!"), rhs().as("r")],
+        pattern: [operand().as("l"), constVal("!"), rest().as("r")],
         precedence,
         resultType: "number",
       });
@@ -196,13 +196,13 @@ describe("grammar validation", () => {
   it("rejects mixed tail shapes within one precedence level", () => {
     const leftTail = defineNode({
       name: "leftTail",
-      pattern: [lhs().as("l"), constVal("+"), lhs().as("r")],
+      pattern: [operand().as("l"), constVal("+"), operand().as("r")],
       precedence: 1,
       resultType: "number",
     });
     const rightTail = defineNode({
       name: "rightTail",
-      pattern: [lhs().as("l"), constVal("-"), rhs().as("r")],
+      pattern: [operand().as("l"), constVal("-"), rest().as("r")],
       precedence: 1,
       resultType: "number",
     });
@@ -213,30 +213,30 @@ describe("grammar validation", () => {
     );
   });
 
-  it("rejects nodes on a left-associative level that do not start with lhs", () => {
+  it("rejects nodes on a left-associative level that do not start with operand", () => {
     const fold = defineNode({
       name: "fold",
-      pattern: [lhs().as("l"), constVal("+"), lhs().as("r")],
+      pattern: [operand().as("l"), constVal("+"), operand().as("r")],
       precedence: 1,
       resultType: "number",
     });
     const prefix = defineNode({
       name: "prefix",
-      pattern: [constVal("-"), lhs().as("operand")],
+      pattern: [constVal("-"), operand().as("operand")],
       precedence: 1,
       resultType: "number",
     });
     expect(() => {
       createParser([num, fold, prefix] as const);
     }).toThrow(
-      /must start with lhs/
+      /must start with operand/
     );
   });
 
-  it("rejects rhs/expr at position 0 (left recursion → stack overflow)", () => {
+  it("rejects rest/expr at position 0 (left recursion → stack overflow)", () => {
     const postfix = defineNode({
       name: "postfix",
-      pattern: [rhs("number").as("v"), constVal("!"), rhs().as("r")],
+      pattern: [rest("number").as("v"), constVal("!"), rest().as("r")],
       precedence: 1,
       resultType: "number",
     });
@@ -250,7 +250,7 @@ describe("grammar validation", () => {
   it("rejects leaf nodes starting with expression elements", () => {
     const bad = defineNode({
       name: "bad",
-      pattern: [lhs().as("v"), constVal("!")],
+      pattern: [operand().as("v"), constVal("!")],
       precedence: 9,
       resultType: "number",
     });
@@ -265,7 +265,7 @@ describe("grammar validation", () => {
   it("rejects expr() elements with no closing constVal", () => {
     const bad = defineNode({
       name: "bad",
-      pattern: [lhs("number").as("l"), constVal("-"), expr().as("r")],
+      pattern: [operand("number").as("l"), constVal("-"), expr().as("r")],
       precedence: 1,
       resultType: "number",
     });
@@ -279,7 +279,7 @@ describe("grammar validation", () => {
   it("rejects empty constVal", () => {
     const bad = defineNode({
       name: "bad",
-      pattern: [lhs().as("l"), constVal(""), rhs().as("r")],
+      pattern: [operand().as("l"), constVal(""), rest().as("r")],
       precedence: 1,
       resultType: "number",
     });
@@ -291,7 +291,7 @@ describe("grammar validation", () => {
   it("rejects constraints that are neither defs nor earlier bindings", () => {
     const forward = defineNode({
       name: "fwd",
-      pattern: [lhs().as("l"), constVal("!"), rhs("later").as("later")],
+      pattern: [operand().as("l"), constVal("!"), rest("later").as("later")],
       precedence: 1,
       resultType: "number",
     });
@@ -306,7 +306,7 @@ describe("grammar validation", () => {
     for (const name of ["node", "outputSchema", "__proto__"] as const) {
       const bad = defineNode({
         name: "bad",
-        pattern: [lhs().as(name), constVal("!"), rhs().as("r")],
+        pattern: [operand().as(name), constVal("!"), rest().as("r")],
         precedence: 1,
         resultType: "number",
       });
@@ -321,7 +321,7 @@ describe("grammar validation", () => {
   it("rejects binding names that shadow types in scope", () => {
     const bad = defineNode({
       name: "bad",
-      pattern: [lhs().as("number"), constVal("!"), rhs().as("r")],
+      pattern: [operand().as("number"), constVal("!"), rest().as("r")],
       precedence: 1,
       resultType: "number",
     });
@@ -335,7 +335,7 @@ describe("grammar validation", () => {
   it("rejects duplicate binding names within one pattern", () => {
     const bad = defineNode({
       name: "bad",
-      pattern: [lhs().as("v"), constVal("#"), rhs().as("v")],
+      pattern: [operand().as("v"), constVal("#"), rest().as("v")],
       precedence: 1,
       resultType: "number",
     });
@@ -349,7 +349,7 @@ describe("grammar validation", () => {
   it("rejects constraints and resultTypes targeting const elements", () => {
     const constraintOnConst = defineNode({
       name: "bad1",
-      pattern: [lhs().as("l"), constVal("!").as("b"), rhs("b").as("r")],
+      pattern: [operand().as("l"), constVal("!").as("b"), rest("b").as("r")],
       precedence: 1,
       resultType: "number",
     });
@@ -361,7 +361,7 @@ describe("grammar validation", () => {
 
     const resultFromConst = defineNode({
       name: "bad2",
-      pattern: [lhs().as("l"), constVal("!").as("b")],
+      pattern: [operand().as("l"), constVal("!").as("b")],
       precedence: 1,
       resultType: "b",
     });
@@ -375,7 +375,7 @@ describe("grammar validation", () => {
   it("rejects unsatisfiable constraint intersections at construction", () => {
     const impossible = defineNode({
       name: "impossible",
-      pattern: [lhs("number & string").as("l"), constVal("!")],
+      pattern: [operand("number & string").as("l"), constVal("!")],
       precedence: 1,
       resultType: "boolean",
     });
@@ -412,7 +412,7 @@ describe("grammar validation", () => {
   it("supports object resultTypes", () => {
     const pair = defineNode({
       name: "pair",
-      pattern: [lhs("number").as("min"), constVal(".."), rhs("number").as("max")],
+      pattern: [operand("number").as("min"), constVal(".."), rest("number").as("max")],
       precedence: 1,
       resultType: { min: "number", max: "number" },
       eval: ({ min, max }) => ({ min, max }),

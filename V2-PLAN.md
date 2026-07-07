@@ -27,11 +27,11 @@ rewrite in Phase 7.
 | # | Decision | Rationale |
 |---|---|---|
 | D1 | Adopt `arktype` as the type-expression engine (runtime scopes/validators + `type.validate`/`type.infer` at compile time). | Gets union types, refinements, and assignability for free; the archived formeddable repo is a working reference for the integration (and its pitfalls — it did string-equality checks instead of real assignability; we won't). |
-| D2 | Binding names are auto-scoped type aliases. `rhs('acc')` means "assignable to whatever `acc` parsed as"; `resultType: 'then'` means "the type `then` parsed as". | Replaces `sameAs()` and `fromBinding()` with plain type expressions. One vocabulary everywhere. |
+| D2 | Binding names are auto-scoped type aliases. `rest('acc')` means "assignable to whatever `acc` parsed as"; `resultType: 'then'` means "the type `then` parsed as". | Replaces `sameAs()` and `fromBinding()` with plain type expressions. One vocabulary everywhere. |
 | D3 | `resultType` is **always required** (one exception, found in Phase 1: single-element unnamed passthrough patterns *forbid* it — they forward a child, constructing nothing), and is any arktype definition — a string expression (`'boolean'`, `'then'`) or an object def (`{x: 'number', y: 'number'}` for a node producing a structured value). Binding aliases resolve inside both forms. | Considered inference-from-eval (impossible for dynamic parsing — TS types are erased and the parser needs result types as data mid-parse to backtrack) and conditional optionality (needs a pattern-classification meta-rule mirrored in both engines; "why is it forbidden here?" moments). One rule, self-documenting grammars. |
 | D4 | `eval` is **verified against** `resultType` at compile time; wrong return type is an error at the `defineNode` call site. Dev-mode runtime assertion via `.allows()` covers plain-JS users. | Inference-grade safety without breaking the semantics-are-data law. |
 | D5 | Correlated eval bindings: the bindings parameter is typed as a **distributed union** (`{acc: string, append: string} \| {acc: number, append: number}`), generated from the pattern's binding links at DEF granularity (`'string \| number'` splits; `'boolean'` stays one branch). | Kills the `as any` in polymorphic evals. **Mechanism correction (Phase 4, verified against TS 5.9):** TS does NOT narrow sibling properties through `typeof b.acc` — discriminant narrowing needs unit types — so the union's payoff is arktype `match` (D14): one case per branch, handlers typed per branch, `.default('assert')` guards the rest. Plain functions must check each property they use, or cast. |
-| D6 | **Associativity is derived from the tail element's level; the `associativity` property is deleted.** Tail at tighter level (`lhs()`) → left-assoc via fold; tail at current level (`rhs()`) → right-assoc; `expr()` → delimited slots only. | v1 already reinterprets a left level's `rhs()` tail to parse at the next level (`runtime/parser.ts:634`) — the label lies. Deriving from shape makes the pattern the single source of truth. Level coherence check: all nodes at a level must agree on tail shape (replaces the mix-associativity error). |
+| D6 | **Associativity is derived from the tail element's level; the `associativity` property is deleted.** Tail at tighter level (`operand()`) → left-assoc via fold; tail at current level (`rest()`) → right-assoc; `expr()` → delimited slots only. | v1 already reinterprets a left level's `rhs()` tail to parse at the next level (`runtime/parser.ts:634`) — the label lies. Deriving from shape makes the pattern the single source of truth. Level coherence check: all nodes at a level must agree on tail shape (replaces the mix-associativity error). |
 | D7 | `precedence` is a plain number; the `"atom"` sentinel is removed. The **highest** precedence level is the leaf level; built-in literals live there implicitly. | "Atom" is jargon; the only thing it encoded (recursion base, no leading expression element) is enforceable by validating the max level. |
 | D8 | Built-in literals gain `true`/`false`/`null`/`undefined` alongside number/string. | Biggest functional gap vs. the archive. Port the keyword-prefix-guard approach (so `nullable` ≠ `null` + `able`) in both engines. |
 | D9 | String escape handling (`\n \t \r \\ \" \' \0 \b \f \v \xHH \uHHHH`) in the runtime tokenizer, with the archive's 405-line test corpus ported. | v1 delegates to parsebox raw tokens; escapes silently don't work. |
@@ -41,6 +41,7 @@ rewrite in Phase 7.
 | D13 | **Evaluation/validation failures are `ArkErrors`** (serializable, `flatByPath` for per-field form state, `hasCode()` for programmatic handling, `actual: () => ''` to keep secret values out of messages). Parse-time failures remain stringent's own positioned `StringentError` diagnostics. | Two error domains, each using the representation built for it: source positions for parse errors, field paths for data errors. |
 | D14 | **Polymorphic eval may be written with arktype's `match`** (`match({ '{acc: string, append: string}': …, '{acc: number, append: number}': …, default: 'never' })`) as the idiomatic style; plain functions with narrowing stay supported. | Kills typeof chains while preserving correlation; match compiles to set-theory-discriminated dispatch (docs: ~9ns/case vs ~765ns for ts-pattern). |
 | D15 | **Runtime type relations use arktype set operations**: constraint matching = `candidate.extends(slot)` (with `ifExtends` driving backtracking); `overlaps` powers a new `createParser`-time **grammar ambiguity lint** (two nodes at one level whose operand types overlap); unit reduction gives static "this rule can never pass" detection when constraints intersect to `never`. | The runtime gets the same set-theory semantics TS applies at compile time, from public APIs — no `.internal` walking needed for the core path (respects the no-refinements-in-constraints assumption). |
+| D16 | **Factories renamed** (owner directive, 2026-07-07): `lhs()` → `operand()`, `rhs()` → `rest()` (role strings in schema data renamed likewise; `expr()` unchanged). | `lhs`/`rhs` read as left/right POSITION, but they encode the parse LEVEL — tighter vs same — which is what derives associativity (D6). `operand` ("parse a tighter-level operand") and `rest` ("parse the rest of this level") say what they do. |
 
 ## API sketch — the fixture grammar in v2
 
@@ -55,7 +56,7 @@ const parens = defineNode({
 
 const eq = defineNode({
   name: 'eq',
-  pattern: [lhs().as('left'), constVal('=='), rhs(overlapping('left')).as('right')],
+  pattern: [operand().as('left'), constVal('=='), rest(overlapping('left')).as('right')],
   //        overlapping(): symmetric — operand types must OVERLAP, so
   //        `x == 1` and `1 == x` both parse for x: 'string | number'
   precedence: 1,
@@ -64,8 +65,8 @@ const eq = defineNode({
 })
 
 const addPattern = [
-  lhs('string | number').as('acc'), constVal('+'), lhs('acc').as('append'),
-  //  tail is lhs() → left-associative fold, no property needed
+  operand('string | number').as('acc'), constVal('+'), operand('acc').as('append'),
+  //  tail is operand() → left-associative fold, no property needed
 ] as const
 
 // correlated bindings ({acc: string, append: string} | {acc: number,
@@ -86,8 +87,8 @@ const add = defineNode({
 
 const pow = defineNode({
   name: 'pow',
-  pattern: [lhs('number').as('base'), constVal('**'), rhs('number').as('exp')],
-  //        tail is rhs() → right-associative
+  pattern: [operand('number').as('base'), constVal('**'), rest('number').as('exp')],
+  //        tail is rest() → right-associative
   precedence: 4,
   resultType: 'number',
   eval: (b) => b.base ** b.exp,
@@ -95,8 +96,8 @@ const pow = defineNode({
 
 const ternary = defineNode({
   name: 'ternary',
-  pattern: [lhs('boolean').as('cond'), constVal('?'), expr().as('then'),
-            constVal(':'), rhs('then').as('else')],
+  pattern: [operand('boolean').as('cond'), constVal('?'), expr().as('then'),
+            constVal(':'), rest('then').as('else')],
   precedence: 0,
   lazy: true,
   resultType: 'then',
@@ -124,7 +125,7 @@ Unchanged: `defineNode`/`createParser` shape, `.as()` naming, `lazy`,
   candidate-output ⊆ constraint.
 - Compile time: TS assignability on `type.infer<candidate> extends
   type.infer<constraint>` as the proxy.
-- Binding references (`rhs('left')`) are DIRECTIONAL: candidate ⊆ the
+- Binding references (`rest('left')`) are DIRECTIONAL: candidate ⊆ the
   referenced binding's parsed type. For equality-style operators, where
   operand order must not matter, `overlapping('left')` is the symmetric
   form: the types must overlap (some value could inhabit both), not nest.
@@ -172,10 +173,10 @@ cached alongside.
   dual-engine law is untouched.
 
 ### Associativity by shape
-- Level's tail shape: `lhs()`-tail levels use the iterative fold
+- Level's tail shape: `operand()`-tail levels use the iterative fold
   (`parseLeftLevel`, unchanged mechanics — the tail already parses at
-  nextLevels there); `rhs()`-tail levels use recursive descent.
-- Patterns with no expression tail (postfix, e.g. `[lhs(), constVal('!')]`)
+  nextLevels there); `rest()`-tail levels use recursive descent.
+- Patterns with no expression tail (postfix, e.g. `[operand(), constVal('!')]`)
   fold naturally (repetition = left).
 - Construction error when nodes at one precedence level disagree on tail
   shape.
@@ -234,8 +235,8 @@ max-level-is-leaf. Deviations recorded during implementation:
 - Single-element passthrough patterns (e.g. `[number()]`) *forbid*
   `resultType` — they forward a child rather than construct a result, so
   there is nothing to declare (the one principled exception to D3).
-- Array constraints (`lhs(["number","string"])`) dropped in favor of union
-  defs (`lhs("number | string")`).
+- Array constraints (`operand(["number","string"])`) dropped in favor of union
+  defs (`operand("number | string")`).
 - A binding reference must currently be the WHOLE constraint/resultType
   string (`"then"`); references embedded in larger defs (`"then | else"`,
   `{ value: "acc" }`) are deferred until union output types.
@@ -326,11 +327,12 @@ incrementally.
 
 | v1 | v2 |
 |---|---|
-| `rhs(sameAs('left'))` (operand slot) | `rhs('left')` — directional, candidate ⊆ left |
-| `rhs(sameAs('left'))` (equality operator) | `rhs(overlapping('left'))` — symmetric, order-independent |
+| `rhs(sameAs('left'))` (operand slot) | `rest('left')` — directional, candidate ⊆ left |
+| `rhs(sameAs('left'))` (equality operator) | `rest(overlapping('left'))` — symmetric, order-independent |
 | `resultType: fromBinding('left')` | `resultType: 'left'` |
-| `associativity: 'left'` + `rhs()` tail | `lhs()` tail |
-| `associativity: 'right'` / default + `rhs()` tail | `rhs()` tail (unchanged) |
+| `associativity: 'left'` + `rhs()` tail | `operand()` tail |
+| `associativity: 'right'` / default + `rhs()` tail | `rest()` tail (same shape, renamed) |
+| `lhs(...)` / `rhs(...)` | `operand(...)` / `rest(...)` (renamed; same semantics) |
 | `precedence: 'atom'` | highest numeric precedence |
 | exact-name constraint match | assignability |
 | `eval` casts for polymorphic nodes | correlated bindings, narrow via `b.x` |
@@ -355,13 +357,13 @@ incrementally.
 5. **`expr()` must be followed by a `constVal` in the same pattern** (new
    Phase 1 check). `expr()` resets to the full grammar, so in an undelimited
    tail it consumes operators *looser* than the node's own precedence:
-   with `sub: [lhs('number'), '-', expr()]` at precedence 2 and `eq` at
+   with `sub: [operand('number'), '-', expr()]` at precedence 2 and `eq` at
    precedence 1, `10 - 5 == 2` parses as `10 - (5 == 2)` instead of
    `(10 - 5) == 2`; `a - b ? x : y` becomes `a - (b ? x : y)`; and
    `10 - 5 - 2` right-nests to `10 - (5 - 2)` = 7 instead of 3. A closing
    const (parens' `)`, ternary's `:`) makes the region delimiter-bounded —
    its extent is decided by tokens, not precedence — which is why `expr()`
-   is safe there and only there. Final operand slots must be `lhs()`/`rhs()`.
+   is safe there and only there. Final operand slots must be `operand()`/`rest()`.
 
 ## Session handoff (2026-07-07, updated same day after Phase 4)
 
@@ -413,7 +415,7 @@ check: ~520k instantiations / ~2.2s.
   the symmetric form. Matching is assignability (runtime: memoized
   `extends`; type level: `type.infer<A> extends type.infer<B>` over
   literal defs so TS memoizes).
-- Associativity from tail shape (lhs tail → left fold, rhs tail → right
+- Associativity from tail shape (operand tail → left fold, rest tail → right
   recursion, expr() only in const-delimited slots); highest precedence
   level = leaf.
 - Refinements are validation-only: identifier/path/constraint types are

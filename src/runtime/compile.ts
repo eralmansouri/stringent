@@ -10,8 +10,8 @@
  *   or static def
  * - precedence levels sorted ascending, with each level's parse mode
  *   derived from its nodes' tail shape:
- *     · tail parses at the current level (rhs)  → "right"
- *     · tail parses at a tighter level (lhs) or the pattern is closed
+ *     · tail parses at the current level (rest)  → "right"
+ *     · tail parses at a tighter level (operand) or the pattern is closed
  *       (ends in a consuming element)           → "left" (iterative fold)
  *     · the highest level is the LEAF level     → plain alternation
  *
@@ -86,11 +86,11 @@ function isExpr(element: PatternSchema): element is ExprSchema {
 }
 
 /** The tail shape of a pattern decides its level's associativity */
-function tailShapeOf(node: NodeSchema): "rhs" | "lhs" | "closed" {
+function tailShapeOf(node: NodeSchema): "rest" | "operand" | "closed" {
   const last = node.pattern[node.pattern.length - 1];
   if (isExpr(last)) {
-    // expr() cannot be last (validated); lhs/rhs decide the level mode
-    return last.role === "rhs" ? "rhs" : "lhs";
+    // expr() cannot be last (validated); operand/rest decide the level mode
+    return last.role === "rest" ? "rest" : "operand";
   }
   return "closed";
 }
@@ -152,14 +152,14 @@ export function compileGrammar(
   const modes: LevelMode[] = levels.map((levelNodes, i) => {
     if (i === leafIndex) return "leaf";
     const shapes = new Set(levelNodes.map(tailShapeOf));
-    if (shapes.has("rhs") && shapes.has("lhs")) {
+    if (shapes.has("rest") && shapes.has("operand")) {
       throw new Error(
-        `stringent: precedence ${precedences[i]} mixes tail shapes — a level is right-associative (tail rhs(...)) or left-associative (tail lhs(...) / closed), never both. Nodes: ${levelNodes
+        `stringent: precedence ${precedences[i]} mixes tail shapes — a level is right-associative (tail rest(...)) or left-associative (tail operand(...) / closed), never both. Nodes: ${levelNodes
           .map((n) => n.name)
           .join(", ")}`
       );
     }
-    return shapes.has("rhs") ? "right" : "left";
+    return shapes.has("rest") ? "right" : "left";
   });
 
   // --- Level-mode-dependent pattern rules ------------------------------------
@@ -173,14 +173,14 @@ export function compileGrammar(
           );
         }
       } else if (modes[i] === "left") {
-        if (!isExpr(first) || first.role !== "lhs") {
+        if (!isExpr(first) || first.role !== "operand") {
           throw new Error(
-            `stringent: node '${node.name}' sits on a left-associative level (a sibling's tail is lhs(...) or closed), so its pattern must start with lhs(...) — prefix operators belong on right-associative levels`
+            `stringent: node '${node.name}' sits on a left-associative level (a sibling's tail is operand(...) or closed), so its pattern must start with operand(...) — prefix operators belong on right-associative levels`
           );
         }
-      } else if (isExpr(first) && first.role !== "lhs") {
+      } else if (isExpr(first) && first.role !== "operand") {
         throw new Error(
-          `stringent: node '${node.name}' starts with ${first.role}(...), which would recurse into the same level forever — operator patterns must start with lhs(...) or a consuming element`
+          `stringent: node '${node.name}' starts with ${first.role}(...), which would recurse into the same level forever — operator patterns must start with operand(...) or a consuming element`
         );
       }
     }
@@ -219,7 +219,7 @@ function compileNode(node: NodeSchema, env: TypeEnv): CompiledNode {
           .some((later) => later.kind === "const");
         if (!closed) {
           throw new Error(
-            `stringent: node '${node.name}' has an expr() element with no constVal after it — expr() resets to the full grammar and must be closed by a delimiter (use rhs()/lhs() for final operands)`
+            `stringent: node '${node.name}' has an expr() element with no constVal after it — expr() resets to the full grammar and must be closed by a delimiter (use rest()/operand() for final operands)`
           );
         }
       }
@@ -296,7 +296,7 @@ function compileConstraint(
     return { kind: "ref", binding: spec, check: "extends" };
   }
 
-  if (index === 0 && element.role === "lhs" && /^[A-Za-z_$][\w$]*$/.test(spec) && !env.resolves(spec)) {
+  if (index === 0 && element.role === "operand" && /^[A-Za-z_$][\w$]*$/.test(spec) && !env.resolves(spec)) {
     throw new Error(
       `stringent: node '${node.name}' constrains its first element to '${spec}', which is neither a type in scope nor an earlier binding (position 0 has no earlier operands to reference)`
     );

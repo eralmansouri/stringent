@@ -21,7 +21,7 @@ import type {
   Parse,
   Thunked,
 } from "./index.js";
-import { defineNode, lhs, rhs, expr, constVal } from "./index.js";
+import { defineNode, operand, rest, expr, constVal } from "./index.js";
 import { add, eq, fixtureNodes, fixtureParser, formSchema, sub, ternary } from "./__fixtures__/grammar.js";
 
 // =============================================================================
@@ -260,11 +260,11 @@ type _b4 = AssertTrue<AssertEqual<SubBindings, { left: number; right: number }>>
 const _chain = defineNode({
   name: "chain3",
   pattern: [
-    lhs("number | string").as("a"),
+    operand("number | string").as("a"),
     constVal("~"),
-    lhs("a").as("b"),
+    operand("a").as("b"),
     constVal("~"),
-    lhs("b").as("c"),
+    operand("b").as("c"),
   ],
   precedence: 1,
   resultType: "a",
@@ -283,7 +283,7 @@ type _b5 = AssertTrue<
 // true | false (the parser never enforces value-level correlation)
 const _iff = defineNode({
   name: "iff",
-  pattern: [lhs("boolean").as("a"), constVal("<=>"), rhs("a").as("b")],
+  pattern: [operand("boolean").as("a"), constVal("<=>"), rest("a").as("b")],
   precedence: 1,
   resultType: "boolean",
   eval: (b) => b.a === b.b,
@@ -294,7 +294,7 @@ type _b6 = AssertTrue<AssertEqual<IffBindings, { a: boolean; b: boolean }>>;
 // eval return is still verified against resultType for correlated patterns
 const _badCorrelated = defineNode({
   name: "badCorrelated",
-  pattern: [lhs("number | string").as("l"), constVal("&"), rhs("l").as("r")],
+  pattern: [operand("number | string").as("l"), constVal("&"), rest("l").as("r")],
   precedence: 1,
   resultType: "l",
   // @ts-expect-error — eval must return l's type (string | number), not boolean
@@ -303,7 +303,7 @@ const _badCorrelated = defineNode({
 
 const _badReturn = defineNode({
   name: "badReturn",
-  pattern: [lhs("number").as("a"), constVal("!"), rhs("number").as("b")],
+  pattern: [operand("number").as("a"), constVal("!"), rest("number").as("b")],
   precedence: 1,
   resultType: "boolean",
   // @ts-expect-error — eval must return boolean, not number
@@ -321,7 +321,7 @@ const _refReturn = defineNode({
 
 const _objReturn = defineNode({
   name: "range",
-  pattern: [lhs("number").as("min"), constVal(".."), rhs("number").as("max")],
+  pattern: [operand("number").as("min"), constVal(".."), rest("number").as("max")],
   precedence: 1,
   resultType: { min: "number", max: "number" },
   eval: ({ min, max }) => ({ min, max }),

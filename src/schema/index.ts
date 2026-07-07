@@ -18,8 +18,8 @@
  * engines, and the runtime engine cannot see TypeScript types.
  *
  * Associativity is derived from the pattern's tail shape:
- * - tail parses at the CURRENT level (rhs)  → right-associative
- * - tail parses at a TIGHTER level (lhs)    → left-associative (fold)
+ * - tail parses at the CURRENT level (rest)  → right-associative
+ * - tail parses at a TIGHTER level (operand)    → left-associative (fold)
  * - expr() is for delimited slots only and must be followed by a constVal
  */
 
@@ -93,9 +93,9 @@ export function isOverlapsRef(value: unknown): value is OverlapsRef {
 /**
  * A constraint on an expression slot:
  * - a string naming an EARLIER binding in the same pattern — "assignable
- *   to whatever that operand parsed as" (e.g. rhs("left"))
+ *   to whatever that operand parsed as" (e.g. rest("left"))
  * - any other string — an arktype definition compiled in the parser's
- *   scope (e.g. lhs("number"), lhs("string | number"), lhs("string.email"))
+ *   scope (e.g. operand("number"), operand("string | number"), operand("string.email"))
  * - overlapping("left") — symmetric: types must overlap, not nest
  *
  * createParser decides string interpretation: binding names shadow nothing
@@ -118,7 +118,7 @@ export type ConstraintSpec = string | OverlapsRef;
 export type ResultSpec = string | object;
 
 /** Expression role determines which grammar level is used */
-export type ExprRole = "lhs" | "rhs" | "expr";
+export type ExprRole = "operand" | "rest" | "expr";
 
 /** Recursive expression pattern element with optional constraint and role */
 export interface ExprSchema<
@@ -149,7 +149,7 @@ export type PatternSchemaBase =
  * Uses intersection so schema properties remain accessible without unwrapping.
  *
  * @example
- * lhs("number").as("left")  // ExprSchema<"number", "lhs"> & { __named: true; name: "left" }
+ * operand("number").as("left")  // ExprSchema<"number", "operand"> & { __named: true; name: "left" }
  */
 export type NamedSchema<
   TSchema extends PatternSchemaBase = PatternSchemaBase,
@@ -214,38 +214,38 @@ export const constVal = <const TValue extends string>(value: TValue) =>
  * Create a TIGHTER-LEVEL expression element.
  *
  * Parses at the next-higher grammar level, avoiding left-recursion.
- * A pattern whose final operand is lhs() makes its level LEFT-associative
+ * A pattern whose final operand is operand() makes its level LEFT-associative
  * (the engine folds repetitions: `a-b-c` → `(a-b)-c`).
  *
- * Constraint forms: lhs("number"), lhs("string | number"), lhs("left")
+ * Constraint forms: operand("number"), operand("string | number"), operand("left")
  * (a binding reference — not valid at position 0, where no earlier
- * operand exists), lhs().
+ * operand exists), operand().
  */
-export const lhs = <const TConstraint extends ConstraintSpec>(
+export const operand = <const TConstraint extends ConstraintSpec>(
   constraint?: TConstraint
 ) =>
-  withAs<ExprSchema<TConstraint, "lhs">>({
+  withAs<ExprSchema<TConstraint, "operand">>({
     kind: "expr",
     constraint: constraint,
-    role: "lhs",
+    role: "operand",
   });
 
 /**
  * Create a CURRENT-LEVEL expression element.
  *
- * Parses at the same level. A pattern whose final operand is rhs() makes
+ * Parses at the same level. A pattern whose final operand is rest() makes
  * its level RIGHT-associative (`a ** b ** c` → `a ** (b ** c)`).
  *
- * Constraint forms: rhs("number"), rhs("string | number"), rhs("left"),
- * rhs().
+ * Constraint forms: rest("number"), rest("string | number"), rest("left"),
+ * rest().
  */
-export const rhs = <const TConstraint extends ConstraintSpec>(
+export const rest = <const TConstraint extends ConstraintSpec>(
   constraint?: TConstraint
 ) =>
-  withAs<ExprSchema<TConstraint, "rhs">>({
+  withAs<ExprSchema<TConstraint, "rest">>({
     kind: "expr",
     constraint: constraint,
-    role: "rhs",
+    role: "rest",
   });
 
 /**
@@ -366,9 +366,9 @@ export type EvalReturn<
  * const ternary = defineNode({
  *   name: "ternary",
  *   pattern: [
- *     lhs("boolean").as("cond"), constVal("?"),
+ *     operand("boolean").as("cond"), constVal("?"),
  *     expr().as("then"), constVal(":"),
- *     rhs("then").as("else"),
+ *     rest("then").as("else"),
  *   ],
  *   precedence: 0,
  *   resultType: "then",
@@ -524,7 +524,7 @@ export type InferBindings<TPattern extends readonly PatternSchema[]> = {
 // Correlated bindings (Phase 4)
 // =============================================================================
 //
-// When a pattern links operands via binding references (rhs("left"),
+// When a pattern links operands via binding references (rest("left"),
 // overlapping("left")), the evaluated bindings are typed as a DISTRIBUTED
 // UNION over the root operand's constraint members: "number | string"
 // yields { left: string; right: string } | { left: number; right: number }
@@ -706,9 +706,9 @@ type CorrelatedNames<
  * @example
  * ```ts
  * type Pattern = [
- *   NamedSchema<ExprSchema<"number | string", "lhs">, "left">,
+ *   NamedSchema<ExprSchema<"number | string", "operand">, "left">,
  *   ConstSchema<"+">,
- *   NamedSchema<ExprSchema<"left", "rhs">, "right">
+ *   NamedSchema<ExprSchema<"left", "rest">, "right">
  * ];
  * type EvalBindings = InferEvaluatedBindings<Pattern>;
  * // { left: number; right: number } | { left: string; right: string }

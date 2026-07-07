@@ -12,10 +12,10 @@ import {
   defineNode,
   expr,
   ident,
-  lhs,
+  operand,
   number,
   path,
-  rhs,
+  rest,
 } from "./index.js";
 import { fixtureParser as parser, formSchema } from "./__fixtures__/grammar.js";
 
@@ -165,7 +165,7 @@ describe("evaluate", () => {
       defineNode({ name: "n", pattern: [number()], precedence: 2 }),
       defineNode({
         name: "cat",
-        pattern: [lhs("number").as("a"), constVal("&"), rhs("number").as("b")],
+        pattern: [operand("number").as("a"), constVal("&"), rest("number").as("b")],
         precedence: 1,
         resultType: "number",
         // deliberately returns the WRONG shape (a string)
