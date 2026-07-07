@@ -207,12 +207,25 @@ Refinement erasure (D-semantics) is implemented in the `types.ts` adapter
 via `internal.transform` + `type.schema(json)` round-trip — the one
 `.internal` touchpoint, per the stability rule.
 
-**Phase 3 — Type engine** (`src/parse/index.ts`, currently a placeholder:
-literal-mode `parse()` accepts any string and returns a loose AST type).
-Mirror the runtime engine per the Phase 0 strategy. Also: scope-aware
-compile-time schema validation (type.validate is currently scope-blind, so
-custom aliases need a cast), literal input validation, result-type
-inference for `evaluate()`, and the recursion canaries.
+**Phase 3 — Type engine. ✅ DONE** (`src/parse/index.ts`,
+`src/grammar/index.ts`). Full literal-mode parsing restored: numeric
+grammar computation (leaf level last; widened/never precedences resolve
+the grammar to `never` instead of recursing), tail-shape associativity
+with the tail-recursive left fold, assignability via
+`type.infer<candidate> extends type.infer<constraint>` over literal defs
+(memoization per the spike), overlap checks as non-never intersections,
+binding-reference resolution against the parsed prefix, def-carrying
+outputSchema (display strings may differ from the runtime's normalized
+expressions; parity is accept/reject + inferred types). Measured floors
+pinned as canaries: 30-term left chains (60 verified), 8-term right pow
+chains (12 verified), 3-deep parens (4 hits TS2589 — same class as v1).
+Two TS inference gotchas discovered and worked around, both measured:
+arktype's `type.validate` or bare `type.infer` as a SIBLING parameter of
+the conditional-typed input poisons generic inference — so `evaluate()`
+wraps values in `NoInfer`, and eager schema-leaf validation lives only on
+`safeParse` (parse/evaluate get leaf errors via the input check and at
+runtime). Scope-aware compile-time validation remains deferred
+(scope-blind `type.validate`; aliases need a cast at compile time).
 
 **Phase 4 — Eval typing** (`src/schema/index.ts`). Distributed-union
 correlated bindings (the `as any` in the fixture's polymorphic add still

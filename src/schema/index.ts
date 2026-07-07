@@ -438,13 +438,13 @@ type FindNamedElement<
   : never;
 
 /** Extract the raw constraint property from an element (possibly NamedSchema) */
-type ExtractSpecOf<T> = T extends { constraint?: infer C } ? C : undefined;
+export type ExtractSpecOf<T> = T extends { constraint?: infer C } ? C : undefined;
 
 /**
  * Normalize a constraint's TYPE: absent or widened-to-string (an
  * unconstrained factory call) → undefined; otherwise the literal.
  */
-type NormalizeConstraint<C> = [Exclude<C, undefined>] extends [never]
+export type NormalizeConstraint<C> = [Exclude<C, undefined>] extends [never]
   ? undefined
   : [string] extends [Exclude<C, undefined>]
   ? undefined // widened string type → unconstrained

@@ -101,9 +101,11 @@ describe("schemas and scope", () => {
       precedence: 1,
       resultType: "number",
     });
-    expect(() => createParser([num, bad] as const)).toThrow(
-      /neither a type in scope nor an earlier binding/
-    );
+    // block body: keeps vitest's expect from instantiating matchers over
+    // the Parser type (TS2589 with an unresolvable constraint def)
+    expect(() => {
+      createParser([num, bad] as const);
+    }).toThrow(/neither a type in scope nor an earlier binding/);
   });
 
   it("extends the scope via the scope option", () => {
@@ -152,7 +154,9 @@ describe("schemas and scope", () => {
 
 describe("grammar validation", () => {
   it("rejects duplicate node names", () => {
-    expect(() => createParser([num, num] as const)).toThrow(/duplicate node name/);
+    expect(() => {
+      createParser([num, num] as const);
+    }).toThrow(/duplicate node name/);
   });
 
   it("rejects reserved node names", () => {
@@ -161,7 +165,9 @@ describe("grammar validation", () => {
       pattern: [number()],
       precedence: 9,
     });
-    expect(() => createParser([reserved] as const)).toThrow(/reserved/);
+    expect(() => {
+      createParser([reserved] as const);
+    }).toThrow(/reserved/);
   });
 
   it("rejects negative, fractional, and non-numeric precedence", () => {
@@ -172,15 +178,19 @@ describe("grammar validation", () => {
         precedence,
         resultType: "number",
       });
-    expect(() => createParser([num, make(-1)] as const)).toThrow(
+    expect(() => {
+      createParser([num, make(-1)] as const);
+    }).toThrow(
       /non-negative safe integer/
     );
-    expect(() => createParser([num, make(1.5)] as const)).toThrow(
+    expect(() => {
+      createParser([num, make(1.5)] as const);
+    }).toThrow(
       /non-negative safe integer/
     );
-    expect(() =>
-      createParser([num, make("atom" as never)] as const)
-    ).toThrow(/non-negative safe integer/);
+    expect(() => {
+      createParser([num, make("atom" as never)] as const);
+    }).toThrow(/non-negative safe integer/);
   });
 
   it("rejects mixed tail shapes within one precedence level", () => {
@@ -196,7 +206,9 @@ describe("grammar validation", () => {
       precedence: 1,
       resultType: "number",
     });
-    expect(() => createParser([num, leftTail, rightTail] as const)).toThrow(
+    expect(() => {
+      createParser([num, leftTail, rightTail] as const);
+    }).toThrow(
       /mixes tail shapes/
     );
   });
@@ -214,7 +226,9 @@ describe("grammar validation", () => {
       precedence: 1,
       resultType: "number",
     });
-    expect(() => createParser([num, fold, prefix] as const)).toThrow(
+    expect(() => {
+      createParser([num, fold, prefix] as const);
+    }).toThrow(
       /must start with lhs/
     );
   });
@@ -226,7 +240,9 @@ describe("grammar validation", () => {
       precedence: 1,
       resultType: "number",
     });
-    expect(() => createParser([num, postfix] as const)).toThrow(
+    expect(() => {
+      createParser([num, postfix] as const);
+    }).toThrow(
       /would recurse into the same level forever/
     );
   });
@@ -239,7 +255,9 @@ describe("grammar validation", () => {
       resultType: "number",
     });
     // both nodes sit on the (single) leaf level
-    expect(() => createParser([num, bad] as const)).toThrow(
+    expect(() => {
+      createParser([num, bad] as const);
+    }).toThrow(
       /must start with a consuming element/
     );
   });
@@ -251,7 +269,9 @@ describe("grammar validation", () => {
       precedence: 1,
       resultType: "number",
     });
-    expect(() => createParser([num, bad] as const)).toThrow(
+    expect(() => {
+      createParser([num, bad] as const);
+    }).toThrow(
       /expr\(\) element with no constVal after it/
     );
   });
@@ -263,7 +283,9 @@ describe("grammar validation", () => {
       precedence: 1,
       resultType: "number",
     });
-    expect(() => createParser([num, bad] as const)).toThrow(/constVal\(""\)/);
+    expect(() => {
+      createParser([num, bad] as const);
+    }).toThrow(/constVal\(""\)/);
   });
 
   it("rejects constraints that are neither defs nor earlier bindings", () => {
@@ -273,7 +295,9 @@ describe("grammar validation", () => {
       precedence: 1,
       resultType: "number",
     });
-    expect(() => createParser([num, forward] as const)).toThrow(
+    expect(() => {
+      createParser([num, forward] as const);
+    }).toThrow(
       /neither an earlier binding name nor a valid type/
     );
   });
@@ -286,7 +310,9 @@ describe("grammar validation", () => {
         precedence: 1,
         resultType: "number",
       });
-      expect(() => createParser([num, bad] as const)).toThrow(
+      expect(() => {
+      createParser([num, bad] as const);
+    }).toThrow(
         /would collide with the AST node structure/
       );
     }
@@ -299,7 +325,9 @@ describe("grammar validation", () => {
       precedence: 1,
       resultType: "number",
     });
-    expect(() => createParser([num, bad] as const)).toThrow(
+    expect(() => {
+      createParser([num, bad] as const);
+    }).toThrow(
       /must not shadow types/
     );
   });
@@ -311,7 +339,9 @@ describe("grammar validation", () => {
       precedence: 1,
       resultType: "number",
     });
-    expect(() => createParser([num, bad] as const)).toThrow(
+    expect(() => {
+      createParser([num, bad] as const);
+    }).toThrow(
       /binds the name 'v' twice/
     );
   });
@@ -323,7 +353,9 @@ describe("grammar validation", () => {
       precedence: 1,
       resultType: "number",
     });
-    expect(() => createParser([num, constraintOnConst] as const)).toThrow(
+    expect(() => {
+      createParser([num, constraintOnConst] as const);
+    }).toThrow(
       /binding 'b', which is a const element/
     );
 
@@ -333,7 +365,9 @@ describe("grammar validation", () => {
       precedence: 1,
       resultType: "b",
     });
-    expect(() => createParser([num, resultFromConst] as const)).toThrow(
+    expect(() => {
+      createParser([num, resultFromConst] as const);
+    }).toThrow(
       /binding 'b', which is a const element/
     );
   });
@@ -345,7 +379,9 @@ describe("grammar validation", () => {
       precedence: 1,
       resultType: "boolean",
     });
-    expect(() => createParser([num, impossible] as const)).toThrow(
+    expect(() => {
+      createParser([num, impossible] as const);
+    }).toThrow(
       /neither an earlier binding name nor a valid type|unsatisfiable/
     );
   });
@@ -356,7 +392,9 @@ describe("grammar validation", () => {
       pattern: [number().as("n")],
       precedence: 9,
     });
-    expect(() => createParser([bad] as const)).toThrow(/needs a resultType/);
+    expect(() => {
+      createParser([bad] as const);
+    }).toThrow(/needs a resultType/);
   });
 
   it("rejects resultType on single-element passthrough patterns", () => {
@@ -366,7 +404,9 @@ describe("grammar validation", () => {
       precedence: 9,
       resultType: "number",
     });
-    expect(() => createParser([bad] as const)).toThrow(/passthrough/);
+    expect(() => {
+      createParser([bad] as const);
+    }).toThrow(/passthrough/);
   });
 
   it("supports object resultTypes", () => {
