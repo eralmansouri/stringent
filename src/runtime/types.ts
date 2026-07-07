@@ -24,18 +24,30 @@ export type ScopeAliases = Record<string, unknown>;
 export interface TypeEnv {
   /** Compile a def in this parser's scope (cached for string defs). */
   compileDef(def: unknown): Type;
+  /**
+   * Compile a def in this parser's scope EXTENDED with per-parse binding
+   * aliases (`compileDefIn("left | null", { left: <parsed Type> })`).
+   * Scope construction is expensive (~1.4ms); results are memoized by
+   * def + alias expressions (~160ns; see spike/union-defs).
+   */
+  compileDefIn(def: unknown, aliases: Record<string, Type>): Type;
   /** Is `candidate` assignable to `constraint`? Memoized. */
   isAssignable(candidate: Type, constraint: Type): boolean;
   /** Could any value inhabit both types? Symmetric; memoized. */
   isOverlapping(a: Type, b: Type): boolean;
   /** True when the string resolves as a def in this scope. */
   resolves(def: string): boolean;
+  /** True when the def resolves once the given alias names are in scope
+   *  (construction-time validation of embedded binding references). */
+  resolvesWith(def: unknown, aliasNames: readonly string[]): boolean;
 }
 
-export function createTypeEnv(aliases: ScopeAliases | undefined): TypeEnv {
-  const $ = scope((aliases ?? {}) as never);
+export function createTypeEnv(userAliases: ScopeAliases | undefined): TypeEnv {
+  const baseAliases = userAliases ?? {};
+  const $ = scope(baseAliases as never);
   const stringDefCache = new Map<string, Type>();
   const objectDefCache = new WeakMap<object, Type>();
+  const scopedDefCache = new Map<string, Type>();
   const assignabilityCache = new Map<string, boolean>();
 
   const compileDef = (def: unknown): Type => {
@@ -60,8 +72,30 @@ export function createTypeEnv(aliases: ScopeAliases | undefined): TypeEnv {
     );
   };
 
+  const compileDefIn = (
+    def: unknown,
+    aliases: Record<string, Type>
+  ): Type => {
+    // cache key: def identity (strings are their own identity; object defs
+    // come from node schemas, one per node, so JSON is fine) + each alias's
+    // normalized expression, NUL-separated (expressions contain spaces)
+    let key = typeof def === "string" ? def : JSON.stringify(def);
+    for (const name of Object.keys(aliases).sort()) {
+      key += "\0" + name + "\0" + aliases[name].expression;
+    }
+    let compiled = scopedDefCache.get(key);
+    if (compiled === undefined) {
+      compiled = scope({ ...baseAliases, ...aliases } as never).type(
+        def as never
+      ) as Type;
+      scopedDefCache.set(key, compiled);
+    }
+    return compiled;
+  };
+
   return {
     compileDef,
+    compileDefIn,
 
     isAssignable(candidate: Type, constraint: Type): boolean {
       // NUL separator: expressions contain spaces ("string | number"), so
@@ -90,6 +124,19 @@ export function createTypeEnv(aliases: ScopeAliases | undefined): TypeEnv {
     resolves(def: string): boolean {
       try {
         compileDef(def);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+
+    resolvesWith(def: unknown, aliasNames: readonly string[]): boolean {
+      const placeholders: Record<string, Type> = {};
+      for (const name of aliasNames) {
+        placeholders[name] = compileDef("unknown");
+      }
+      try {
+        compileDefIn(def, placeholders);
         return true;
       } catch {
         return false;

@@ -108,6 +108,8 @@ export function isOverlapsRef(value: unknown): value is OverlapsRef {
  *   to whatever that operand parsed as" (e.g. rest("left"))
  * - any other string — an arktype definition compiled in the parser's
  *   scope (e.g. operand("number"), operand("string | number"), operand("string.email"))
+ * - a def EMBEDDING earlier binding names (e.g. rest("left | null")) —
+ *   resolved per-parse in a scope extended with the parsed operand types
  * - overlapping("left") — symmetric: types must overlap, not nest
  *
  * createParser decides string interpretation: binding names shadow nothing
@@ -122,6 +124,8 @@ export type ConstraintSpec = string | OverlapsRef;
  *   parsed as (polymorphic passthrough, e.g. resultType: "then")
  * - an arktype string def (e.g. "boolean")
  * - an arktype object def (e.g. { min: "number", max: "number" })
+ * - a def EMBEDDING binding names (e.g. "then | null", { value: "acc" }) —
+ *   resolved per-parse in a scope extended with the parsed operand types
  *
  * Required for every node that CONSTRUCTS a result. The only exemption is
  * a single-element passthrough pattern (e.g. [number()]), which forwards

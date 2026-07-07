@@ -43,6 +43,7 @@ discussion of v1's ergonomics. DESIGN.md now describes v2.
 | D14 | **Polymorphic eval may be written with arktype's `match`** (`match({ '{acc: string, append: string}': …, '{acc: number, append: number}': …, default: 'never' })`) as the idiomatic style; plain functions with narrowing stay supported. | Kills typeof chains while preserving correlation; match compiles to set-theory-discriminated dispatch (docs: ~9ns/case vs ~765ns for ts-pattern). |
 | D15 | **Runtime type relations use arktype set operations**: constraint matching = `candidate.extends(slot)` (with `ifExtends` driving backtracking); `overlaps` powers a new `createParser`-time **grammar ambiguity lint** (two nodes at one level whose operand types overlap); unit reduction gives static "this rule can never pass" detection when constraints intersect to `never`. | The runtime gets the same set-theory semantics TS applies at compile time, from public APIs — no `.internal` walking needed for the core path (respects the no-refinements-in-constraints assumption). |
 | D16 | **Factories renamed** (owner directive, 2026-07-07): `lhs()` → `operand()`, `rhs()` → `rest()` (role strings in schema data renamed likewise; `expr()` unchanged). | `lhs`/`rhs` read as left/right POSITION, but they encode the parse LEVEL — tighter vs same — which is what derives associativity (D6). `operand` ("parse a tighter-level operand") and `rest` ("parse the rest of this level") say what they do. |
+| D17 | **Embedded binding references** (owner pushback, 2026-07-07): constraints/resultTypes may EMBED binding names in larger defs (`rest("left \| null")`, `resultType: { value: "left" }`), resolved per-parse via scope extension — runtime `compileDefIn` (memoized), type level `type.infer<def, scope>` with a resolved-type carrier for outputSchema. | The original whole-string restriction cited type-level cost, but that concern only applies to TEXTUAL def synthesis (TS2589 at depth 30); scoped inference costs ~10 instantiations/level at depth 500 (spike/union-defs). Eval-binding typing through templates stays conservative (`unknown`) for now. |
 
 ## API sketch — the fixture grammar in v2
 
@@ -238,9 +239,8 @@ max-level-is-leaf. Deviations recorded during implementation:
   there is nothing to declare (the one principled exception to D3).
 - Array constraints (`operand(["number","string"])`) dropped in favor of union
   defs (`operand("number | string")`).
-- A binding reference must currently be the WHOLE constraint/resultType
-  string (`"then"`); references embedded in larger defs (`"then | else"`,
-  `{ value: "acc" }`) are deferred until union output types.
+- ~~A binding reference must be the WHOLE constraint/resultType string~~ —
+  superseded by D17 (embedded references now resolve via scope extension).
 - Binding-reference constraints are DIRECTIONAL (candidate ⊆ referenced
   binding's type), replacing v1's symmetric exact-equality `sameAs`.
 
@@ -467,6 +467,11 @@ check: ~678k instantiations / ~2.7s.
    all 8 Starlight pages + the playground component ported to v2 — every
    docs snippet verified against the real engine (tsc + vitest) and the
    docs site build ran green (73 pages; twoslash enforces snippets).
+9. (on `claude/v2-plan-review-e13a11`) — D17 embedded binding references:
+   spike/union-defs (scoped inference ≈ free, textual synthesis TS2589 —
+   the owner was right to push back), runtime `compileDefIn`/`resolvesWith`
+   + template constraint/result kinds, type-level `ResolveDefIn` +
+   `ResolvedDef` carrier, tests in both engines.
 
 ### The four load-bearing design rules
 
@@ -538,9 +543,10 @@ check: ~678k instantiations / ~2.7s.
   resultType (nothing to declare; `[path()]`'s type is per-parse). Named
   single elements are constructing nodes (converter idiom:
   `[number().as("n")], resultType: "string"`).
-- Binding refs must be the WHOLE constraint/resultType string; embedded
-  forms (`"then | else"`, `{ value: "acc" }`) deferred until union
-  output types.
+- ~~Binding refs must be the WHOLE constraint/resultType string~~ —
+  lifted by D17. Type-level outputSchema for template results is a
+  resolved-type carrier (`{ "~resolved": T }`); runtime displays the
+  normalized expression (display parity not required).
 - Scope-blind compile time: schemas/constraints using createParser
   `scope` aliases need `as never` at compile time (runtime fully
   validates). Threading the scope through type.validate/Parse is an open

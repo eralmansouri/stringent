@@ -93,13 +93,53 @@ export interface LooseAstNode {
 // Def-level type algebra
 // =============================================================================
 
-/** The TS type of a def (string expression or object def). Refinements
- *  erase automatically (type.infer<"number > 0"> = number). */
-export type InferOfDef<D> = D extends string
+/**
+ * Resolved-type CARRIER for defs that embed binding references
+ * ("left | null"): a TS type cannot be turned back into a def string, so
+ * the resolved type rides in the outputSchema slot under a reserved key.
+ * The runtime twin displays arktype's normalized expression instead —
+ * display parity is not part of the contract (accept/reject + inferred
+ * types are). The "~resolved" key is reserved in result defs.
+ */
+export interface ResolvedDef<T = unknown> {
+  readonly "~resolved": T;
+}
+
+/** The TS type of a def (string expression, object def, or resolved
+ *  carrier). Refinements erase automatically (type.infer<"number > 0">
+ *  = number). */
+export type InferOfDef<D> = D extends ResolvedDef<infer T>
+  ? T
+  : D extends string
   ? type.infer<D>
   : D extends object
   ? type.infer<D>
   : never;
+
+/**
+ * Resolve a def against a scope of already-parsed binding types — the
+ * type-level twin of TypeEnv.compileDefIn. Plain defs (whose meaning the
+ * scope cannot change — binding names may not shadow scope types) stay
+ * AS WRITTEN, keeping display and TS memoization; scope-dependent defs
+ * wrap their resolved type in a carrier. Costs ~10 instantiations per
+ * resolution (measured; spike/union-defs).
+ */
+type ResolveDefIn<D, S> = type.infer<D, S> extends infer Scoped
+  ? [type.infer<D>] extends [Scoped]
+    ? [Scoped] extends [type.infer<D>]
+      ? D // scope-independent — keep the literal def
+      : { "~resolved": Scoped }
+    : { "~resolved": Scoped }
+  : never;
+
+/** Scope of a bindings object: binding name → inferred parsed type.
+ *  Const bindings carry matched text, not a type — excluded (mirrors
+ *  compile.ts template classification). */
+type ScopeOfBindings<Bindings> = {
+  [K in keyof Bindings as Bindings[K] extends { node: "const" }
+    ? never
+    : K]: Bindings[K] extends { outputSchema: infer O } ? InferOfDef<O> : unknown;
+};
 
 /** Assignability over defs — the type-level twin of TypeEnv.isAssignable.
  *  Keep arguments as LITERAL defs so TS memoizes each distinct check. */
@@ -355,8 +395,17 @@ type ResolveSpec<
     : N extends string
     ? FindBoundOutput<TDone, TAcc, N> extends infer D
       ? D extends NotBound
-        ? { mode: "extends"; def: N } // static def
-        : { mode: "extends"; def: D } // binding reference
+        ? {
+            mode: "extends";
+            // static def, resolved against the parsed siblings so defs
+            // EMBEDDING binding references ("left | null") work; plain
+            // defs stay literal (ResolveDefIn)
+            def: ResolveDefIn<
+              N,
+              ScopeOfBindings<ExtractBindings<TDone, [...TAcc]>>
+            >;
+          }
+        : { mode: "extends"; def: D } // whole-string binding reference
       : never
     : undefined
   : never;
@@ -552,9 +601,9 @@ type ResultSchemaOf<TNode extends NodeSchema, Bindings> = Exclude<
       ? Bindings[R] extends { outputSchema: infer O }
         ? O
         : "unknown"
-      : R // static string def
+      : ResolveDefIn<R, ScopeOfBindings<Bindings>> // static or template def
     : [R] extends [object]
-    ? R // static object def
+    ? ResolveDefIn<R, ScopeOfBindings<Bindings>> // object def (may embed refs)
     : "unknown"
   : never;
 

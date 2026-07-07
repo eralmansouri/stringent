@@ -41,12 +41,27 @@ export type CompiledConstraint =
       /** "extends" = directional subtype; "overlaps" = symmetric */
       readonly check: "extends" | "overlaps";
     }
-  | { readonly kind: "static"; readonly type: Type; readonly describe: string };
+  | { readonly kind: "static"; readonly type: Type; readonly describe: string }
+  | {
+      /** A def EMBEDDING binding references ("left | null") — compiled
+       *  per-parse in a scope extended with the parsed sibling types
+       *  (memoized; see spike/union-defs). */
+      readonly kind: "template";
+      readonly def: string;
+      /** Earlier binding names available to the def as aliases */
+      readonly bindings: readonly string[];
+    };
 
 export type CompiledResult =
   | { readonly kind: "passthrough" }
   | { readonly kind: "ref"; readonly binding: string }
-  | { readonly kind: "static"; readonly type: Type; readonly describe: string };
+  | { readonly kind: "static"; readonly type: Type; readonly describe: string }
+  | {
+      /** A def (string or object) embedding binding references */
+      readonly kind: "template";
+      readonly def: unknown;
+      readonly bindings: readonly string[];
+    };
 
 export interface CompiledNode {
   /** One entry per pattern element (null for non-expr elements) */
@@ -315,8 +330,18 @@ function compileConstraint(
     const compiled = eraseRefinements(env.compileDef(spec));
     return { kind: "static", type: compiled, describe: spec };
   } catch (e) {
+    // Not a plain def — a def EMBEDDING earlier binding names resolves
+    // once those names are in scope ("left | null" with .as("left")).
+    // Const bindings carry matched text, not a type — excluded, so a def
+    // referencing one still errors.
+    const bindings = [...namedSoFar.keys()].filter(
+      (name) => namedSoFar.get(name)!.kind !== "const"
+    );
+    if (bindings.length > 0 && env.resolvesWith(spec, bindings)) {
+      return { kind: "template", def: spec, bindings };
+    }
     throw new Error(
-      `stringent: node '${node.name}' has constraint '${spec}', which is neither an earlier binding name nor a valid type in this parser's scope — ${(e as Error).message}`
+      `stringent: node '${node.name}' has constraint '${spec}', which is neither an earlier binding name, a def referencing one, nor a valid type in this parser's scope — ${(e as Error).message}`
     );
   }
 }
@@ -363,10 +388,18 @@ function compileResult(
       describe: typeof spec === "string" ? spec : compiled.expression,
     };
   } catch (e) {
+    // A def embedding binding names ("left | null", { value: "left" })
+    // resolves per-parse in a scope extended with the parsed types
+    const bindings = [...allNamed.keys()].filter(
+      (name) => allNamed.get(name)!.kind !== "const"
+    );
+    if (bindings.length > 0 && env.resolvesWith(spec, bindings)) {
+      return { kind: "template", def: spec, bindings };
+    }
     throw new Error(
       `stringent: node '${node.name}' has resultType ${JSON.stringify(
         spec
-      )}, which is neither a binding name nor a valid type in this parser's scope — ${(e as Error).message}`
+      )}, which is neither a binding name, a def referencing one, nor a valid type in this parser's scope — ${(e as Error).message}`
     );
   }
 }

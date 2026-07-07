@@ -298,7 +298,7 @@ describe("grammar validation", () => {
     expect(() => {
       createParser([num, forward] as const);
     }).toThrow(
-      /neither an earlier binding name nor a valid type/
+      /neither an earlier binding name, a def referencing one, nor a valid type/
     );
   });
 

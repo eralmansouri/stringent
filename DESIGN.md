@@ -95,8 +95,19 @@ memoization effective; see the Phase 0 spike). `'number > 0'` satisfies a
 A binding reference must name an element *earlier* in the pattern (position
 0 can never reference). Constraint resolution folds left-to-right through
 the pattern with the already-parsed children available — in both engines.
-A reference must currently be the *whole* constraint string; embedded forms
-(`"left | null"`) wait on union output types.
+
+References also work EMBEDDED in larger defs: `rest("left | null")`,
+`resultType: "left | null"`, `resultType: { value: "left" }`. Such
+"template" defs are resolved per parse in a scope extended with the parsed
+sibling types — `scope({ left: <parsed> }).type("left | null")` at runtime
+(memoized by def + alias expressions), `type.infer<"left | null",
+{ left: … }>` at the type level. TS union normalization gives chained
+templates a fixed point, so the cost is ~10 instantiations per resolution
+(measured; spike/union-defs). One representational consequence: a TS type
+cannot be turned back into a def string, so at the type level a template
+node's `outputSchema` is a resolved-type carrier (`{ "~resolved": T }`,
+a reserved key) while the runtime displays arktype's normalized
+expression — display parity is not part of the contract.
 
 ### Refinements are validation-only
 
@@ -340,9 +351,12 @@ things the runtime accepts, never vice versa):
 
 ## Limits & non-goals (current)
 
-- No union-typed *outputs* (a ternary's branches must agree via a binding
-  reference rather than producing `"number | string"`); binding references
-  must be whole constraint strings until union outputs land.
+- Union-typed outputs exist only where DECLARED (template resultTypes like
+  `"left | null"`); a ternary's disagreeing branches still don't
+  auto-synthesize `"number | string"` — they must agree via a reference.
+- Eval-binding typing for template constraints/resultTypes is conservative
+  (`unknown`): correlation and eval-return checking see through
+  whole-string references only.
 - Evaluation is synchronous (arktype morphs cannot be async); async
   operators must be promise-valued outputs handled by the caller.
 - No incremental/streaming parse; inputs are expression-sized strings.
@@ -351,8 +365,10 @@ things the runtime accepts, never vice versa):
 
 ## Roadmap candidates
 
-- Union output types with distributed constraint checking (unlocks
-  embedded binding references like `"left | null"`).
+- Auto-synthesized union outputs (disagreeing ternary branches producing
+  `"number | string"` instead of failing); template defs already cover the
+  declared-union cases.
+- Precise eval typing through template defs (currently `unknown`).
 - Function-call operators via arktype's `type.fn`, paired with a
   `many()`/separated-list pattern element (argument lists).
 - Literal result types (number/string/boolean literals as arktype unit

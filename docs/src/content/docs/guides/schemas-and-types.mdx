@@ -107,8 +107,10 @@ const add = defineNode({
 The derived output type is computed per-parse, so `parser.evaluate("'a'+'b'", …)`
 is typed `string` while `parser.evaluate("1+2", …)` is typed `number`.
 
-A binding reference must currently be the *whole* constraint string —
-embedded forms like `"left | null"` wait on union output types.
+References also work *embedded* in larger defs — `rest("left | null")`
+constrains the operand to "whatever `left` parsed as, or null", and
+`resultType: "left | null"` derives a union result the same way. The def
+is resolved per parse in a scope extended with the parsed operand types.
 
 ## Correlated bindings & `match`
 

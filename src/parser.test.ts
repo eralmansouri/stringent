@@ -9,6 +9,16 @@
  */
 
 import { describe, expect, it } from "vitest";
+import {
+  constVal,
+  createParser,
+  defineNode,
+  nullVal,
+  number,
+  operand,
+  rest,
+  string,
+} from "./index.js";
 import { fixtureParser as parser, formSchema } from "./__fixtures__/grammar.js";
 
 // Expected-AST builders (match the runtime node shapes exactly)
@@ -369,6 +379,95 @@ describe("member access (paths)", () => {
   it("dangling dot fails the element", () => {
     const error = parseErr("values.", formSchema);
     expect(error.code).toBe("PARSE_ERROR");
+  });
+});
+
+describe("embedded binding references (scoped defs)", () => {
+  // A def that EMBEDS a binding name resolves per-parse in a scope
+  // extended with the parsed operand types (spike/union-defs).
+  const num = defineNode({ name: "num", pattern: [number()], precedence: 2 });
+  const str = defineNode({
+    name: "str",
+    pattern: [string(["'"])],
+    precedence: 2,
+  });
+  const nullLit = defineNode({
+    name: "null",
+    pattern: [nullVal()],
+    precedence: 2,
+  });
+
+  /** postfix `x?`: resultType is a TEMPLATE over the operand. The operand
+   *  constraint includes null so the node accepts its OWN output —
+   *  chaining then exercises the fixed point. */
+  const maybe = defineNode({
+    name: "maybe",
+    pattern: [operand("number | string | null").as("v"), constVal("?")],
+    precedence: 1,
+    resultType: "v | null",
+    eval: ({ v }) => v as never,
+  });
+
+  /** `l ~ r` where r must be l-or-null: a TEMPLATE constraint */
+  const pair = defineNode({
+    name: "pair",
+    pattern: [operand("number | string").as("l"), constVal("~"), rest("l | null").as("r")],
+    precedence: 0,
+    resultType: "boolean",
+    eval: ({ l, r }) => l === r,
+  });
+
+  /** object resultType embedding a reference */
+  const box = defineNode({
+    name: "box",
+    pattern: [operand("number | string").as("v"), constVal("!")],
+    precedence: 1,
+    resultType: { value: "v | null" },
+    eval: ({ v }) => ({ value: v }) as never,
+  });
+
+  const p = createParser([num, str, nullLit, maybe, pair, box] as const);
+
+  it("resolves template resultTypes against the parsed operand", () => {
+    const numbery = p.safeParse("1?", {});
+    expect(numbery.success).toBe(true);
+    if (numbery.success) expect(numbery.ast.outputSchema).toBe("number | null");
+
+    const stringy = p.safeParse("'a'?", {});
+    expect(stringy.success).toBe(true);
+    if (stringy.success) expect(stringy.ast.outputSchema).toBe("string | null");
+  });
+
+  it("normalizes chained templates to a fixed point", () => {
+    const chained = p.safeParse("1??", {});
+    expect(chained.success).toBe(true);
+    // (number | null) | null normalizes — no unbounded growth
+    if (chained.success) expect(chained.ast.outputSchema).toBe("number | null");
+  });
+
+  it("checks template constraints by assignability", () => {
+    expect(p.safeParse("1 ~ 2", {}).success).toBe(true);
+    expect(p.safeParse("1 ~ null", {}).success).toBe(true); // null ⊆ number | null
+    const bad = p.safeParse("1 ~ 'a'", {});
+    expect(bad.success).toBe(false);
+    if (!bad.success) expect(bad.error.code).toBe("TYPE_MISMATCH");
+  });
+
+  it("resolves references inside object resultTypes", () => {
+    const boxed = p.safeParse("1!", {});
+    expect(boxed.success).toBe(true);
+    if (boxed.success) {
+      expect(boxed.ast.outputSchema).toBe("{ value: number | null }");
+      expect(p.evaluateAst(boxed.ast as never, {})).toEqual({ value: 1 });
+    }
+  });
+
+  it("template results feed downstream constraint checks", () => {
+    // maybe's output (number | null) satisfies pair's template constraint
+    // on the right ("l | null" with l: number)…
+    expect(p.safeParse("1 ~ 2?", {}).success).toBe(true);
+    // …but not pair's PLAIN left slot ("number | string": null ⊄ it)
+    expect(p.safeParse("1? ~ 2", {}).success).toBe(false);
   });
 });
 

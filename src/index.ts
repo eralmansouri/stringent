@@ -72,7 +72,7 @@ export { EvaluationError } from "./runtime/evaluate.js";
 // Types: Parse, Grammar, Context
 // =============================================================================
 
-export type { Parse, LooseAstNode } from "./parse/index.js";
+export type { Parse, LooseAstNode, InferOfDef, ResolvedDef } from "./parse/index.js";
 export type { ComputeGrammar, Grammar } from "./grammar/index.js";
 export type { Context, EmptyContext, SchemaShape } from "./context.js";
 export { emptyContext } from "./context.js";

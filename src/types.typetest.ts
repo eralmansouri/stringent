@@ -16,12 +16,22 @@ import type { type } from "arktype";
 import type {
   ComputeGrammar,
   Context,
+  InferOfDef,
   InferValues,
   InferEvaluatedBindings,
   Parse,
   Thunked,
 } from "./index.js";
-import { defineNode, operand, rest, expr, constVal } from "./index.js";
+import {
+  defineNode,
+  operand,
+  rest,
+  expr,
+  constVal,
+  number,
+  nullVal,
+  string,
+} from "./index.js";
 import { add, eq, fixtureNodes, fixtureParser, formSchema, sub, ternary } from "./__fixtures__/grammar.js";
 
 // =============================================================================
@@ -286,6 +296,75 @@ fixtureParser.parse("1 + 'a'", {});
 fixtureParser.parse("1+2" as string, {});
 // @ts-expect-error — values must match the schema
 fixtureParser.evaluate("x == 1", { x: "number" }, { x: "no" });
+
+// =============================================================================
+// Embedded binding references (scoped defs; spike/union-defs)
+// =============================================================================
+
+const embNum = defineNode({ name: "num", pattern: [number()], precedence: 2 });
+const embStr = defineNode({
+  name: "str",
+  pattern: [string(["'"])],
+  precedence: 2,
+});
+const embNull = defineNode({
+  name: "null",
+  pattern: [nullVal()],
+  precedence: 2,
+});
+const embMaybe = defineNode({
+  name: "maybe",
+  pattern: [operand("number | string | null").as("v"), constVal("?")],
+  precedence: 1,
+  resultType: "v | null",
+  eval: ({ v }) => v as never,
+});
+const embPair = defineNode({
+  name: "pair",
+  pattern: [
+    operand("number | string").as("l"),
+    constVal("~"),
+    rest("l | null").as("r"),
+  ],
+  precedence: 0,
+  resultType: "boolean",
+  eval: ({ l, r }) => l === r,
+});
+const embNodes = [embNum, embStr, embNull, embMaybe, embPair] as const;
+type EmbG = ComputeGrammar<typeof embNodes>;
+
+// template resultType resolves against the parsed operand; the AST carries
+// a resolved-type CARRIER whose inferred type is exact
+type PMaybe = Parse<EmbG, "1?", EmptyCtx>;
+type _e1 = AssertTrue<AssertExtends<PMaybe, [{ node: "maybe" }, ""]>>;
+type MaybeOut = PMaybe extends [{ outputSchema: infer O }, string]
+  ? InferOfDef<O>
+  : never;
+type _e2 = AssertTrue<AssertEqual<MaybeOut, number | null>>;
+
+// chained templates hit a fixed point (number | null | null normalizes) —
+// the type set stays finite, so deep chains don't blow up (measured)
+type PMaybe2 = Parse<EmbG, "1??", EmptyCtx>;
+type Maybe2Out = PMaybe2 extends [{ outputSchema: infer O }, string]
+  ? InferOfDef<O>
+  : never;
+type _e3 = AssertTrue<AssertEqual<Maybe2Out, number | null>>;
+
+// template CONSTRAINTS: null ⊆ l | null with l: number …
+type PPairNull = Parse<EmbG, "1 ~ null", EmptyCtx>;
+type _e4 = AssertTrue<AssertExtends<PPairNull, [{ node: "pair" }, ""]>>;
+// … but string is rejected
+type PPairBad = Parse<EmbG, "1 ~ 'a'", EmptyCtx>;
+type _e5 = AssertTrue<AssertEqual<PPairBad extends [unknown, ""] ? true : false, false>>;
+
+// template results feed downstream checks: maybe's number | null satisfies
+// pair's template on the right, but not its PLAIN left slot
+type PPairChain = Parse<EmbG, "1 ~ 2?", EmptyCtx>;
+type _e6 = AssertTrue<AssertExtends<PPairChain, [{ node: "pair" }, ""]>>;
+type PPairChainBad = Parse<EmbG, "1? ~ 2", EmptyCtx>;
+type _e7 = AssertTrue<
+  AssertEqual<PPairChainBad extends [unknown, ""] ? true : false, false>
+>;
 
 // =============================================================================
 // compile(): rule-as-Type call-site typing (Phase 6)

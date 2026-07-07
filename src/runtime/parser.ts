@@ -301,6 +301,26 @@ const UNCONSTRAINED: ResolvedConstraint = {
   describe: undefined,
 };
 
+/** Collect the parsed Types of the named siblings listed in `bindings`,
+ *  for use as scope aliases. Unresolved operands alias to `unknown`
+ *  (matching how unresolved whole-string refs behave). */
+function bindingAliases(
+  env: ParseEnv,
+  bindings: readonly string[],
+  done: readonly PatternSchema[],
+  children: readonly ASTNode[]
+): Record<string, Type> {
+  const aliases: Record<string, Type> = {};
+  for (let i = 0; i < done.length; i++) {
+    const el = done[i] as { __named?: boolean; name?: string };
+    if (el.__named === true && el.name !== undefined && bindings.includes(el.name)) {
+      aliases[el.name] =
+        outputTypeOf(children[i]) ?? env.compiled.env.compileDef("unknown");
+    }
+  }
+  return aliases;
+}
+
 /**
  * Resolve an element's compiled constraint against already-parsed siblings.
  * Mirrors ResolveSpec in src/parse/index.ts.
@@ -308,7 +328,8 @@ const UNCONSTRAINED: ResolvedConstraint = {
 function resolveConstraint(
   constraint: CompiledConstraint | null,
   done: readonly PatternSchema[],
-  children: readonly ASTNode[]
+  children: readonly ASTNode[],
+  env: ParseEnv
 ): ResolvedConstraint {
   if (constraint === null || constraint.kind === "none") return UNCONSTRAINED;
   if (constraint.kind === "static") {
@@ -316,6 +337,20 @@ function resolveConstraint(
       type: constraint.type,
       check: "extends",
       describe: constraint.describe,
+    };
+  }
+  if (constraint.kind === "template") {
+    // Def embedding binding references: compile in a scope extended with
+    // the parsed sibling types (memoized), then erase refinements like
+    // any other constraint
+    const aliases = bindingAliases(env, constraint.bindings, done, children);
+    const type = eraseRefinements(
+      env.compiled.env.compileDefIn(constraint.def, aliases)
+    );
+    return {
+      type,
+      check: "extends",
+      describe: `${type.expression} (${constraint.def})`,
     };
   }
   // Binding reference: find the referenced sibling's parsed Type
@@ -406,7 +441,7 @@ function parseElementWithLevel(
   env: ParseEnv
 ): ParseResult {
   if (element.kind === "expr") {
-    const constraint = resolveConstraint(constraintSpec, done, children);
+    const constraint = resolveConstraint(constraintSpec, done, children, env);
     const role = (element as ExprSchema).role;
     const levels =
       role === "operand" ? nextLevels
@@ -491,7 +526,8 @@ function extractBindings(
 function buildNodeResult(
   node: NodeSchema,
   compiledNode: CompiledNode,
-  children: readonly ASTNode[]
+  children: readonly ASTNode[],
+  env: ParseEnv
 ): ASTNode {
   const result = compiledNode.result;
   if (result.kind === "passthrough") return children[0];
@@ -503,6 +539,15 @@ function buildNodeResult(
   if (result.kind === "static") {
     outputType = result.type;
     outputSchema = result.type.expression;
+  } else if (result.kind === "template") {
+    // Def embedding binding references: resolve in a scope extended with
+    // the parsed operand types ("left | null" with left parsed as number
+    // → number | null)
+    const aliases = bindingAliases(env, result.bindings, node.pattern, children);
+    outputType = eraseRefinements(
+      env.compiled.env.compileDefIn(result.def, aliases)
+    );
+    outputSchema = outputType.expression;
   } else {
     const bound = bindings[result.binding];
     outputType = bound === undefined ? undefined : outputTypeOf(bound);
@@ -542,7 +587,7 @@ function parseNodePattern(
     env
   );
   if (result.length === 0) return [];
-  return [buildNodeResult(node, compiledNode, result[0]), result[1]];
+  return [buildNodeResult(node, compiledNode, result[0], env), result[1]];
 }
 
 /**
@@ -629,7 +674,12 @@ function parseLeftLevel(levels: Levels, input: string, env: ParseEnv): ParseResu
       // Check the folded-so-far node against the operand constraint. Record
       // mismatches so schema typos surface in errors (the seed's start
       // offset is the operand's position).
-      const constraint = resolveConstraint(compiledNode.constraints[0], [], []);
+      const constraint = resolveConstraint(
+        compiledNode.constraints[0],
+        [],
+        [],
+        env
+      );
       if (!constraintAccepts(env, constraint, outputTypeOf(left))) {
         failConstraint(
           env.diag,
@@ -660,7 +710,7 @@ function parseLeftLevel(levels: Levels, input: string, env: ParseEnv): ParseResu
       // validation makes this unreachable)
       if (tailResult[1] === rest) continue;
 
-      left = buildNodeResult(node, compiledNode, tailResult[0]);
+      left = buildNodeResult(node, compiledNode, tailResult[0], env);
       rest = tailResult[1];
       continue outer;
     }
