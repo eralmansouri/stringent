@@ -27,6 +27,7 @@ import { parseWithDiagnostics } from "./runtime/parser.js";
 import {
   type StringentError,
   StringentParseError,
+  toInvalidSchemaError,
   toParseError,
   toUnexpectedInputError,
 } from "./runtime/diagnostics.js";
@@ -183,9 +184,11 @@ export interface Parser<
   /**
    * Parse any string (including runtime-provided input).
    *
-   * Requires the whole input to be consumed. Never throws for invalid
-   * INPUT (returns a structured error with position/expected/found);
-   * throws for invalid SCHEMAS (a programmer error).
+   * Requires the whole input to be consumed. NEVER throws: invalid input
+   * returns a structured error with position/expected/found; an invalid
+   * schema (a programmer error, normally caught at compile time by
+   * type.validate) returns { success: false, error: { code:
+   * "INVALID_SCHEMA" } }.
    */
   safeParse<TInput extends string, const TSchema extends SchemaShape>(
     input: TInput,
@@ -270,35 +273,34 @@ export function createParser<const TNodes extends readonly NodeSchema[]>(
     nodes.map((node) => [node.name, node])
   );
 
-  function compileSchema(schema: object): Type {
-    try {
-      return compiled.env.compileDef(schema);
-    } catch (e) {
-      throw new Error(
-        `stringent: invalid schema — ${(e as Error).message}. Schema leaves must be type defs resolvable in this parser's scope (add aliases via createParser(nodes, { scope: {...} })).`
-      );
-    }
-  }
+  type ImplResult =
+    | { success: true; ast: AnyAstNode; rest: string; schemaType: Type }
+    | { success: false; error: StringentError };
 
-  function safeParseImpl(
-    input: string,
-    schema: object
-  ): (SafeParseResult<AnyAstNode> & { rest?: string; schemaType: Type }) {
-    const schemaType = compileSchema(schema);
+  function safeParseImpl(input: string, schema: object): ImplResult {
+    let schemaType: Type;
+    try {
+      schemaType = compiled.env.compileDef(schema);
+    } catch (e) {
+      // Schema errors are programmer errors, but safeParse still never
+      // throws — they surface as a structured INVALID_SCHEMA result
+      // (parse/evaluate/compile turn it into a StringentParseError throw,
+      // same as invalid input there)
+      return { success: false, error: toInvalidSchemaError(e) };
+    }
     const { result, diagnostics } = parseWithDiagnostics(
       compiled,
       input,
       schemaType
     );
     if (result.length === 0) {
-      return { success: false, error: toParseError(diagnostics), schemaType };
+      return { success: false, error: toParseError(diagnostics) };
     }
     const [ast, rest] = result;
     if (rest.trim() !== "") {
       return {
         success: false,
         error: toUnexpectedInputError(diagnostics, rest),
-        schemaType,
       };
     }
     return { success: true, ast: ast as AnyAstNode, rest, schemaType };
@@ -316,11 +318,10 @@ export function createParser<const TNodes extends readonly NodeSchema[]>(
     },
 
     safeParse(input: string, schema: object) {
-      const { rest: _rest, schemaType: _t, ...result } = safeParseImpl(
-        input,
-        schema
-      );
-      return result as never;
+      const result = safeParseImpl(input, schema);
+      return (
+        result.success ? { success: true, ast: result.ast } : result
+      ) as never;
     },
 
     evaluate(input: string, schema: object, values: EvaluationValues) {

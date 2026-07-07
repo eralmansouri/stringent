@@ -74,15 +74,29 @@ describe("safeParse", () => {
 });
 
 describe("schemas and scope", () => {
-  it("rejects schema leaves that are not resolvable defs (runtime)", () => {
-    expect(() => parser.safeParse("x", { x: "numbr" } as never)).toThrow(
-      /invalid schema/
-    );
+  it("safeParse NEVER throws: unresolvable schema leaves return INVALID_SCHEMA", () => {
+    const result = parser.safeParse("x", { x: "numbr" } as never);
+    expect(result).toMatchObject({
+      success: false,
+      error: { code: "INVALID_SCHEMA", position: 0 },
+    });
+    if (!result.success) expect(result.error.message).toMatch(/invalid schema/);
   });
 
-  it("rejects invalid nested schema leaves", () => {
+  it("invalid nested schema leaves also return INVALID_SCHEMA", () => {
+    const result = parser.safeParse("x", { a: { b: "numbr" } } as never);
+    expect(result).toMatchObject({
+      success: false,
+      error: { code: "INVALID_SCHEMA" },
+    });
+  });
+
+  it("parse/evaluate/compile throw StringentParseError for invalid schemas", () => {
     expect(() =>
-      parser.safeParse("x", { a: { b: "numbr" } } as never)
+      parser.evaluate("1+1" as never, { x: "numbr" } as never, { x: 1 } as never)
+    ).toThrow(StringentParseError);
+    expect(() =>
+      parser.compile("x == 1", { x: "numbr" } as never)
     ).toThrow(/invalid schema/);
   });
 

@@ -86,14 +86,26 @@ export function failConstraint(
 // =============================================================================
 
 export interface StringentError {
-  code: "PARSE_ERROR" | "TYPE_MISMATCH" | "UNEXPECTED_INPUT";
+  code: "PARSE_ERROR" | "TYPE_MISMATCH" | "UNEXPECTED_INPUT" | "INVALID_SCHEMA";
   message: string;
-  /** 0-based offset into the input */
+  /** 0-based offset into the input. INVALID_SCHEMA errors are about the
+   *  schema argument, not the input — their position is always 0. */
   position: number;
   /** Token descriptions that would have been valid at `position` */
   expected?: readonly string[];
   /** The next few characters at `position` */
   found?: string;
+}
+
+/** Build a StringentError for a schema whose defs failed to compile —
+ *  a programmer error, but safeParse still NEVER throws (pinned in
+ *  createParser.test.ts / design-claims.test.ts). */
+export function toInvalidSchemaError(cause: unknown): StringentError {
+  return {
+    code: "INVALID_SCHEMA",
+    message: `invalid schema — ${(cause as Error).message}. Schema leaves must be type defs resolvable in this parser's scope (add aliases via createParser(nodes, { scope: {...} })).`,
+    position: 0,
+  };
 }
 
 function foundAt(source: string, position: number): string {

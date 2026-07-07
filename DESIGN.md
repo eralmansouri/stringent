@@ -385,12 +385,15 @@ rule.in.toJsonSchema({ fallback: { predicate: (ctx) => ctx.base } }); // ✓
 Two error domains, each using the representation built for it:
 
 - **Parse-time** failures are stringent's positioned diagnostics.
-  `safeParse` never throws for input; it returns `{ success: false, error }`
-  with `code` (`PARSE_ERROR` — no interpretation matched; `TYPE_MISMATCH` —
+  `safeParse` NEVER throws; it returns `{ success: false, error }` with
+  `code` (`PARSE_ERROR` — no interpretation matched; `TYPE_MISMATCH` —
   parsed but a constraint rejected it; `UNEXPECTED_INPUT` — a prefix parsed,
-  trailing input remains), `position` (0-based), `expected`, `found`.
+  trailing input remains; `INVALID_SCHEMA` — the schema argument's defs do
+  not compile, a programmer error normally caught at compile time, with
+  `position` fixed at 0), `position` (0-based), `expected`, `found`.
   `parse()`/`evaluate()`/`compile()` throw `StringentParseError` (same
-  fields).
+  fields, all four codes). Pinned in createParser.test.ts "schemas and
+  scope".
 - **Data-time** failures are **ArkErrors**: schema validation in
   `evaluate()` and everything produced by compiled rules (serializable,
   `flatByPath` for per-field form state, field-path attribution via
