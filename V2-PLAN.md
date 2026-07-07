@@ -1,14 +1,14 @@
 # Stringent v2 — API Redesign Plan
 
-Status: **Phases 0–6 implemented and green**. Phases 0–3 landed on
+Status: **Phases 0–6 implemented and green; Phase 7 mostly done** (docs
+rewritten; release/publish left to the owner). Phases 0–3 landed on
 `claude/formeddable-stringent-review-suiwqu` (PR #5); Phases 4–5, the
 D16 rename, and a plan review continue on `claude/v2-plan-review-e13a11`,
 which contains the
 suiwqu history (see the Session Handoff section at the bottom for exact
 state). Decisions below came out of a design review comparing this repo
 against the archived formeddable/stringent (Jan 2026, arktype-based) and a
-discussion of v1's ergonomics. DESIGN.md still describes v1 and needs its
-rewrite in Phase 7.
+discussion of v1's ergonomics. DESIGN.md now describes v2.
 
 ## Goals
 
@@ -335,11 +335,26 @@ natively). Deviations/discoveries:
 - "Which variables does a rule read" (AST-walk introspection) deferred;
   `.in` covers the schema-level contract.
 
-**Phase 7 — Docs, tests, release.** Rewrite affected DESIGN.md sections;
-update Starlight guides + playground fixture (playground gains identifier
-autocomplete via `schema.props`); port archive benchmark shapes
-(`vitest bench`); migration notes; release as the next **0.0.x** (see
-D10: never 0.1/0.x, owner directive).
+**Phase 7 — Docs, tests, release. ◐ MOSTLY DONE.** DESIGN.md fully
+rewritten for v2 (the contract doc); README rewritten and its quickstart
+VERIFIED to compile (caught a stale `x*2` example); `pnpm bench` added
+(vitest bench: safeParse shapes, evaluateAst dev-on/off, compiled-rule
+pass/fail, construction — archive shapes unavailable, fresh set written);
+migration notes = the table in this plan (README/DESIGN link here);
+Starlight guides + playground fixture updated to v2. Remaining, left to
+the owner or follow-ups: publishing the next **0.0.x** (D10 — bump
+`package.json` at release time), and the playground
+identifier-autocomplete feature (`schema.props`) — deferred, it is an
+enhancement, not doc parity. Bench observations worth follow-up:
+- Dev-mode result assertions cost ~2% on evaluateAst (~1.3M ops/s
+  either way) — the default-on decision is validated.
+- `evaluate()` with an INLINE schema object recompiles the schema every
+  call (the object-def cache is a WeakMap keyed by identity): ~1.1ms/op
+  vs ~2µs for compiled rules. Docs should say "hoist schema objects or
+  use compile()"; a structural cache key is a possible optimization.
+- Headline-rule safeParse (~30µs) is dominated by schema-path
+  resolution (`Type.get` per identifier per parse) — cacheable per
+  (schemaType, path) if it ever matters.
 
 Phases 1–4 land together (they are one breaking change); 5–7 can follow
 incrementally.
@@ -550,10 +565,9 @@ check: ~678k instantiations / ~2.7s.
   operand form. (Phase 4 ended up NOT needing it: correlation runs at
   the type level over def strings, and the dev assertion checks the
   already-resolved per-parse Type.)
-- **Phase 7**: DESIGN.md rewrite, Starlight docs + playground update,
-  benchmarks (port shapes from archive), migration notes, release as
-  the next **0.0.x** patch (D10 — never 0.1/0.x; an earlier revision of
-  this bullet said "0.1.0", which was a drafting error).
+- ~~**Phase 7**~~ MOSTLY DONE (see the Phases section) — remaining:
+  publish the next **0.0.x** patch (D10 — never 0.1/0.x; owner action)
+  and the optional playground autocomplete enhancement.
 
 ### Context that lives outside this repo
 
